@@ -40,6 +40,7 @@ export default defineConfig({
             "src/lib/supabase/__tests__/payment_state_machine.test.ts",
             "src/lib/supabase/__tests__/apply_payment_event_authz.test.ts",
             "src/lib/supabase/__tests__/billing_audit_log.test.ts",
+            "src/lib/supabase/__tests__/billing_audit_log_writers.test.ts",
             "src/lib/supabase/__tests__/audit_actor_kind.test.ts",
             "src/lib/supabase/__tests__/invoice_counters.test.ts",
             "src/lib/supabase/__tests__/invoice_logos_bucket.test.ts",
@@ -61,6 +62,7 @@ export default defineConfig({
             "src/lib/supabase/__tests__/credential_key_reach.test.ts",
             "src/lib/supabase/__tests__/tenant_access.test.ts",
             "src/lib/tenant-app/__tests__/usage.db.test.ts",
+            "src/lib/supabase/__tests__/meter_readings_insert_only.test.ts",
             "src/lib/supabase/__tests__/openems_id_format.test.ts",
             // Component tests of the interface kit and host run in the
             // "gui" project below, in jsdom. Without this line each would
@@ -106,6 +108,7 @@ export default defineConfig({
             "src/lib/supabase/__tests__/payment_state_machine.test.ts",
             "src/lib/supabase/__tests__/apply_payment_event_authz.test.ts",
             "src/lib/supabase/__tests__/billing_audit_log.test.ts",
+            "src/lib/supabase/__tests__/billing_audit_log_writers.test.ts",
             "src/lib/supabase/__tests__/audit_actor_kind.test.ts",
             "src/lib/supabase/__tests__/invoice_counters.test.ts",
             "src/lib/supabase/__tests__/invoice_logos_bucket.test.ts",
@@ -127,6 +130,7 @@ export default defineConfig({
             "src/lib/supabase/__tests__/credential_key_reach.test.ts",
             "src/lib/supabase/__tests__/tenant_access.test.ts",
             "src/lib/tenant-app/__tests__/usage.db.test.ts",
+            "src/lib/supabase/__tests__/meter_readings_insert_only.test.ts",
             "src/lib/supabase/__tests__/openems_id_format.test.ts",
             "src/app/api/users/[id]/resend-invite/__tests__/rls-route.test.ts",
             "src/app/api/users/invite/__tests__/rls-route.test.ts",
