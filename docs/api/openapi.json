@@ -123,7 +123,7 @@
             "$ref": "#/components/responses/SessionRequired"
           },
           "409": {
-            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Turning it on in Settings → Plugins keeps every record.",
+            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.",
             "content": {
               "application/json": {
                 "schema": {
@@ -527,7 +527,7 @@
             "$ref": "#/components/responses/SessionRequired"
           },
           "409": {
-            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Turning it on in Settings → Plugins keeps every record.",
+            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.",
             "content": {
               "application/json": {
                 "schema": {
@@ -704,7 +704,7 @@
             "$ref": "#/components/responses/SessionRequired"
           },
           "409": {
-            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Turning it on in Settings → Plugins keeps every record.",
+            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.",
             "content": {
               "application/json": {
                 "schema": {
@@ -848,7 +848,7 @@
             "$ref": "#/components/responses/SessionRequired"
           },
           "409": {
-            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Turning it on in Settings → Plugins keeps every record.",
+            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1009,7 +1009,7 @@
             "$ref": "#/components/responses/SessionRequired"
           },
           "409": {
-            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Turning it on in Settings → Plugins keeps every record.",
+            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1159,7 +1159,7 @@
             "$ref": "#/components/responses/SessionRequired"
           },
           "409": {
-            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Turning it on in Settings → Plugins keeps every record.\n- `billing_period_totals_changed`: The route's own: what the person confirmed changed after prepare. Prepare the action again and confirm the new step; the route never takes the old one.",
+            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n- `billing_period_totals_changed`: The route's own: what the person confirmed changed after prepare. Prepare the action again and confirm the new step; the route never takes the old one.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1284,7 +1284,7 @@
             "$ref": "#/components/responses/SessionRequired"
           },
           "409": {
-            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Turning it on in Settings → Plugins keeps every record.",
+            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1437,7 +1437,7 @@
             "$ref": "#/components/responses/SessionRequired"
           },
           "409": {
-            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Turning it on in Settings → Plugins keeps every record.",
+            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1874,7 +1874,7 @@
             ]
           },
           "409": {
-            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Turning it on in Settings → Plugins keeps every record.\n- `gui_action_refused`: The action's own prepare refused it, for a reason other than not finding its record. The status and the message are the action's.\n- `gui_action_unavailable`: The action's own available() said no for this record; the message says why.",
+            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n- `gui_action_refused`: The action's own prepare refused it, for a reason other than not finding its record. The status and the message are the action's.\n- `gui_action_unavailable`: The action's own available() said no for this record; the message says why.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2241,7 +2241,7 @@
             ]
           },
           "409": {
-            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Turning it on in Settings → Plugins keeps every record.\n- `gui_view_refused`: The view's loader refused, for a reason other than not finding its record. The status and the message are the loader's.\n- `metering_disabled`: The plugin is off for the organization the request targets. Turning it on in Settings → Plugins keeps every record.",
+            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n- `gui_view_refused`: The view's loader refused, for a reason other than not finding its record. The status and the message are the loader's.\n- `metering_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2386,7 +2386,7 @@
             "$ref": "#/components/responses/SessionRequired"
           },
           "409": {
-            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Turning it on in Settings → Plugins keeps every record.",
+            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2592,7 +2592,7 @@
             "$ref": "#/components/responses/SessionRequired"
           },
           "409": {
-            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Turning it on in Settings → Plugins keeps every record.",
+            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6440,7 +6440,7 @@
       "reasons": [
         "enabled"
       ],
-      "meaning": "The plugin is off for the organization the request targets. Turning it on in Settings → Plugins keeps every record."
+      "meaning": "The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins."
     },
     {
       "code": "billing_gate_unavailable",
@@ -6599,7 +6599,7 @@
       "reasons": [
         "enabled"
       ],
-      "meaning": "The plugin is off for the organization the request targets. Turning it on in Settings → Plugins keeps every record."
+      "meaning": "The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins."
     },
     {
       "code": "metering_gate_unavailable",

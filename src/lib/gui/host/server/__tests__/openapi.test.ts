@@ -23,6 +23,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { GUI_CONTRACT, type Json } from "@/lib/gui/contract";
 import type { ActionDef } from "@/lib/gui/surface";
+import { MGM_BUNDLED_PLUGINS } from "@/lib/plugins/bundled";
 import { getMgmRuntime, resetMgmRuntimeForTests } from "@/lib/runtime/root";
 import { UNGATED_WRITES, apiRouteFiles, exemptionKey } from "@/lib/runtime/__tests__/route-rules";
 import { describeAction } from "../catalog";
@@ -151,13 +152,13 @@ describe("the OpenAPI document", () => {
       const key = exemptionKey(method.toUpperCase(), actions[0].path as string);
       const gateCodes = codesOf(op).filter((c) => /_(disabled|gate_unavailable)$/.test(c));
       const plugin = actions[0].plugin as string;
-      const core = plugin === "organization-directory";
+      const core = MGM_BUNDLED_PLUGINS.find((p) => p.name === plugin)?.core ?? false;
       expect(gateCodes.length > 0, key).toBe(!core && !Object.hasOwn(UNGATED_WRITES, key));
     }
   });
 
   it("names only listed codes on the host's routes, and every host code a route answers", () => {
-    const plugins = ["billing", "payments", "metering", "community-management", "pesapal", "tenant-app"] as const;
+    const plugins = MGM_BUNDLED_PLUGINS.filter((p) => !p.core).map((p) => p.name);
     const listed = new Set(listedCodes(plugins.flatMap((p) => [[p, "disabled"] as const, [p, "unavailable"] as const])).map((c) => c.code));
     const named = new Set(operations(doc).filter(({ path: p }) => p.startsWith("/api/gui/")).flatMap(({ op }) => codesOf(op)));
     for (const code of named) expect(listed.has(code), code).toBe(true);

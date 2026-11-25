@@ -36,6 +36,7 @@ import "server-only";
 import type { MgmPluginName } from "@/lib/plugins/bundled";
 import { codePrefix } from "@/lib/runtime/gate";
 import type { AvailabilityCheck } from "../../contract";
+import { TENANT_UNIT_PARAM } from "../shared/tenant-units";
 
 export type CodeEntry = {
   /** The HTTP statuses a refusal with this code comes with; empty when it is only ever a catalog reason. */
@@ -113,7 +114,7 @@ export const HOST_CODES = {
   },
   gui_unit_required: {
     status: [400],
-    meaning: "A tenant view was asked for by a person with several units, naming none. Ask again with `unit=<tenant id>` in the page's query.",
+    meaning: `A tenant view was asked for by a person with several units, naming none. Ask again with \`${TENANT_UNIT_PARAM}=<tenant id>\` in the page's query.`,
   },
   gui_view_failed: {
     status: [500],
@@ -140,7 +141,7 @@ export const GATE_CODES = {
     status: [409],
     reasons: ["enabled"],
     meaning:
-      "The plugin is off for the organization the request targets. Turning it on in Settings → Plugins keeps every record.",
+      "The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.",
   },
   unavailable: {
     suffix: "_gate_unavailable",

@@ -29,6 +29,7 @@ import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { CORE_ENTITY_KINDS, MGM_BUNDLED_PLUGINS, type MgmPluginName } from "@/lib/plugins/bundled";
 import { GUI_CONTRACT, type EntityKind, type Json } from "../../contract";
 import { OWN_ID_RE, byCatalogOrder } from "../shared/merge-actions";
+import { TENANT_UNIT_PARAM } from "../shared/tenant-units";
 import { MAX_CATALOG_ENTITIES, describeAction } from "./catalog";
 import { BODY_CODES, GATE_CODES, HOST_CODES, gateCode, listedCodes, type GateRefusal, type HostCode } from "./error-codes";
 import { describeBody } from "./input-spec";
@@ -385,7 +386,7 @@ export const HOST_ROUTES: readonly HostRoute[] = [
     path: "/api/gui/view",
     summary: "One contributed view",
     description: [
-      "The view a page's path names, as the page renders it, for the signed-in person. A tenant view takes `unit=<tenant id>` in that path's query when the person rents several units.",
+      `The view a page's path names, as the page renders it, for the signed-in person. A tenant view takes \`${TENANT_UNIT_PARAM}=<tenant id>\` in that path's query when the person rents several units.`,
       ORG_HINT,
     ].join("\n\n"),
     query: [
