@@ -5,9 +5,10 @@ import "server-only";
  * registered. A broken rule throws SurfaceContributionError, whose message
  * names the plugin and the path of each failing field.
  *
- * The parse reads only the contribution and the catalog it is given, never
- * the environment, the network or the database, so a test that builds the
- * same contribution refuses exactly what start-up would.
+ * The parse reads only the contribution, the catalog it is given and the
+ * list of views and watchers an assistant may read (../../assistant-reads.ts),
+ * never the environment, the network or the database, so a test that builds
+ * the same contribution refuses exactly what start-up would.
  *
  * Checked here: strict shapes at every depth; the plugin is in the catalog;
  * ids carry its alias and are unique within the contribution; confirmation
@@ -15,9 +16,11 @@ import "server-only";
  * route ownership; strict `ext` schemas; action inputs that JSON Schema can
  * describe; examples against the model schemas and the declared keys, and a
  * watcher's examples against the signal schema; no
- * assistant reading of views reached from configure or system navigation,
- * of billing's, payments' or Pesapal's views, of views whose path names a
- * tenant or a device, or of views that take signals;
+ * assistant reading of a view or watcher that is not on the list, of views
+ * reached from configure or system navigation, of billing's, payments',
+ * Pesapal's or the tenant app's views and watchers, of views whose path
+ * names a tenant, a device or a billing or payment record, or of views that
+ * take signals;
  * tenant views without segments, attachments or assistant reading, reached
  * only from tenant navigation; `attach.whilePluginOff` only on a tab or tile
  * of cost "db"; `takesSignals` only on an organization's view that is not
@@ -32,6 +35,7 @@ import "server-only";
 import { z } from "zod";
 import { CORE_ENTITY_KINDS, getRouteOwner, type CoreEntityKind, type MgmPluginName } from "@/lib/plugins/bundled";
 import type { MgmCatalog } from "@/lib/runtime/services";
+import { ASSISTANT_READS, type AssistantRead } from "../../assistant-reads";
 import type { Contribution } from "../../surface";
 import type { BodiesOf, ViewKind, ViewModel } from "../../contract";
 import {
@@ -189,28 +193,33 @@ export function strictProblems(schema: z.ZodType): { path: Path; message: string
 // ── Assistant reading ───────────────────────────────────────────────────────
 
 /*
- * `agent: "read"` is the only thing that lets an assistant read a view
- * (ViewDef in ../../surface.ts), and #133's data boundary keeps from any
- * assistant tenants' names and units, bills and payment references, the
- * identifiers of single devices, and every watcher's signals together. So
- * the mark is refused, besides on tenant views and on views reached from
+ * `agent: "read"` is the only thing that lets an assistant read a view or a
+ * watcher's signals (ViewDef and SignalDef in ../../surface.ts), and #133's
+ * data boundary keeps from any assistant tenants' names and units, bills and
+ * payment references, the identifiers of single devices, and every
+ * watcher's signals together. So the mark is refused on a view or watcher
+ * that is not on the code-owned list (ASSISTANT_READS, ADR-007 decision 8),
+ * and, listed or not, besides on tenant views and on views reached from
  * configure or system navigation, on:
  *
- * - every view of a plugin below marked "refused": billing (billing-review
- *   is a service of the billing plugin, so whatever it shows is contributed
- *   as billing), payments and Pesapal carry bills, tenants and payment
- *   references; the tenant app is about a tenant's own unit;
- * - a view whose path names a tenant or a device (ASSISTANT_REFUSED_KINDS);
+ * - every view and watcher of a plugin below marked "refused": billing
+ *   (billing-review is a service of the billing plugin, so whatever it shows
+ *   is contributed as billing), payments and Pesapal carry bills, tenants
+ *   and payment references; the tenant app is about a tenant's own unit;
+ * - a view whose path names a tenant, a device, or a billing or payment
+ *   record (ASSISTANT_REFUSED_KINDS);
  * - a view that takes signals, which carries every watcher's answer.
  *
- * The list is keyed by every plugin name, so a new or renamed plugin does
- * not type-check until someone decides whether its views may be marked, and
- * contribution-schema.test.ts fails while it and the catalog differ. A name
- * missing from it at run time is refused. "per view" leaves the decision to
- * each view and the rules on kinds and signals: those plugins' views carry
- * neither bills nor payments. If a plugin's views come to carry them, or the
- * host's read interface gains its own refusal per model (which would make
- * these refusals a second copy of it), revisit this list and those rules.
+ * ASSISTANT_READING is keyed by every plugin name, so a new or renamed
+ * plugin does not type-check until someone decides whether its views and
+ * watchers may be marked, and contribution-schema.test.ts fails while it and
+ * the catalog differ. A name missing from it at run time is refused. "per
+ * view" leaves the decision to each view's or watcher's entry on
+ * ASSISTANT_READS and the rules on kinds and signals: those plugins' views
+ * carry neither bills nor payments. If a plugin's views come to carry
+ * them, or the host's read interface gains its own refusal per model (which
+ * would make these refusals a second copy of it), revisit ASSISTANT_READING
+ * and those rules.
  */
 export const ASSISTANT_READING: Readonly<Record<MgmPluginName, "per view" | "refused">> = {
   "organization-directory": "per view",
@@ -223,7 +232,17 @@ export const ASSISTANT_READING: Readonly<Record<MgmPluginName, "per view" | "ref
 };
 
 /** The entity kinds whose records an assistant may never read through a view's path. */
-const ASSISTANT_REFUSED_KINDS: ReadonlySet<string> = new Set<CoreEntityKind>(["tenant", "device"]);
+const ASSISTANT_REFUSED_KINDS: ReadonlySet<string> = new Set<CoreEntityKind>([
+  "tenant",
+  "device",
+  "rateSchedule",
+  "billingPeriod",
+  "lineItem",
+  "paymentAttempt",
+]);
+
+const READS_LIST = "src/lib/gui/assistant-reads.ts";
+const NOUN = { view: "views", watcher: "watchers" } as const;
 
 // ── Views ───────────────────────────────────────────────────────────────────
 
@@ -430,6 +449,8 @@ const signalDefSchema = z
     // Which watchers may declare it is checked in CI (gui-surface.test.ts),
     // which can read the capability's gating.
     whilePluginOff: z.literal("checked").optional(),
+    // The plugin and list rules need the catalog and the list, so they are in checkContribution.
+    agent: z.literal("read").optional(),
   })
   .superRefine((w, ctx) => {
     const seen = new Set<string>();
@@ -461,10 +482,17 @@ type Shape = z.output<typeof contributionSchema>;
 
 const CORE_KINDS: ReadonlySet<string> = new Set(CORE_ENTITY_KINDS);
 
-function checkContribution(c: Shape, catalog: SurfaceCatalog, ctx: Ctx) {
+function checkContribution(c: Shape, catalog: SurfaceCatalog, reads: readonly AssistantRead[], ctx: Ctx) {
   const entry = catalog.plugins.find((p) => p.name === c.plugin);
   if (!entry) return add(ctx, ["plugin"], `"${c.plugin}" is not a plugin in the catalog`);
   const ownKinds = new Set<string>((c.entities ?? []).map((e) => e.kind));
+  /** The plugin and list rules on a view or watcher that carries the mark. */
+  const readable = (kind: AssistantRead["kind"], id: string, path: Path) => {
+    if (ASSISTANT_READING[c.plugin as MgmPluginName] !== "per view")
+      add(ctx, path, `a ${c.plugin} ${kind} cannot be read by an assistant`);
+    if (!reads.some((r) => r.kind === kind && r.id === id))
+      add(ctx, path, `"${id}" is not on the list of ${NOUN[kind]} an assistant may read (${READS_LIST})`);
+  };
 
   const ids = (list: string[] = [], at: string, field = "id") => {
     const seen = new Set<string>();
@@ -500,8 +528,9 @@ function checkContribution(c: Shape, catalog: SurfaceCatalog, ctx: Ctx) {
     else paths.set(routeKey(v.path), v.path);
     for (const [key, k] of Object.entries(v.params)) kind(k, ["views", i, "params", key]);
     if (typeof v.attach?.to === "string") kind(v.attach.to, ["views", i, "attach", "to"]);
-    if (v.agent === "read" && ASSISTANT_READING[c.plugin as MgmPluginName] !== "per view")
-      add(ctx, ["views", i, "agent"], `a ${c.plugin} view cannot be read by an assistant`);
+    // A tenant view gets its own refusal (viewSchema) and only that one. If
+    // tenant views may be listed (ADR-007 decision 10), revisit.
+    if (v.agent === "read" && v.scope !== "tenant") readable("view", v.id, ["views", i, "agent"]);
     if (v.ext && !v.ext.schema.startsWith(`${entry.alias}.`))
       add(ctx, ["views", i, "ext", "schema"], `"${v.ext.schema}" must start with the alias "${entry.alias}."`);
   });
@@ -533,11 +562,22 @@ function checkContribution(c: Shape, catalog: SurfaceCatalog, ctx: Ctx) {
       for (const [key, k] of Object.entries(a.bind[side] ?? {})) kind(k, ["actions", i, "bind", side, key]);
   });
   (c.search ?? []).forEach((s, i) => kind(s.entity, ["search", i, "entity"]));
+  (c.signals ?? []).forEach((s, i) => {
+    if (s.agent === "read") readable("watcher", s.id, ["signals", i, "agent"]);
+  });
 }
 
-/** Throws SurfaceContributionError unless `c` is a contribution that keeps every rule above. */
-export function parseContribution(c: unknown, catalog: SurfaceCatalog): ParsedContribution {
-  const result = contributionSchema.superRefine((v, ctx) => checkContribution(v, catalog, ctx)).safeParse(c);
+/**
+ * Throws SurfaceContributionError unless `c` is a contribution that keeps
+ * every rule above. `reads` is the list of what an assistant may read; only
+ * tests pass another.
+ */
+export function parseContribution(
+  c: unknown,
+  catalog: SurfaceCatalog,
+  reads: readonly AssistantRead[] = ASSISTANT_READS,
+): ParsedContribution {
+  const result = contributionSchema.superRefine((v, ctx) => checkContribution(v, catalog, reads, ctx)).safeParse(c);
   const named = (c as { plugin?: unknown } | null)?.plugin;
   const plugin = typeof named === "string" ? named : "(no plugin)";
   if (!result.success) throw new SurfaceContributionError(plugin, result.error);

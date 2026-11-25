@@ -6,6 +6,7 @@ import { BILLING_SURFACE } from "../../../__tests__/fixtures/billing-surface";
 import { TENANT_APP_SURFACE } from "@/lib/tenant-app/surface";
 import { METERING_SURFACE } from "@/lib/metering/surface";
 import { PAYMENTS_SURFACE } from "@/lib/payments/surface";
+import { ASSISTANT_READS, type AssistantRead } from "../../../assistant-reads";
 import {
   ASSISTANT_READING,
   SurfaceContributionError,
@@ -38,11 +39,16 @@ function copy<T>(v: T): T {
   return v;
 }
 
-function refusal(change: (c: Draft) => void, catalog = CATALOG, base: object = BILLING_SURFACE) {
+function refusal(
+  change: (c: Draft) => void,
+  catalog = CATALOG,
+  base: object = BILLING_SURFACE,
+  reads?: readonly AssistantRead[],
+) {
   const c = copy(base) as Draft;
   change(c);
   try {
-    parseContribution(c, catalog);
+    parseContribution(c, catalog, reads);
   } catch (error) {
     if (error instanceof SurfaceContributionError) return error;
     throw error;
@@ -380,53 +386,135 @@ describe("tenant views and the tenant audience", () => {
 describe("assistant reading", () => {
   /** METERING_SURFACE with the mark on its one view, metering.site-day. */
   const marked = (c: Draft) => (c.views[0].agent = "read");
+  /** METERING_SURFACE with the mark on its one watcher, metering.connection. */
+  const watched = (c: Draft) => (c.signals[0].agent = "read");
   const issue = (path: PropertyKey[], message: string) => expect.objectContaining({ path, message });
+  const unlisted = (noun: string, id: string) =>
+    `"${id}" is not on the list of ${noun} an assistant may read (src/lib/gui/assistant-reads.ts)`;
+  /** Any refusal by the list. */
+  const onList = expect.objectContaining({ message: expect.stringContaining("is not on the list") });
+  const SITE_DAY: readonly AssistantRead[] = [{ kind: "view", id: "metering.site-day" }];
+  const CONNECTION: readonly AssistantRead[] = [{ kind: "watcher", id: "metering.connection" }];
 
-  it("accepts the mark on a view about an organization's records that takes no signals", () => {
-    const c = copy(METERING_SURFACE) as Draft;
-    marked(c);
-    expect(c.views[0].params).toEqual({ id: "microgrid" });
-    expect(parseContribution(c, CATALOG).contribution.views?.[0].agent).toBe("read");
+  it("lists nothing yet", () => {
+    // ADR-007 decision 8: the list starts empty, and A1's pull requests add
+    // its first entries, one each, with the mark. Each of them changes this.
+    expect(ASSISTANT_READS).toEqual([]);
   });
 
-  it("refuses the mark on each of billing's views", () => {
-    const error = refusal((c) => c.views.forEach((v: Draft) => (v.agent = "read")));
-    for (const i of BILLING_SURFACE.views!.keys())
-      expect(error.issues).toContainEqual(issue(["views", i, "agent"], "a billing view cannot be read by an assistant"));
-  });
+  describe("views", () => {
+    it("accepts the mark on a listed view about an organization's records that takes no signals", () => {
+      const c = copy(METERING_SURFACE) as Draft;
+      marked(c);
+      expect(c.views[0].params).toEqual({ id: "microgrid" });
+      expect(parseContribution(c, CATALOG, SITE_DAY).contribution.views?.[0].agent).toBe("read");
+    });
 
-  it("refuses the mark on payments' views", () => {
-    const error = refusal(marked, CATALOG, PAYMENTS_SURFACE);
-    expect(error.issues).toContainEqual(issue(["views", 0, "agent"], "a payments view cannot be read by an assistant"));
-  });
+    it("refuses the mark on a view that is not on the list", () => {
+      const error = refusal(marked, CATALOG, METERING_SURFACE);
+      expect(error.issues).toEqual([issue(["views", 0, "agent"], unlisted("views", "metering.site-day"))]);
+    });
 
-  // Decided by the contributing plugin, whatever the view's id: the same view
-  // contributed by each of these is refused, alongside the alias and
-  // ownership issues it also raises there.
-  it.each(["billing", "payments", "pesapal", "tenant-app", "sms-reminders"])(
-    "refuses the mark on a view contributed by %s",
-    (plugin) => {
-      const error = refusal((c) => Object.assign(c, { plugin }) && marked(c), CATALOG, METERING_SURFACE);
-      expect(error.issues).toContainEqual(issue(["views", 0, "agent"], `a ${plugin} view cannot be read by an assistant`));
-    },
-  );
+    it("refuses the mark on a view listed as a watcher", () => {
+      const error = refusal(marked, CATALOG, METERING_SURFACE, [{ kind: "watcher", id: "metering.site-day" }]);
+      expect(error.issues).toEqual([issue(["views", 0, "agent"], unlisted("views", "metering.site-day"))]);
+    });
 
-  it.each(["tenant", "device"])("refuses the mark on a view whose path names a %s", (kind) => {
-    const error = refusal((c) => Object.assign(c.views[0], { params: { id: kind } }) && marked(c), CATALOG, METERING_SURFACE);
-    expect(error.issues).toEqual([issue(["views", 0, "agent"], `a view whose path names a ${kind} cannot be read by an assistant`)]);
-  });
+    it("refuses the mark on each of billing's views, even listed", () => {
+      const listed = BILLING_SURFACE.views!.map((v) => ({ kind: "view" as const, id: v.id }));
+      const error = refusal((c) => c.views.forEach((v: Draft) => (v.agent = "read")), CATALOG, BILLING_SURFACE, listed);
+      for (const i of BILLING_SURFACE.views!.keys())
+        expect(error.issues).toContainEqual(issue(["views", i, "agent"], "a billing view cannot be read by an assistant"));
+      expect(error.issues).not.toContainEqual(onList);
+    });
 
-  it("refuses the mark on a view that takes signals", () => {
-    const error = refusal(
-      (c) => {
-        delete c.views[0].attach;
-        Object.assign(c.views[0], { takesSignals: true });
-        marked(c);
+    it("refuses the mark on payments' views, even listed", () => {
+      const error = refusal(marked, CATALOG, PAYMENTS_SURFACE, [{ kind: "view", id: PAYMENTS_SURFACE.views![0].id }]);
+      expect(error.issues).toContainEqual(issue(["views", 0, "agent"], "a payments view cannot be read by an assistant"));
+      expect(error.issues).not.toContainEqual(onList);
+    });
+
+    // Decided by the contributing plugin, whatever the view's id: the same view
+    // contributed by each of these is refused, alongside the alias and
+    // ownership issues it also raises there.
+    it.each(["billing", "payments", "pesapal", "tenant-app", "sms-reminders"])(
+      "refuses the mark on a listed view contributed by %s",
+      (plugin) => {
+        const error = refusal((c) => Object.assign(c, { plugin }) && marked(c), CATALOG, METERING_SURFACE, SITE_DAY);
+        expect(error.issues).toContainEqual(issue(["views", 0, "agent"], `a ${plugin} view cannot be read by an assistant`));
       },
-      CATALOG,
-      METERING_SURFACE,
     );
-    expect(error.issues).toEqual([issue(["views", 0, "agent"], "a view that takes signals cannot be read by an assistant")]);
+
+    it.each(["tenant", "device", "rateSchedule", "billingPeriod", "lineItem", "paymentAttempt"])(
+      "refuses the mark on a listed view whose path names a %s",
+      (kind) => {
+        const error = refusal(
+          (c) => Object.assign(c.views[0], { params: { id: kind } }) && marked(c),
+          CATALOG,
+          METERING_SURFACE,
+          SITE_DAY,
+        );
+        expect(error.issues).toEqual([issue(["views", 0, "agent"], `a view whose path names a ${kind} cannot be read by an assistant`)]);
+      },
+    );
+
+    it("refuses the mark on a listed view that takes signals", () => {
+      const error = refusal(
+        (c) => {
+          delete c.views[0].attach;
+          Object.assign(c.views[0], { takesSignals: true });
+          marked(c);
+        },
+        CATALOG,
+        METERING_SURFACE,
+        SITE_DAY,
+      );
+      expect(error.issues).toEqual([issue(["views", 0, "agent"], "a view that takes signals cannot be read by an assistant")]);
+    });
+
+    // ADR-007 decision 10 may let tenant views be listed (#259 § 5); the pull
+    // request that does changes this.
+    it.each([
+      ["unlisted", undefined],
+      ["listed", [{ kind: "view", id: TENANT_APP_SURFACE.views![0].id }] as const],
+    ])("gives a marked tenant view, %s, one refusal", (_listed, reads) => {
+      const error = refusal(marked, CATALOG, TENANT_APP_SURFACE, reads);
+      expect(error.issues).toEqual([issue(["views", 0, "agent"], "a tenant view cannot be read by an assistant")]);
+    });
+  });
+
+  describe("watchers", () => {
+    it("accepts the mark on a listed watcher", () => {
+      const c = copy(METERING_SURFACE) as Draft;
+      watched(c);
+      expect(parseContribution(c, CATALOG, CONNECTION).contribution.signals?.[0].agent).toBe("read");
+    });
+
+    it("refuses the mark on a watcher that is not on the list", () => {
+      const error = refusal(watched, CATALOG, METERING_SURFACE);
+      expect(error.issues).toEqual([issue(["signals", 0, "agent"], unlisted("watchers", "metering.connection"))]);
+    });
+
+    it("refuses the mark on a watcher listed as a view", () => {
+      const error = refusal(watched, CATALOG, METERING_SURFACE, [{ kind: "view", id: "metering.connection" }]);
+      expect(error.issues).toEqual([issue(["signals", 0, "agent"], unlisted("watchers", "metering.connection"))]);
+    });
+
+    it.each([
+      ["billing", BILLING_SURFACE],
+      ["payments", PAYMENTS_SURFACE],
+    ] as const)("refuses the mark on every %s watcher, even listed", (plugin, base) => {
+      const listed = base.signals!.map((s) => ({ kind: "watcher" as const, id: s.id }));
+      const error = refusal((c) => c.signals.forEach((s: Draft) => (s.agent = "read")), CATALOG, base, listed);
+      expect(error.issues).toEqual(
+        base.signals!.map((_, i) => issue(["signals", i, "agent"], `a ${plugin} watcher cannot be read by an assistant`)),
+      );
+    });
+
+    it("refuses a mark other than read", () => {
+      const error = refusal((c) => (c.signals[0].agent = "write"), CATALOG, METERING_SURFACE, CONNECTION);
+      expect(error.issues).toContainEqual(expect.objectContaining({ path: ["signals", 0, "agent"] }));
+    });
   });
 
   it("has a decision for every plugin in the catalog, and none for a plugin outside it", () => {
