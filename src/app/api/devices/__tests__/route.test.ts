@@ -11,6 +11,8 @@
  *   (e) Valid UUID + valid device row → 200 { saved: [...] }
  *   (g) componentId format: trimmed and stored; outside the pattern → 400
  *       `invalid_component_id`
+ *   (h) The same componentId twice, after trimming → 400
+ *       `duplicate_component_id` naming it, before any database call
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -207,6 +209,59 @@ describe("POST /api/devices", () => {
       const json = await res.json();
       expect(json.reason).toBe("invalid_component_id");
       expect(mockFrom).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("(h) the same componentId twice", () => {
+    it.each([
+      ["identical", "meter0", "meter0"],
+      ["only spaces apart", "meter0", " meter0"],
+      ["both padded", "  meter0", "meter0\t"],
+    ])(
+      "refuses two entries that are %s with 400 duplicate_component_id before any database call",
+      async (_label, first, second) => {
+        const { gateRoute } = await import("@/lib/runtime/gate");
+        const { POST } = await import("../route");
+        const res = await POST(
+          makeRequest({
+            edgeId: VALID_UUID,
+            devices: [
+              { ...VALID_DEVICE, componentId: first, name: "Meter A" },
+              { ...VALID_DEVICE, componentId: "ess0", deviceType: "battery", name: "Battery" },
+              { ...VALID_DEVICE, componentId: second, name: "Meter B" },
+            ],
+          })
+        );
+        expect(res.status).toBe(400);
+        const json = await res.json();
+        expect(json.reason).toBe("duplicate_component_id");
+        expect(json.componentId).toBe("meter0");
+        expect(json.error).toContain("'meter0'");
+        expect(gateRoute).not.toHaveBeenCalled();
+        expect(mockFrom).not.toHaveBeenCalled();
+      }
+    );
+
+    it("saves entries whose ids differ", async () => {
+      mockSelect.mockResolvedValueOnce({ data: [], error: null });
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeRequest({
+          edgeId: VALID_UUID,
+          devices: [
+            VALID_DEVICE,
+            { ...VALID_DEVICE, componentId: " meter1 ", name: "Second Meter" },
+          ],
+        })
+      );
+      expect(res.status).toBe(200);
+      expect(mockUpsert).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({ openems_component_id: "meter0" }),
+          expect.objectContaining({ openems_component_id: "meter1" }),
+        ],
+        expect.anything()
+      );
     });
   });
 });
