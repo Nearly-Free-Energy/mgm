@@ -18,6 +18,8 @@
  *   (m) Component ids outside the stored format → listed in `skipped`, left
  *       out of `devices` and of the dedup query
  *   (n) A skipped id is cut to 100 characters in the response
+ *   (o) Each skipped entry carries the type Discover suggests for it, every
+ *       type included, and listed devices keep the fields they had
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -494,10 +496,10 @@ describe("GET /api/edges/[id]/discover-devices", () => {
       "meter0",
     ]);
     expect(json.skipped).toEqual([
-      { componentId: "meter 1", reason: "invalid_component_id" },
-      { componentId: " meter2", reason: "invalid_component_id" },
-      { componentId: "meter/3", reason: "invalid_component_id" },
-      { componentId: longId, reason: "invalid_component_id" },
+      { componentId: "meter 1", reason: "invalid_component_id", suggestedDeviceType: "consumption_meter" },
+      { componentId: " meter2", reason: "invalid_component_id", suggestedDeviceType: "consumption_meter" },
+      { componentId: "meter/3", reason: "invalid_component_id", suggestedDeviceType: "consumption_meter" },
+      { componentId: longId, reason: "invalid_component_id", suggestedDeviceType: "consumption_meter" },
     ]);
     expect(dedupIds).toEqual(["meter0"]);
   });
@@ -528,7 +530,78 @@ describe("GET /api/edges/[id]/discover-devices", () => {
     // No dedup query runs: nothing is left to look up.
     expect(json.devices).toEqual([]);
     expect(json.skipped).toEqual([
-      { componentId: "x".repeat(100), reason: "invalid_component_id" },
+      {
+        componentId: "x".repeat(100),
+        reason: "invalid_component_id",
+        suggestedDeviceType: "consumption_meter",
+      },
+    ]);
+  });
+
+  // (o) A surface that offers one type (the meter wizard) names only the
+  // skipped components of that type, so each entry says what it would be.
+  it("(o) gives each skipped component the type Discover suggests for it", async () => {
+    getMicrogridEmsConfigMock.mockResolvedValue(defaultEmsConfig);
+    registerEdgeLookup(true);
+    registerFrom(() => ({
+      select: () => ({
+        eq: () => ({
+          in: () => Promise.resolve({ data: [], error: null }),
+        }),
+      }),
+    }));
+
+    const consumption = "io.openems.impl.meter.consumption.ConsumptionMeter";
+    const grid = "Srne.Grid-Meter";
+    const ess = "Ess.Generic.ManagedSymmetric";
+    const evcs = "Evcs.Keba.KeContact";
+    const acMeter = "Meter.Socomec.AcUniversal";
+    getEdgesStatusMock.mockResolvedValue([{ edgeId: OPENEMS_EDGE_ID, online: true }]);
+    getEdgeConfigMock.mockResolvedValue({
+      components: {
+        meter0: { alias: "House 1", factoryId: consumption, properties: {} },
+        "meter 1": { alias: "House 2", factoryId: consumption, properties: {} },
+        "grid meter": { alias: "Grid", factoryId: grid, properties: {} },
+        "ess 0": { alias: "Battery", factoryId: ess, properties: {} },
+        "evcs 0": { alias: "Charger", factoryId: evcs, properties: {} },
+        "meter/2": { alias: "Tenant load", factoryId: acMeter, properties: {} },
+        "meter/3": { alias: "Spare", factoryId: acMeter, properties: {} },
+      },
+      factories: {
+        [consumption]: { natureIds: ["io.openems.edge.meter.api.ElectricityMeter"] },
+        [grid]: { natureIds: ["io.openems.edge.meter.api.ElectricityMeter"] },
+        [ess]: { natureIds: ["io.openems.edge.ess.api.SymmetricEss"] },
+        [evcs]: { natureIds: ["io.openems.edge.evcs.api.Evcs"] },
+        [acMeter]: { natureIds: ["io.openems.edge.meter.api.ElectricityMeter"] },
+      },
+    });
+
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), {
+      params: Promise.resolve({ id: EDGE_DB_ID }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.skipped).toEqual([
+      { componentId: "meter 1", reason: "invalid_component_id", suggestedDeviceType: "consumption_meter" },
+      { componentId: "grid meter", reason: "invalid_component_id", suggestedDeviceType: "grid_meter" },
+      { componentId: "ess 0", reason: "invalid_component_id", suggestedDeviceType: "battery" },
+      { componentId: "evcs 0", reason: "invalid_component_id", suggestedDeviceType: "ev_charger" },
+      // The alias fallback applies to a skipped component as to a listed one.
+      { componentId: "meter/2", reason: "invalid_component_id", suggestedDeviceType: "consumption_meter" },
+      { componentId: "meter/3", reason: "invalid_component_id", suggestedDeviceType: "other" },
+    ]);
+    // The listed device is unchanged by the skipped entries' new field.
+    expect(json.devices).toEqual([
+      {
+        componentId: "meter0",
+        factoryId: consumption,
+        alias: "House 1",
+        nature: "io.openems.edge.meter.api.ElectricityMeter",
+        openemsChannelAddress: "meter0/ActiveConsumptionEnergy",
+        suggestedDeviceType: "consumption_meter",
+        alreadyAdded: false,
+      },
     ]);
   });
 });

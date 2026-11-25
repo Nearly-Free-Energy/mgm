@@ -87,11 +87,15 @@ export type DiscoveredDevice = {
  * A component OpenEMS reported with a supported nature that Discover leaves
  * out of `devices`, because MGM would refuse to store its id
  * (`OPENEMS_ID_PATTERN` in `@/lib/openems/ids`). `componentId` is the id as
- * OpenEMS sent it, cut to 100 characters.
+ * OpenEMS sent it, cut to 100 characters. `suggestedDeviceType` is the type
+ * Discover would have suggested had it listed the component, so a surface
+ * that offers one type (the meter wizard) names only the skipped components
+ * of that type.
  */
 export type SkippedComponent = {
   componentId: string;
   reason: "invalid_component_id";
+  suggestedDeviceType: import("@/lib/types/domain").DeviceType;
 };
 
 /** Single-edge discovery result (F #57) — flat, not wrapped in an array */
