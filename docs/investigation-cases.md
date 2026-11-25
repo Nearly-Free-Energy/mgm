@@ -2,7 +2,7 @@
 
 Status: draft for #133 milestone A0, for review by the A0 owner (dismasfriday) and the operator evaluator (arindahills). Figures are from `main` at `0f3ad0c0`, computed with `computeSiteDay` over the fixture provider's samples.
 
-This document gives #133's first slice its labelled cases, the answer each case expects, three worked example answers, the deterministic fixture set the cases run on, and the manual baseline procedure. It proposes the rules that decide when a result escalates, which `docs/investigation-evidence.md` (§5) leaves to this step, and the ratification of A3's proposed acceptance. Evidence and result shapes are those of `site-day-evidence/1` and `site-day-result/1` in that document; this one adds no field.
+This document gives #133's first slice its labelled cases, the answer each case expects, three worked example answers, the deterministic fixture set the cases run on, and the manual baseline procedure. It sets the rules that decide when a result escalates, which `docs/investigation-evidence.md` (§5) leaves to this step, and records how A3's proposed acceptance was ratified. Evidence and result shapes are those of `site-day-evidence/1` and `site-day-result/1` in that document; this one adds no field.
 
 All cases and their answers are public, as #133's A3 acceptance requires: the deterministic investigator and the agent are built with them in view, and the manual baseline is not blind.
 
@@ -126,7 +126,7 @@ These exercise the operation rather than an answer, so they are A2's database-ba
 
 ## 3. When a result escalates
 
-Evidence §5 sets the outcome: `escalation` when `escalateTo` names a role; else `evidence_limited` when an item limits the answer, a hypothesis is contested or the zone fell back; else `answered`. It leaves to this step which findings name a role. Proposed (decision owners in §7):
+Evidence §5 sets the outcome: `escalation` when `escalateTo` names a role; else `evidence_limited` when an item limits the answer, a hypothesis is contested or the zone fell back; else `answered`. It leaves to this step which findings name a role. Decided by tushabe on 25 November 2026:
 
 | Rule | When | `escalateTo` |
 |---|---|---|
@@ -204,22 +204,21 @@ The manual baseline is the first of A3's three arms: an operator answering each 
 
 ## 6. A3's proposed acceptance, ratified
 
-#133 asks A0 to ratify or amend A3's proposed acceptance against these cases. Proposed:
+#133 asks A0 to ratify or amend A3's proposed acceptance against these cases. Ratified with these amendments by tushabe on 25 November 2026, and recorded in #133's A3 section:
 
 1. **At least 20 labelled synthetic scenarios.** Ratified: 24, in §2. Amend its list: "missing/stale samples" becomes "missing samples", because the slice reads only finished days (evidence §3 O2), so no sample can be stale. "Mixed units/time zones" becomes "time zones (a clock-change day and a zone fallback)", because units are fixed by the provider contract and the evidence schema (evidence §4), and a unit error is a provider defect for the provider's own tests, not an investigation case.
 2. **Public cases and answers.** Ratified; this document is that.
 3. **Every reported numerical fact has a reference.** Ratified. A result holds no figures of its own (evidence §2, rule N), so this applies to A3's model text: each figure in it must resolve to a citation, or be shown as unverified.
 4. **Scope, gating, cancellation and human-only tests.** Ratified, with §2's operation cases among them.
-5. **The operator rubric.** Proposed: per case, outcome and role exact, findings and hypotheses as sets, and unsupported claims counted. Correct abstention means `evidence_limited` where §2 expects it, without a guessed cause. The rubric is agreed before the first model run.
+5. **The operator rubric.** Per case, outcome and role exact, findings and hypotheses as sets, and unsupported claims counted. Correct abstention means `evidence_limited` where §2 expects it, without a guessed cause. The rubric is agreed before the first model run.
 6. **Three arms on the same cases.** Ratified, with §5 as the manual arm. A case pending at comparison time is left out of all three arms, and the evidence packet lists it.
 7. **Release only if the agent beats the deterministic investigator.** Ratified.
 8. **Failure keeps the agent experimental and read-only.** Ratified.
 
 ## 7. Open, with owners
 
+The escalation rules R1–R6, R3's 120-minute threshold (evidence Q8) and the amendments in §6 were decided by tushabe on 25 November 2026.
+
 | Question | Proposal | Decision owner |
 |---|---|---|
-| Escalation rules R1–R6 and their order (§3; evidence Q8) | As §3 | The A0 owner; arindahills as operator evaluator |
-| R3's threshold | 120 minutes of no-data time | The A0 owner; arindahills |
 | How pending scenarios are selected without moving pins (§1) | A separate hash, or a pinned (microgrid, date) table in the fixture | Whoever builds evidence §11 change 6 |
-| A3's acceptance amendments (§6) | As §6 | The maintainers, on #133 |
