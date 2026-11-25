@@ -66,6 +66,15 @@ describe("POST /api/mgm/bootstrap", () => {
     expect(mockRpc).not.toHaveBeenCalled();
   });
 
+  it("403 on a token of the same length that differs", async () => {
+    const { POST } = await import("../route");
+    const res = await POST(
+      makePost({ ...VALID_BODY, bootstrap_token: "test-bootstrap-tokeN" })
+    );
+    expect(res.status).toBe(403);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
   it("422 when the organization name is missing", async () => {
     const { POST } = await import("../route");
     const res = await POST(
