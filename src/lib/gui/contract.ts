@@ -314,7 +314,7 @@ export interface Signals {
   /**
    * How many of the `count` signals are `warn` or `critical`: what the
    * installed app's badge shows, since info signals show in the tray and on
-   * Today but not on the icon (#230). Optional, added within 0.1 as a patch
+   * Today but not on the icon (#230). Optional, added in 0.2.1 as a patch
    * may add fields (ADR-006 decision 6): a GUI that finds none uses `count`.
    */
   attention?: number;

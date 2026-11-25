@@ -100,7 +100,9 @@ read a stored credential, or to send data to another origin.
      route sends gained `error` beside `message`, a key added to an answer
      whose type was not in the contract before; the kit reads it and gives
      an interface the `ActionResult` it always did, without `error`. No
-     shape an interface receives changed, so a patch was enough.
+     shape an interface receives changed, so a patch was enough. It also
+     covers `Signals.attention` (#230), an optional field added while the
+     contract read 0.2.0.
    - Each view kind records the version it arrived in (`GUI_KINDS_SINCE`),
      so a kind newer than an interface's range can be shown by a generic
      fallback.
@@ -167,7 +169,7 @@ read a stored credential, or to send data to another origin.
      more than 50 signals. It sends each id prefixed with the watcher's.
    - The answer carries the first 20 signals, most severe first (`top`),
      how many there were (`count`), and how many of them are `warn` or
-     `critical` (`attention`, optional since it was added within 0.1),
+     `critical` (`attention`, optional since it was added in 0.2.1),
      both counted over every signal, not only `top`.
    - A watcher sets each signal's severity by fixed rules, decided on #230:
      a billing period with bills not closed is a warning from the day after
