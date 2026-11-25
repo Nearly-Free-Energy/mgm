@@ -64,6 +64,13 @@ export const iconSchema = z.enum([
 const coreEntityKindSchema = z.enum(CORE_ENTITY_KINDS);
 /** A core kind, or a plugin's own kind written like an id ("sms-reminders.send"). */
 export const entityKindSchema = z.union([coreEntityKindSchema, idSchema]);
+/**
+ * "/", or segments of lowercase words and [name] placeholders: a page or API
+ * route as a contribution names it, such as /api/billing-periods/[periodId].
+ */
+export const routePattern = z
+  .string()
+  .regex(/^\/$|^(?:\/(?:[a-z0-9_][a-z0-9_-]*|\[[A-Za-z][A-Za-z0-9_]*\]))+$/, "Expected a route such as /microgrids/[id]");
 
 export const entityRefSchema = z.strictObject({
   kind: entityKindSchema,
