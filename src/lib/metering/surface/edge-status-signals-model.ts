@@ -29,8 +29,10 @@ export const unreadTitle = (name: string) => `${name}: gateway status could not 
 
 /**
  * One signal per microgrid with an edge offline or whose status could not
- * be read, by name, at most MAX_SIGNALS_PER_SOURCE; nothing for one whose
- * edges are all online, or that has no outcome.
+ * be read; nothing for one whose edges are all online, or that has no
+ * outcome. At most MAX_SIGNALS_PER_SOURCE: the offline ones by name, then
+ * the unread ones by name, so a cut drops what could not be read before a
+ * gateway known to be offline.
  */
 export function buildEdgeStatusSignals(
   fmt: Fmt,
@@ -39,7 +41,7 @@ export function buildEdgeStatusSignals(
   now: Date,
 ): SignalOut[] {
   const byId = new Map(outcomes.map((o) => [o.microgridId, o]));
-  return [...microgrids]
+  const signals = [...microgrids]
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
     .flatMap((m): SignalOut[] => {
       const outcome = byId.get(m.id);
@@ -56,6 +58,8 @@ export function buildEdgeStatusSignals(
       return outcome.state === "read"
         ? [{ ...base, id: `offline:${m.id}`, title: offlineTitle(m.name, outcome.offline), href: `/microgrids/${m.id}/setup/edges` }]
         : [{ ...base, id: `unread:${m.id}`, title: unreadTitle(m.name), href: `/microgrids/${m.id}/setup/openems-backend` }];
-    })
-    .slice(0, MAX_SIGNALS_PER_SOURCE);
+    });
+  const offlineFirst = (s: SignalOut) => (s.id.startsWith("offline:") ? 0 : 1);
+  // A stable sort keeps each group in name order.
+  return signals.sort((a, b) => offlineFirst(a) - offlineFirst(b)).slice(0, MAX_SIGNALS_PER_SOURCE);
 }

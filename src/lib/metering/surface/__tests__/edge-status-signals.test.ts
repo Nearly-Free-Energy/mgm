@@ -5,7 +5,10 @@
  * runs before any stored configuration is read, and a refusal (metering off,
  * a session Auth has ended) throws before one; a microgrid with a gateway
  * offline, or whose read failed, is a signal with fixed copy, one with all
- * online is none; a failed database read throws without its message.
+ * online is none; every configured microgrid up to the bound is examined
+ * and a read that reaches the bound throws; at most MAX_SIGNALS_PER_SOURCE
+ * signals go back, offline ones first; a failed database read throws
+ * without its message.
  */
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -38,7 +41,7 @@ import { signalOutSchema } from "@/lib/gui/host/server/model-schema";
 import { MAX_SIGNALS_PER_SOURCE, type SurfaceRequest } from "@/lib/gui/surface";
 import { OpenEmsError } from "@/lib/openems";
 import { _resetEdgeStatusCacheForTests, EDGE_STATUS_READ_TIMEOUT_MS } from "../../infrastructure/edge-status-cache";
-import { EDGE_STATUS_BUDGET_MS, loadEdgeStatusSignals } from "../edge-status-signals";
+import { EDGE_STATUS_BUDGET_MS, EDGE_STATUS_MICROGRID_BOUND, loadEdgeStatusSignals } from "../edge-status-signals";
 import { EDGE_STATUS_EXAMPLES } from "../edge-status-signals-examples";
 import { buildEdgeStatusSignals, type EdgeStatusMicrogrid } from "../edge-status-signals-model";
 
@@ -91,7 +94,7 @@ describe("loadEdgeStatusSignals", () => {
           ["not", ["ems_type", "is", null]],
           ["order", ["name", { ascending: true }]],
           ["order", ["id", { ascending: true }]],
-          ["limit", [MAX_SIGNALS_PER_SOURCE]],
+          ["limit", [EDGE_STATUS_MICROGRID_BOUND + 1]],
         ],
       },
     ]);
@@ -167,6 +170,34 @@ describe("loadEdgeStatusSignals", () => {
     expect(composeMetering).toHaveBeenCalledTimes(2);
   });
 
+  it(`examines every microgrid, past the ${MAX_SIGNALS_PER_SOURCE}th, and returns at most ${MAX_SIGNALS_PER_SOURCE} signals, offline ones first`, async () => {
+    const count = MAX_SIGNALS_PER_SOURCE + 10;
+    const name = (i: number) => `Site ${String(i).padStart(3, "0")}`;
+    // Every site but the last fails to be read; the last, past the 50th by name, has its gateway offline.
+    const rows = Array.from({ length: count }, (_, i) => row(`mg-${i}`, name(i), [`edge-${i}`]));
+    getMicrogridEmsConfig.mockImplementation(async (_c: unknown, id: string) => {
+      if (id !== `mg-${count - 1}`) throw new OpenEmsError(VENDOR_TEXT, "OPENEMS_UNREACHABLE", 503);
+      return { type: "direct_url", url: "https://ems.example.test/rest" };
+    });
+    getEdgesStatus.mockResolvedValue([]);
+    const { client } = tableClient({ microgrids: { data: rows } });
+    const out = await loadEdgeStatusSignals(req(client));
+    expect(getMicrogridEmsConfig).toHaveBeenCalledTimes(count);
+    expect(out).toHaveLength(MAX_SIGNALS_PER_SOURCE);
+    expect(out[0]).toMatchObject({ id: `offline:mg-${count - 1}`, title: `${name(count - 1)}: 1 gateway offline` });
+    expect(out.slice(1).every((s) => s.id.startsWith("unread:"))).toBe(true);
+  });
+
+  it(`throws, so the watcher is unchecked, when the read reaches ${EDGE_STATUS_MICROGRID_BOUND} microgrids`, async () => {
+    const rows = Array.from({ length: EDGE_STATUS_MICROGRID_BOUND + 1 }, (_, i) => row(`mg-${i}`, `Site ${i}`, ["edge0"]));
+    const { client } = tableClient({ microgrids: { data: rows } });
+    await expect(loadEdgeStatusSignals(req(client))).rejects.toThrow("metering.edge-status: too many microgrids to examine");
+    expect(composeMetering).not.toHaveBeenCalled();
+    const { client: atBound } = tableClient({ microgrids: { data: rows.slice(0, EDGE_STATUS_MICROGRID_BOUND) } });
+    getEdgesStatus.mockResolvedValue([{ edgeId: "edge0", online: true }]);
+    await expect(loadEdgeStatusSignals(req(atBound))).resolves.toEqual([]);
+  });
+
   it("throws on a failed read of the microgrids, without the database's message", async () => {
     const { client } = tableClient({ microgrids: { data: null, error: { message: SECRET } } });
     const failed = loadEdgeStatusSignals(req(client));
@@ -205,6 +236,17 @@ describe("buildEdgeStatusSignals", () => {
     expect(late).not.toHaveProperty("facts");
     const [failed] = buildEdgeStatusSignals(fmt, [{ ...north, timezone: "Kampala" }], [{ microgridId: NORTH, state: "failed", readAt: "2026-11-25T08:59:00.000Z" }], NOW);
     expect(failed.facts).toEqual([fmt.datetime("2026-11-25T08:59:00.000Z", "UTC")]);
+  });
+
+  it(`keeps offline gateways ahead of unread sites when it stops at ${MAX_SIGNALS_PER_SOURCE}`, () => {
+    const sites = Array.from({ length: MAX_SIGNALS_PER_SOURCE + 2 }, (_, i) => ({ id: `m${i}`, name: `Site ${String(i).padStart(3, "0")}`, timezone: null }));
+    const outcomes = sites.map((m, i) =>
+      i >= MAX_SIGNALS_PER_SOURCE ? { microgridId: m.id, state: "read" as const, total: 1, offline: 1, readAt: NOW.toISOString() } : { microgridId: m.id, state: "late" as const },
+    );
+    const out = buildEdgeStatusSignals(fmt, sites, outcomes, NOW);
+    expect(out).toHaveLength(MAX_SIGNALS_PER_SOURCE);
+    expect(out.slice(0, 2).map((s) => s.title)).toEqual(sites.slice(MAX_SIGNALS_PER_SOURCE).map((m) => `${m.name}: 1 gateway offline`));
+    expect(out.slice(2).map((s) => s.title)).toEqual(sites.slice(0, MAX_SIGNALS_PER_SOURCE - 2).map((m) => `${m.name}: gateway status could not be read`));
   });
 
   it(`lists microgrids by name and stops at ${MAX_SIGNALS_PER_SOURCE}`, () => {

@@ -11,8 +11,10 @@ import "server-only";
  *    and at least one edge, through the person's own client (row-level
  *    security), with the organization filter explicit, because a super
  *    admin's row-level security shows every organization. The columns read
- *    are in MICROGRID_PUBLIC_COLUMNS (@/lib/types/microgrid-columns). A
- *    failed read throws, so the host lists the watcher as unchecked.
+ *    are in MICROGRID_PUBLIC_COLUMNS (@/lib/types/microgrid-columns). Every
+ *    such microgrid is examined, up to EDGE_STATUS_MICROGRID_BOUND; a failed
+ *    read, or one that reaches the bound, throws, so the host lists the
+ *    watcher as unchecked rather than leaving microgrids out unseen.
  * 2. With none, nothing else runs: no composition and no backend read, so
  *    an organization without OpenEMS (a local database, the browser smoke)
  *    costs one query and stays deterministic.
@@ -22,18 +24,21 @@ import "server-only";
  *    microgrid's stored credential on a cache miss. A composition refused
  *    throws (unchecked).
  * 4. Each microgrid's answer is cached (five minutes, a failure one minute),
- *    a read under way is shared, at most a few run at once, and none starts
- *    unless it can time out before this watcher's budget ends. A microgrid
- *    whose read failed, timed out or could not start in time is a signal
- *    that its status could not be read, not a reason to call the whole
- *    watcher unchecked.
+ *    a read under way is shared, at most a few run at once in the process,
+ *    microgrids never read or read longest ago go first, and a read still
+ *    under way at this watcher's deadline finishes into the cache for the
+ *    next load. A microgrid whose read failed, timed out or gave no answer in
+ *    time is a signal that its status could not be read, not a reason to
+ *    call the whole watcher unchecked.
+ * 5. At most MAX_SIGNALS_PER_SOURCE signals go back, offline gateways first
+ *    (./edge-status-signals-model.ts).
  *
  * The host runs this only while metering is on for the organization
  * (collectOrganizationSignals skips a watcher whose plugin gate answers 409,
  * and contribution-schema.ts refuses `whilePluginOff` on any watcher but
  * Payments'), and composeMetering checks again before any backend read.
  */
-import { MAX_SIGNALS_PER_SOURCE, type SignalOut, type SurfaceRequest } from "@/lib/gui/surface";
+import type { SignalOut, SurfaceRequest } from "@/lib/gui/surface";
 import { composeMetering } from "../compose";
 import type { EdgeStatusSite } from "../edge-status";
 import { createEdgeStatusReader } from "../infrastructure/openems-edge-status";
@@ -48,8 +53,18 @@ import { buildEdgeStatusSignals, type EdgeStatusMicrogrid } from "./edge-status-
  * (it takes signals) for longer than a cached answer is worth.
  */
 export const EDGE_STATUS_BUDGET_MS = 3_000;
-/** Kept back from the budget for the host's parse of the answer: no read starts that could end in it. */
+/** Kept back from the budget for the host's parse of the answer: the watcher stops waiting this long before it ends. */
 const EDGE_STATUS_MARGIN_MS = 250;
+/**
+ * The most microgrids with OpenEMS one organization may have for the
+ * watcher to examine them all. It reads one row more, and throws when that
+ * row comes back, so an organization past the bound shows the watcher as
+ * unchecked rather than some microgrids as silently fine. Below PostgREST's
+ * `max_rows` (1000, supabase/config.toml), which would otherwise cut the
+ * read short without saying so; if that setting drops below this bound
+ * plus one, lower the bound with it.
+ */
+export const EDGE_STATUS_MICROGRID_BOUND = 500;
 
 type MicrogridRow = {
   id: string;
@@ -68,8 +83,9 @@ export async function loadEdgeStatusSignals(req: SurfaceRequest, o: { now?: () =
     .not("ems_type", "is", null)
     .order("name", { ascending: true })
     .order("id", { ascending: true })
-    .limit(MAX_SIGNALS_PER_SOURCE);
+    .limit(EDGE_STATUS_MICROGRID_BOUND + 1);
   if (error) throw new Error("metering.edge-status: the microgrids could not be read");
+  if ((data ?? []).length > EDGE_STATUS_MICROGRID_BOUND) throw new Error("metering.edge-status: too many microgrids to examine");
   const microgrids: EdgeStatusMicrogrid[] = [];
   const sites: EdgeStatusSite[] = [];
   for (const m of (data ?? []) as unknown as MicrogridRow[]) {
