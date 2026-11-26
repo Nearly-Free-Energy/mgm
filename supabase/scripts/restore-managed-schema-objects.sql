@@ -89,7 +89,12 @@ CREATE POLICY "invoice_logos_delete" ON storage.objects
 -- From supabase/migrations/20261126160000_mgm_agent_role.sql. roles.sql
 -- creates mgm_agent, and schema.sql its grants and policy, but without this
 -- PostgREST cannot switch an agent client's token to it. A grant that is
--- already there is left as it is.
-GRANT mgm_agent TO authenticator;
+-- already there is left as it is. An export from a database that never ran
+-- 20261126160000 has no such role, since migrations are pushed apart from
+-- releases, so the grant is skipped there rather than stopping the restore;
+-- schema.sql would already have failed had it granted the missing role
+-- anything. (One line: a BEGIN that starts a line reads as transaction
+-- control to scripts/tests/test_restore_managed_schema_objects.py.)
+DO $$ BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'mgm_agent') THEN GRANT mgm_agent TO authenticator; END IF; END $$;
 
 RESET search_path;

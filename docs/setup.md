@@ -318,7 +318,10 @@ Auth calls the function for every sign-in and every refresh, the email link
 and the emergency link included. If the function is missing or fails,
 nobody can sign in. While it is off, Supabase Auth still issues tokens to
 clients of the OAuth server, with no kind, no approval record and no check of
-MGM's table of clients (ADR-008 decision 2). So, in this order:
+MGM's table of clients (ADR-008 decision 2), and an agent client's token
+runs as `authenticated`, with the person's full authority at the database
+API, not as `mgm_agent` (ADR-008 decision 7). MGM's routes refuse a client
+token with no kind; the database API does not. So, in this order:
 
 1. If the project's OAuth server is on, turn it off first
    ([Clients that are not a browser](#clients-that-are-not-a-browser)), and
@@ -431,14 +434,50 @@ in the dashboard as a public client with the same return address. For the assist
 assistant bridge"`.
 
 **3. List each client in MGM's table.** Locally with `supabase db query`,
-on a hosted project in the SQL editor:
+on a hosted project in the SQL editor.
+
+On a hosted project, before listing the assistant bridge, check that
+`20261126160000` and `20261126160100` were pushed (both appear in
+`supabase_migrations.schema_migrations`) and that the role reaches what
+`src/lib/supabase/__tests__/agent_role.test.ts` pins and nothing more. A
+long-lived database can differ from the migrations, and a hosted project may
+refuse the grant to `authenticator`; a refused grant stops the push before
+`20261126160100`, so no agent token runs as anything. In the SQL editor:
+
+```sql
+-- Exactly is_super_admin() and mgm_plugin_enabled_for_org(uuid,text):
+SELECT p.oid::regprocedure FROM pg_proc p
+ WHERE p.prosecdef AND has_schema_privilege('mgm_agent', p.pronamespace, 'USAGE')
+   AND has_function_privilege('mgm_agent', p.oid, 'EXECUTE');
+
+-- Exactly one row, user_roles SELECT:
+SELECT c.relname, p FROM pg_class c,
+       unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p
+ WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r','p','v','m','f')
+   AND has_table_privilege('mgm_agent', c.oid, p)
+UNION ALL
+SELECT c.relname, 'column ' || p FROM pg_class c, unnest(ARRAY['SELECT','INSERT','UPDATE','REFERENCES']) p
+ WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r','p','v','m','f')
+   AND NOT has_table_privilege('mgm_agent', c.oid, p)
+   AND has_any_column_privilege('mgm_agent', c.oid, p);
+
+-- authenticator with SET only, and at most one row with ADMIN only
+-- (the role that created it), and no row with mgm_agent as the member:
+SELECT pg_get_userbyid(roleid) AS role, pg_get_userbyid(member) AS member,
+       admin_option, inherit_option, set_option
+  FROM pg_auth_members
+ WHERE 'mgm_agent'::regrole IN (roleid, member);
+```
+
+Any other answer: leave the assistant bridge out of the table, and record
+what you found in your private operations records.
 
 ```sql
 -- The CLI:
 INSERT INTO public.mgm_clients (client_id, kind, label)
 VALUES ('<client_id>', 'operator', 'MGM CLI');
 
--- The assistant bridge, once 20261126160100 is pushed:
+-- The assistant bridge, once 20261126160100 is pushed and checked:
 INSERT INTO public.mgm_clients (client_id, kind, label)
 VALUES ('<client_id>', 'agent', 'MGM assistant bridge');
 ```
@@ -477,7 +516,12 @@ revokes the app from Connected apps ends its sessions, and MGM's routes
 refuse its token on the next request, since middleware asks Supabase Auth
 about every bearer token. Deleting the client
 in Supabase is the same. To replace a client, list the new one before
-removing the old. An installation that wants no assistant at all leaves the
+removing the old. Never change a listed client's `kind` in place: the hook
+reads it at every refresh, so each live session of that client changes
+role at its next refresh with no new approval, and an assistant's sessions
+listed again as `operator` would hold the person's full authority at the
+database API. Register a new client, list it with the new kind, then
+delete the old row. An installation that wants no assistant at all leaves the
 agent client out of the table.
 
 **Turning client tokens off** (ADR-008 decision 9). Set

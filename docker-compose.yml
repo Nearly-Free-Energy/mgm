@@ -37,10 +37,11 @@ services:
       GOTRUE_MAILER_OTP_LENGTH: "10"
       GOTRUE_MAILER_OTP_EXP: "900"
       # Refuses a token for a password or recovery sign-in (RFC #186 § 6);
-      # migration 20261117210000 creates the function and 20261126090100
-      # replaces it. Docker mode leaves Supabase Auth's OAuth server off
-      # (no GOTRUE_OAUTH_SERVER_* settings), so it has no client sign-in
-      # (docs/setup.md, "Clients that are not a browser").
+      # migration 20261117210000 creates the function, and 20261126090100
+      # and then 20261126160100 replace it. Docker mode leaves Supabase
+      # Auth's OAuth server off (no GOTRUE_OAUTH_SERVER_* settings), so it
+      # has no client sign-in (docs/setup.md, "Clients that are not a
+      # browser").
       GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: "true"
       GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI: "pg-functions://postgres/public/fn_auth_access_token_hook"
     healthcheck:
@@ -105,13 +106,17 @@ services:
         # REPLACE, safe to re-run). The tables go in one transaction (-1),
         # so a run that stops part way leaves no mgm_clients and the next
         # start applies them again. A later migration that replaces the
-        # hook again takes the place of the last psql line.
+        # hook again takes the place of the last psql line. The newest is
+        # 20261126160100, which writes the role mgm_agent into an agent
+        # client token; 20261126160000, which creates that role, is left
+        # out: its CREATE POLICY cannot run twice, and with the OAuth
+        # server off no agent client signs in here.
         # (No apostrophes in this block: it is one single-quoted sh -c.)
         echo "Migrations already applied, skipping; applying the access-token hook."
         if ! psql -c "SELECT 1 FROM mgm_clients LIMIT 0" >/dev/null 2>&1; then
           psql -1 -v ON_ERROR_STOP=1 -f /migrations/20261126090000_mgm_clients_and_approvals.sql || exit 1
         fi
-        psql -v ON_ERROR_STOP=1 -f /migrations/20261126090100_auth_access_token_hook_clients.sql || exit 1
+        psql -v ON_ERROR_STOP=1 -f /migrations/20261126160100_auth_access_token_hook_agent_role.sql || exit 1
         exit 0
       fi
 

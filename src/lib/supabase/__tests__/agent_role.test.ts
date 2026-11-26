@@ -4,8 +4,9 @@
  * runs as).
  *
  * 1. The guard: what mgm_agent may do, read from the catalogs (pg_class,
- *    pg_attribute, pg_proc, pg_namespace and pg_auth_members through
- *    aclexplode and the has_*_privilege functions), not from
+ *    pg_attribute, pg_proc, pg_namespace, pg_auth_members, pg_policy,
+ *    pg_depend and pg_publication_tables, through aclexplode and the
+ *    has_*_privilege functions), not from
  *    information_schema.column_privileges, which also lists every column of
  *    a table granted whole. The lists below are the role's whole reach. A
  *    pull request that grants the role anything moves them in the same
@@ -69,8 +70,61 @@ const POLICIES = [
   },
 ];
 
+/**
+ * The schemas the role may use, through any grant. pg_catalog and
+ * information_schema are every role's; net is pg_net's, which the extension
+ * opens to PUBLIC (PUBLIC_WRITES). auth is not on the list: a policy may
+ * call auth.uid(), since a stored expression looks up no names, but an
+ * invoker function whose body names auth.* fails for the role unless a
+ * migration grants it USAGE on auth.
+ */
+const USABLE_SCHEMAS = ["information_schema", "net", "pg_catalog", "public"];
+
+/**
+ * What the role may write in those schemas, all of it through PUBLIC: what
+ * pg_net grants PUBLIC on its queue and responses, and pg_settings, which
+ * Postgres opens to every role (it is SET). anon and authenticated hold the
+ * same. The database API serves public and graphql_public only
+ * (supabase/config.toml, [api] schemas), so no token reaches net; if it
+ * ever serves net, or a function in public the role may run reads or
+ * writes it, revisit.
+ */
+const PUBLIC_WRITES: Record<string, string[]> = {
+  "net._http_response": ["DELETE", "INSERT", "REFERENCES", "TRIGGER", "TRUNCATE", "UPDATE"],
+  "net.http_request_queue": ["DELETE", "INSERT", "REFERENCES", "TRIGGER", "TRUNCATE", "UPDATE"],
+  "net.http_request_queue_id_seq": ["sequence SELECT", "sequence UPDATE", "sequence USAGE"],
+  "pg_catalog.pg_settings": ["UPDATE"],
+};
+
 /** Schemas Supabase serves that the role must not reach (#268). */
 const CLOSED_SCHEMAS = ["storage", "graphql_public", "realtime"];
+
+/**
+ * user_roles' columns. The role reads the table whole, which is safe only
+ * while no column names a person other than the row's own user_id
+ * (20261126160000). A new column fails this until someone decides whether
+ * an assistant may read it; if it names another person, or holds anything
+ * else outside ADR-007 decision 6, grant the table by column instead.
+ */
+const USER_ROLES_COLUMNS = [
+  "id",
+  "user_id",
+  "role",
+  "scope_type",
+  "scope_id",
+  "created_at",
+  "scope_org_id",
+  "scope_microgrid_id",
+  "scope_tenant_id",
+];
+
+/**
+ * Tables whose first grant to the role brings RESTRICTIVE policies TO
+ * mgm_agent with it (ADR-008 decision 8): without them the staff policies,
+ * which name no role, would show a staff member's assistant every tenant of
+ * the organization.
+ */
+const RESTRICTED_ON_FIRST_GRANT = ["public.tenants", "public.tenant_devices"];
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -152,11 +206,12 @@ describe.skipIf(skip)("mgm_agent, the assistant's database role (#274)", { timeo
   describe("the role's grants, from the catalogs", () => {
     it("is NOLOGIN and holds no attribute beyond a plain role", () => {
       const [role] = ownerRows<Record<string, boolean>>(
-        `SELECT rolcanlogin, rolsuper, rolcreaterole, rolcreatedb, rolreplication, rolbypassrls
+        `SELECT rolcanlogin, rolinherit, rolsuper, rolcreaterole, rolcreatedb, rolreplication, rolbypassrls
            FROM pg_roles WHERE rolname = '${ROLE}'`
       );
       expect(role).toEqual({
         rolcanlogin: false,
+        rolinherit: false,
         rolsuper: false,
         rolcreaterole: false,
         rolcreatedb: false,
@@ -220,22 +275,39 @@ describe.skipIf(skip)("mgm_agent, the assistant's database role (#274)", { timeo
       expect(columns).toEqual(COLUMN_GRANTS);
     });
 
-    it("may write nothing in public, and read only the listed tables, PUBLIC's grants included", () => {
-      const writable = ownerRows<{ relation: string; privilege: string }>(
-        `SELECT r.relname AS relation, p AS privilege
-           FROM (${PUBLIC_RELATIONS}) r,
-                unnest(ARRAY['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']) p
-          WHERE r.relkind <> 'S' AND has_table_privilege('${ROLE}', r.oid, p)
-         UNION ALL
-         SELECT r.relname, 'column ' || p
-           FROM (${PUBLIC_RELATIONS}) r, unnest(ARRAY['INSERT', 'UPDATE', 'REFERENCES']) p
-          WHERE r.relkind <> 'S' AND has_any_column_privilege('${ROLE}', r.oid, p)
-         UNION ALL
-         SELECT r.relname, 'sequence ' || p
-           FROM (${PUBLIC_RELATIONS}) r, unnest(ARRAY['USAGE', 'SELECT', 'UPDATE']) p
-          WHERE r.relkind = 'S' AND has_sequence_privilege('${ROLE}', r.oid, p)`
+    it("may use exactly the listed schemas", () => {
+      const usable = ownerRows<{ schema: string }>(
+        `SELECT nspname AS schema FROM pg_namespace
+          WHERE has_schema_privilege('${ROLE}', oid, 'USAGE')`
       );
-      expect(writable).toEqual([]);
+      expect(usable.map((r) => r.schema).sort()).toEqual([...USABLE_SCHEMAS].sort());
+    });
+
+    it("may write nothing in the schemas it may use but what PUBLIC holds, and read only the listed tables in public", () => {
+      const writable = ownerRows<{ relation: string; privilege: string }>(
+        `WITH rel AS (
+           SELECT c.oid, ${RELATION("c")} AS relation, c.relkind
+             FROM pg_class c
+            WHERE has_schema_privilege('${ROLE}', c.relnamespace, 'USAGE')
+              AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
+         )
+         SELECT relation, p AS privilege
+           FROM rel, unnest(ARRAY['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']) p
+          WHERE relkind <> 'S' AND has_table_privilege('${ROLE}', oid, p)
+         UNION ALL
+         SELECT relation, 'column ' || p
+           FROM rel, unnest(ARRAY['INSERT', 'UPDATE', 'REFERENCES']) p
+          WHERE relkind <> 'S' AND NOT has_table_privilege('${ROLE}', oid, p)
+            AND has_any_column_privilege('${ROLE}', oid, p)
+         UNION ALL
+         SELECT relation, 'sequence ' || p
+           FROM rel, unnest(ARRAY['USAGE', 'SELECT', 'UPDATE']) p
+          WHERE relkind = 'S' AND has_sequence_privilege('${ROLE}', oid, p)`
+      );
+      const byRelation: Record<string, string[]> = {};
+      for (const { relation, privilege } of writable) (byRelation[relation] ??= []).push(privilege);
+      for (const privileges of Object.values(byRelation)) privileges.sort();
+      expect(byRelation).toEqual(PUBLIC_WRITES);
 
       const readable = ownerRows<{ relation: string }>(
         `SELECT 'public.' || r.relname AS relation FROM (${PUBLIC_RELATIONS}) r
@@ -251,11 +323,11 @@ describe.skipIf(skip)("mgm_agent, the assistant's database role (#274)", { timeo
     // function is closed to the role only by its own REVOKE … FROM PUBLIC.
     // Invoker functions run as the role, so they are not listed (ADR-008
     // decision 7).
-    it("may run exactly the listed definer functions in public", () => {
+    it("may run exactly the listed definer functions, in every schema it may use", () => {
       const runnable = ownerRows<{ fn: string }>(
         `SELECT ${FUNCTION("p")} AS fn
            FROM pg_proc p
-          WHERE p.pronamespace = 'public'::regnamespace
+          WHERE has_schema_privilege('${ROLE}', p.pronamespace, 'USAGE')
             AND p.prosecdef
             AND has_function_privilege('${ROLE}', p.oid, 'EXECUTE')
           ORDER BY 1`
@@ -298,10 +370,49 @@ describe.skipIf(skip)("mgm_agent, the assistant's database role (#274)", { timeo
       expect(policies).toEqual(POLICIES);
     });
 
+    it("reads user_roles, granted whole, only while its columns are the listed ones", () => {
+      const columns = ownerRows<{ column: string }>(
+        `SELECT attname AS column FROM pg_attribute
+          WHERE attrelid = 'public.user_roles'::regclass AND attnum > 0 AND NOT attisdropped
+          ORDER BY attnum`
+      );
+      expect(columns.map((c) => c.column)).toEqual(USER_ROLES_COLUMNS);
+    });
+
+    it("reads tenants or tenant_devices only together with a RESTRICTIVE read policy TO mgm_agent on that table", () => {
+      const unrestricted = ownerRows<{ relation: string }>(
+        `SELECT t AS relation
+           FROM unnest(ARRAY[${RESTRICTED_ON_FIRST_GRANT.map((t) => `'${t}'`).join(", ")}]) t
+          WHERE has_any_column_privilege('${ROLE}', t::regclass, 'SELECT')
+            AND NOT EXISTS (
+              SELECT 1 FROM pg_policy pol
+               WHERE pol.polrelid = t::regclass
+                 AND NOT pol.polpermissive
+                 AND '${ROLE}'::regrole = ANY (pol.polroles)
+                 AND pol.polcmd IN ('r', '*'))`
+      );
+      expect(unrestricted).toEqual([]);
+    });
+
+    // A table in the publication sends its changes to subscribers as the
+    // role their token names, under that role's grants and policies. Adding
+    // one needs a decision about this role at the same time (CLAUDE.md).
+    it("finds no table in the supabase_realtime publication", () => {
+      const published = ownerRows<{ relation: string }>(
+        `SELECT schemaname || '.' || tablename AS relation
+           FROM pg_publication_tables WHERE pubname = 'supabase_realtime'`
+      );
+      expect(published).toEqual([]);
+    });
+
     // A read fails as a whole when a policy that applies to it calls a
     // function, or reads a table, the role may not (#268: a nested read
     // failed until the role could run the helper its policy called). So every
-    // table the role may read is readable without error.
+    // table the role may read is readable without error. Postgres records a
+    // policy's read of another table per column (refobjsubid is the
+    // column's number) and only a reference with no column on the table
+    // itself, so the check follows it: a grant by column must cover each
+    // column a policy reads.
     it("may run every function, and read every table, that a policy on a table it reads calls as it", () => {
       const missing = ownerRows<{ relation: string; policy: string; needs: string }>(
         `WITH readable AS (
@@ -322,11 +433,17 @@ describe.skipIf(skip)("mgm_agent, the assistant's database role (#274)", { timeo
            JOIN pg_proc p ON p.oid = d.refobjid
           WHERE NOT has_function_privilege('${ROLE}', p.oid, 'EXECUTE')
          UNION
-         SELECT a.polrelid::regclass::text, a.polname, d.refobjid::regclass::text
+         SELECT a.polrelid::regclass::text, a.polname,
+                d.refobjid::regclass::text
+                  || CASE WHEN d.refobjsubid = 0 THEN ''
+                          ELSE '.' || (SELECT attname FROM pg_attribute
+                                        WHERE attrelid = d.refobjid AND attnum = d.refobjsubid) END
            FROM applies a
            JOIN pg_depend d ON d.classid = 'pg_policy'::regclass AND d.objid = a.oid
                             AND d.refclassid = 'pg_class'::regclass AND d.refobjid <> a.polrelid
-          WHERE NOT has_any_column_privilege('${ROLE}', d.refobjid, 'SELECT')`
+          WHERE NOT CASE WHEN d.refobjsubid = 0
+                         THEN has_any_column_privilege('${ROLE}', d.refobjid, 'SELECT')
+                         ELSE has_column_privilege('${ROLE}', d.refobjid, d.refobjsubid::int2, 'SELECT') END`
       );
       expect(missing).toEqual([]);
     });

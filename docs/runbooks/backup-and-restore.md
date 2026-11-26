@@ -524,9 +524,10 @@ export holds no Vault secrets for the key to unlock.
    - `restore-managed-schema-objects.sql` re-creates the triggers and policies
      MGM's migrations put on `auth` and `storage` tables, which the export
      cannot carry, and grants `mgm_agent` to `authenticator`, which
-     `roles.sql` leaves out. Without it, new users get no profile, the
-     `invoice-logos` bucket has no access policies, and the database API
-     refuses every assistant token.
+     `roles.sql` leaves out (skipped when the export has no such role).
+     Without it, new users get no profile, the `invoice-logos` bucket has
+     no access policies, and the database API refuses every assistant
+     token.
    - The final `--command` disables merchant accounts. Include it on every
      target, a production replacement too: the target then never commits
      with merchant accounts able to start checkouts, and a production
@@ -949,7 +950,11 @@ starts only when every other item has passed.
   ```
 
   And `authenticator` may switch to the assistant's role: `SELECT
-  pg_has_role('authenticator', 'mgm_agent', 'SET');` answers `true`.
+  pg_has_role('authenticator', oid, 'SET') FROM pg_roles WHERE rolname =
+  'mgm_agent';` answers `true`. It returns no row only when the export
+  came from a database that never ran `20261126160000` (its
+  `history_data.sql` stops before it); the restore script then skips the
+  grant.
 
 - [ ] **Payments inactive.** `cron.job` does not list
   `mgm-payments-reconcile`, every merchant account is disabled, and the

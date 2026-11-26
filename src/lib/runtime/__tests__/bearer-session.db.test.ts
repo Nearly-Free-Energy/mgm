@@ -23,12 +23,11 @@
  *
  * Opt-out: SKIP_RLS_TESTS=1, for running without a local Supabase.
  */
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { SignJWT } from "jose";
 
 import {
   LOCAL_SUPABASE_URL,
@@ -66,6 +65,7 @@ let svc: SupabaseClient;
 let staff: Person;
 let tenant: Person;
 let clientId = "";
+let agentClientId = "";
 
 const anonClient = () =>
   createClient(LOCAL_SUPABASE_URL, testAnonKey()!, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -107,11 +107,11 @@ async function browserFor(userId: string, email: string): Promise<Person> {
 }
 
 /** A whole client sign-in for `person`, ending in an access token. */
-async function signIn(person: Person): Promise<string> {
+async function signIn(person: Person, client: string = clientId): Promise<string> {
   const verifier = randomBytes(32).toString("base64url");
   const query = new URLSearchParams({
     response_type: "code",
-    client_id: clientId,
+    client_id: client,
     redirect_uri: REDIRECT_URI,
     code_challenge: createHash("sha256").update(verifier).digest("base64url"),
     code_challenge_method: "S256",
@@ -133,13 +133,13 @@ async function signIn(person: Person): Promise<string> {
     redirect = consent.body.redirect_url as string;
   }
   // The record MGM's consent page writes when the person clicks (ADR-008 decision 2).
-  const { error } = await svc.from("mgm_client_approvals").insert({ user_id: person.userId, client_id: clientId });
+  const { error } = await svc.from("mgm_client_approvals").insert({ user_id: person.userId, client_id: client });
   expect(error).toBeNull();
   const token = await auth("POST", "/oauth/token", {
     form: {
       grant_type: "authorization_code",
       code: new URL(redirect).searchParams.get("code")!,
-      client_id: clientId,
+      client_id: client,
       redirect_uri: REDIRECT_URI,
       code_verifier: verifier,
     },
@@ -206,24 +206,32 @@ describe.skipIf(skip)("a client's bearer token at MGM's routes (#272)", { timeou
     staff = await browserFor(staffUser.userId, EMAIL.staff);
     tenant = await browserFor(tenantUser.userId, EMAIL.tenant);
 
-    // Registered and listed as docs/setup.md registers and lists the CLI.
-    const created = await admin("POST", "/admin/oauth/clients", {
-      client_name: "mgm-bearer-session-test",
-      redirect_uris: [REDIRECT_URI],
-      grant_types: ["authorization_code", "refresh_token"],
-      token_endpoint_auth_method: "none",
-    });
-    expect(created.status, JSON.stringify(created.body)).toBe(201);
-    clientId = created.body.client_id as string;
-    const { error } = await svc.from("mgm_clients").insert({ client_id: clientId, kind: "operator", label: "MGM CLI (bearer test)" });
-    expect(error).toBeNull();
+    // Registered and listed as docs/setup.md registers and lists the CLI and
+    // the assistant bridge.
+    const register = async (name: string, kind: "operator" | "agent", label: string) => {
+      const created = await admin("POST", "/admin/oauth/clients", {
+        client_name: name,
+        redirect_uris: [REDIRECT_URI],
+        grant_types: ["authorization_code", "refresh_token"],
+        token_endpoint_auth_method: "none",
+      });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      const id = created.body.client_id as string;
+      const { error } = await svc.from("mgm_clients").insert({ client_id: id, kind, label });
+      expect(error).toBeNull();
+      return id;
+    };
+    clientId = await register("mgm-bearer-session-test", "operator", "MGM CLI (bearer test)");
+    agentClientId = await register("mgm-bearer-session-agent-test", "agent", "MGM assistant bridge (bearer test)");
     staffToken = await signIn(staff);
   }, 90_000);
 
   afterAll(async () => {
     vi.unstubAllEnvs();
-    if (svc && clientId) await svc.from("mgm_clients").delete().eq("client_id", clientId);
-    if (clientId) await admin("DELETE", `/admin/oauth/clients/${clientId}`);
+    for (const id of [clientId, agentClientId].filter(Boolean)) {
+      if (svc) await svc.from("mgm_clients").delete().eq("client_id", id);
+      await admin("DELETE", `/admin/oauth/clients/${id}`);
+    }
     if (svc) await cleanupTestData({ orgIds: [F.org], userEmails: Object.values(EMAIL) });
   }, 60_000);
 
@@ -279,21 +287,11 @@ describe.skipIf(skip)("a client's bearer token at MGM's routes (#272)", { timeou
   });
 
   it("refuses an agent client on that route before it runs, and lets it on to the view route", async () => {
-    // This token carries the claims the hook gives an agent client's token
-    // (20261126160100), signed with the project's secret; Supabase Auth
-    // answers GET /user for it, as for a client's token.
-    const now = Math.floor(Date.now() / 1000);
-    const agentToken = await new SignJWT({
-      sub: staff.userId,
-      aud: "authenticated",
-      role: "mgm_agent",
-      client_id: randomUUID(),
-      mgm_client_kind: "agent",
-      iat: now,
-      exp: now + 600,
-    })
-      .setProtectedHeader({ alg: "HS256" })
-      .sign(new TextEncoder().encode(process.env.SUPABASE_JWT_SECRET!));
+    // A whole sign-in of the agent client: the hook gives its token the
+    // role mgm_agent (20261126160100).
+    const agentToken = await signIn(staff, agentClientId);
+    const claims = JSON.parse(Buffer.from(agentToken.split(".")[1], "base64url").toString()) as Record<string, unknown>;
+    expect(claims).toMatchObject({ sub: staff.userId, role: "mgm_agent", client_id: agentClientId, mgm_client_kind: "agent" });
     const { from, res } = await getPlugins(agentToken);
     expect(from).toBe("middleware");
     expect(res.status).toBe(403);

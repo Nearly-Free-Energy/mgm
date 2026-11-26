@@ -178,6 +178,14 @@ BEGIN
     ));
   END IF;
 
+  -- The kind is read at every event, refreshes included, so changing a
+  -- listed client's kind in place changes the role of every live session
+  -- of that client at its next refresh, with no new approval: agent to
+  -- operator would give each assistant session the person's full authority
+  -- at the database API. Only the service role and the database owner can
+  -- write mgm_clients; docs/setup.md ("Removing a client") says to register
+  -- a new client instead. If that table becomes writable by anyone else,
+  -- revisit.
   IF _kind = 'agent' THEN
     RETURN jsonb_set(
       jsonb_set(event, '{claims,mgm_client_kind}', to_jsonb(_kind)),

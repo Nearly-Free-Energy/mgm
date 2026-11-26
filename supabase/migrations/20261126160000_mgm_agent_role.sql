@@ -11,7 +11,10 @@
 --   * is NOLOGIN, and granted to authenticator only, so PostgREST can switch
 --     to it. It is never made a member of authenticated or of any other
 --     role, so it holds only what is granted to mgm_agent itself (or to
---     PUBLIC).
+--     PUBLIC). It is also NOINHERIT, so a membership granted to it by
+--     mistake later would give it no privilege and no policy written for
+--     that role unless it switched to it, which nothing does. PostgREST's
+--     switch uses authenticator's membership, not this attribute.
 --   * reads no table and no column unless a migration grants it. This one
 --     grants only what every agent call needs (ADR-008 decision 7): the
 --     caller's own role rows, which the GUI host and the composers read with
@@ -34,22 +37,25 @@
 -- policy.
 --
 -- Roles belong to the cluster, not to the database, so on a local database
--- reset the role may already exist. It is then checked rather than created:
--- the migration stops if the role can log in, has an attribute it must not
--- have, or is a member of any role.
+-- reset the role may already exist. It is then made NOINHERIT, which only
+-- takes away, and checked rather than created: the migration stops if the
+-- role can log in, has an attribute it must not have, or is a member of any
+-- role.
 
 DO $$
 DECLARE
   _problems TEXT[] := '{}';
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mgm_agent') THEN
-    CREATE ROLE mgm_agent NOLOGIN;
+    CREATE ROLE mgm_agent NOLOGIN NOINHERIT;
+  ELSE
+    ALTER ROLE mgm_agent NOINHERIT;
   END IF;
 
   IF EXISTS (
     SELECT 1 FROM pg_roles
      WHERE rolname = 'mgm_agent'
-       AND (rolcanlogin OR rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls)
+       AND (rolcanlogin OR rolinherit OR rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls)
   ) THEN
     _problems := array_append(_problems, 'mgm_agent can log in or has an attribute it must not have');
   END IF;
@@ -74,15 +80,21 @@ GRANT mgm_agent TO authenticator;
 -- ── The caller's own role rows ─────────────────────────────────────────────
 --
 -- The GUI host and the composers read the caller's role rows with the
--- caller's client. Two existing policies on user_roles name no role, so they
--- apply to mgm_agent: "Users can view their own roles" and "Super admins can
--- manage all user_roles" (00002), which calls is_super_admin() directly as
--- the caller. Under them alone a super admin's assistant would read every
--- role row, so this RESTRICTIVE policy limits the role to the caller's own.
--- user_id is then only ever the caller's, and no loader puts it into a
--- model, so the table is granted whole (ADR-008 decision 8). It is FOR ALL
--- so it bounds any privilege the role is ever given here, not only SELECT;
--- the role is given none but SELECT.
+-- caller's client. Three existing policies on user_roles name no role, so
+-- they apply to mgm_agent. The two that apply to a read are "Users can view
+-- their own roles" and "Super admins can manage all user_roles" (00002),
+-- which calls is_super_admin() directly as the caller. The third, "Org
+-- managers can delete user_roles in their orgs" (00013), is FOR DELETE; it
+-- would also need EXECUTE on user_can_access_org, and the role is never
+-- given DELETE. Under the first two alone a super admin's assistant would
+-- read every role row, so this RESTRICTIVE policy limits the role to the
+-- caller's own. user_id is then only ever the caller's, no other column
+-- names a person, and no loader puts a row into a model, so the table is
+-- granted whole (ADR-008 decision 8); agent_role.test.ts pins its columns.
+-- If user_roles gains a column that names another person, or holds anything
+-- else outside ADR-007 decision 6, grant it by column instead. The policy is
+-- FOR ALL so it bounds any privilege the role is ever given here, not only
+-- SELECT; the role is given none but SELECT.
 GRANT SELECT ON public.user_roles TO mgm_agent;
 
 CREATE POLICY "Agent tokens read only the caller's own role rows"
