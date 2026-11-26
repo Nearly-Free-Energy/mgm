@@ -551,14 +551,18 @@ describe("readForAssistant, applying a view's entry", () => {
   });
 
   it("drops every link of a view whose entry lists none, at the model and in a collection's rows", async () => {
+    // The ext's own data holds a `links` list of its own, which is data, not the model's links.
+    const Ext = z.strictObject({ links: z.array(z.strictObject({ id: z.string() })) });
     const listing = view("metering", {
       id: "metering.list",
       kind: "collection",
       path: "/microgrids/[id]/operations",
       agent: "read",
       declares: { keys: ["a"] },
+      ext: { schema: "metering.list@1", zod: Ext },
     } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
     const link = (id: string) => ({ id, label: id, href: `/microgrids/${MG}/setup/edges` });
+    const extData = { links: [{ id: "metering.in-data" }, { id: "metering.kept" }] };
     loadOf(listing).mockResolvedValue({
       ok: true,
       model: {
@@ -570,6 +574,7 @@ describe("readForAssistant, applying a view's entry", () => {
           rows: [{ id: "r1", cells: { a: { t: "text", text: "x" } }, actions: [], links: [link("metering.row"), link("metering.kept")] }],
           empty: { title: "None" },
         },
+        ext: { schema: "metering.list@1", data: extData },
       },
     });
     snapshot = snapshotOf([listing]);
@@ -578,9 +583,31 @@ describe("readForAssistant, applying a view's entry", () => {
     if (!out.ok || out.value.model.kind !== "collection") throw new Error("refused");
     expect(out.value.model.links.map((l) => l.id)).toEqual(["metering.kept"]);
     expect(out.value.model.body.rows[0].links?.map((l) => l.id)).toEqual(["metering.kept"]);
+    expect(out.value.model.ext?.data).toEqual(extData);
     expect(out.value.withheld).toEqual([]);
     expect(logged()).toContain("left out the link metering.top");
     expect(logged()).toContain("left out the link metering.row");
+    expect(logged()).not.toContain("metering.in-data");
+  });
+
+  it("refuses the read when an unlisted link carries a refused reference, rather than dropping it", async () => {
+    const sharing = view("metering", { id: "metering.sharing", path: "/microgrids/[id]/operations", agent: "read" } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
+    loadOf(sharing).mockResolvedValue({
+      ok: true,
+      model: {
+        title: "Sharing",
+        actions: [],
+        links: [{ id: "metering.unlisted", label: "Share", href: `/microgrids/${MG}/setup/edges`, share: { title: "Day", text: CANARY } }],
+        body: { tiles: [] },
+      },
+    });
+    snapshot = snapshotOf([sharing]);
+    list(viewEntry("metering.sharing"));
+    const out = await read(DAY);
+    expect(out).toEqual({ ok: false, status: 500, code: "assistant_reference_refused", message: expect.any(String) });
+    expect(JSON.stringify(out)).not.toContain(CANARY);
+    expect(logged()).toContain("assistant read metering.sharing: a share reference at links.0");
+    expect(logged()).not.toContain("left out the link");
   });
 
   it("applies an embedded view's own entry to its model, removing an optional path", async () => {
@@ -625,6 +652,27 @@ describe("readForAssistant, applying a view's entry", () => {
     expect(JSON.stringify(out)).not.toContain(CANARY);
   });
 
+  it("refuses the answer, as the host's, when the ext does not parse once withheld", async () => {
+    // Registration accepts this schema (a refine adds no key), and `a` is nullable, so it can be withheld; the refine then fails.
+    const Ext = z.strictObject({ a: z.string().nullable() }).refine((d) => d.a !== null);
+    const refined = view("metering", {
+      id: "metering.refined",
+      path: "/microgrids/[id]/operations",
+      agent: "read",
+      ext: { schema: "metering.refined@1", zod: Ext },
+    } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
+    loadOf(refined).mockResolvedValue({
+      ok: true,
+      model: { title: "Refined", actions: [], body: { tiles: [] }, ext: { schema: "metering.refined@1", data: { a: CANARY } } },
+    });
+    snapshot = snapshotOf([refined]);
+    list(viewEntry("metering.refined", { withhold: ["a"] }));
+    const out = await read(DAY);
+    expect(out).toEqual({ ok: false, status: 500, code: "gui_output_invalid", message: expect.any(String) });
+    expect(JSON.stringify(out)).not.toContain(CANARY);
+    expect(logged()).toContain("assistant read metering.refined: its ext does not parse once withheld");
+  });
+
   it("refuses the answer, as the host's, when a withheld path cannot be withheld", async () => {
     // The contribution check refuses such an entry; the read interface does not trust that it ran.
     list(siteDayEntry({ withhold: ["date"] }));
@@ -650,11 +698,14 @@ describe("readForAssistant, for metering.site-day as listed", () => {
     expect(REAL_SITE_DAY.agent).toBe("read");
   });
 
+  // 2026-11-08 is yesterday in Kampala (NOW), so the day links are previous, next and today.
+  const DAY_LINKS = ["metering.day-previous", "metering.day-next", "metering.day-today"];
   it.each([
-    ["a day", () => undefined, "day"],
-    ["no site devices", () => getSiteDay.mockResolvedValue({ ok: false, status: 409, code: "metering_no_site_devices", message: UPSTREAM }), "no-site-devices"],
-    ["a problem", () => getSiteDay.mockResolvedValue({ ok: false, status: 503, code: "METERING_UNAVAILABLE", message: UPSTREAM }), "problem"],
-  ])("gives no text of the time zone notice and no link to it, in %s", async (_name, arrange, state) => {
+    ["a day", () => undefined, "day", [...DAY_LINKS, "metering.microgrid-setup"]],
+    ["no site devices", () => getSiteDay.mockResolvedValue({ ok: false, status: 409, code: "metering_no_site_devices", message: UPSTREAM }), "no-site-devices", ["metering.edges", ...DAY_LINKS]],
+    ["a problem", () => getSiteDay.mockResolvedValue({ ok: false, status: 503, code: "METERING_UNAVAILABLE", message: UPSTREAM }), "problem", [...DAY_LINKS, "metering.microgrid-setup"]],
+    ["a problem with a fix", () => getSiteDay.mockResolvedValue({ ok: false, status: 503, code: "METERING_CONFIGURATION", message: UPSTREAM }), "problem", ["metering.openems-backend", ...DAY_LINKS]],
+  ])("gives no text of the time zone notice and no link to it, and keeps every other link, in %s", async (_name, arrange, state, links) => {
     arrange();
     const page = await dispatchView(ctx(), `${DAY}?date=2026-11-08`);
     // The page itself carries the notice, so its absence below is the interface's doing.
@@ -662,7 +713,11 @@ describe("readForAssistant, for metering.site-day as listed", () => {
     expect(JSON.stringify(page)).toContain(NUDGE_TITLE);
 
     const out = await read(`${DAY}?date=2026-11-08`);
-    if (!out.ok) throw new Error("refused");
+    if (!out.ok || !page.ok) throw new Error("refused");
+    const pageLinks = page.value.links.map((l) => l.id);
+    expect(pageLinks).toContain("metering.set-timezone");
+    expect(out.value.model.links.map((l) => l.id)).toEqual(pageLinks.filter((id) => id !== "metering.set-timezone"));
+    expect(out.value.model.links.map((l) => l.id)).toEqual(links);
     expect(out.value.model.ext?.data).toMatchObject({ state, timezoneNotice: null });
     expect(out.value.withheld).toContainEqual({ what: "field", path: "ext.data.timezoneNotice", note: WITHHELD_NOTE });
     const json = JSON.stringify(out);

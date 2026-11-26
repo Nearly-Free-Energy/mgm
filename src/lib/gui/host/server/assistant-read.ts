@@ -370,14 +370,19 @@ async function readView(
 
   const { attached: _attached, signals: _signals, live: _live, ...rest } = loaded;
   void [_attached, _signals, _live];
-  const applied = applyEntry(stripActions(rest) as Record<string, unknown>, snapshot, "", withheld);
-  if (!applied.ok) return applied;
-  const model = applied.model as AssistantViewModel;
-  const refusal = findRefusedReference(model, snapshot.views);
+  const stripped = stripActions(rest) as Record<string, unknown>;
+  // Before the entry drops any link, so an unlisted link with a refused
+  // reference refuses the read as a review failure rather than being
+  // dropped with a log line. applyEntry only drops and withholds, so it
+  // cannot add a reference this check would refuse.
+  const refusal = findRefusedReference(stripped, snapshot.views);
   if (refusal) {
     console.error(`[gui] assistant read ${view.def.id}: a ${refusal.kind} reference at ${refusal.path}`);
     return REFERENCE_REFUSED;
   }
+  const applied = applyEntry(stripped, snapshot, "", withheld);
+  if (!applied.ok) return applied;
+  const model = applied.model as AssistantViewModel;
   return {
     ok: true,
     value: {
