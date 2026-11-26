@@ -103,6 +103,18 @@ describe("POST /api/payments/attempts/[id]/reconcile", () => {
     expect(await res.json()).toEqual({ error: "externalAmount must be a number.", field: "externalAmount", code: "invalid_body" });
     expect(reconcileMock).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["a completed adjustment with no amount names the amount", { action: "record_external", externalReference: "MTN-1", notes: "n" }, { error: "externalAmount must be a number.", field: "externalAmount" }],
+    ["a completed adjustment with blank notes names the notes", { action: "record_external", externalAmount: 1, externalReference: "MTN-1", notes: " " }, { error: "notes are required.", field: "notes" }],
+    ["an acceptance with an amount: it has no amount field", { action: "accept_exact", externalAmount: 0 }, { error: "Unknown field: externalAmount" }],
+    ["an unknown resolution", { action: "refund" }, { error: "action must be 'accept_exact' or 'record_external'.", field: "action" }],
+  ])("refuses %s", async (_label, body, answer) => {
+    const res = await call(reconcile, "reconcile", JSON.stringify(body));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ...answer, code: "invalid_body" });
+    expect(reconcileMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/payments/attempts/[id]/refresh", () => {

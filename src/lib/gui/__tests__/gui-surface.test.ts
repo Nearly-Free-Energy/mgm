@@ -6,7 +6,8 @@
  *
  * Actions: 1. the route file exists and exports the method; 2. the handler
  * parses its body with parseJsonBody(request, S), S imported from the plugin's
- * schemas module, and S is the action's `input` itself; 3. the route is gated
+ * schemas module, and S is the action's `input` itself, or a discriminated
+ * union with it as one option; 3. the route is gated
  * or composes, or carries a PaymentExemption, and an action declaring
  * `whilePluginOff` is one WHILE_OFF_ACTIONS pins to its own
  * `METHOD /api/route`, on a route its Payments or Pesapal plugin owns, which
@@ -138,7 +139,6 @@ const LOADER_READS: Readonly<Record<string, readonly string[]>> = {
 };
 const CONTRACT = /CapabilityContract$/;
 
-type Problems = string[];
 /**
  * The actions decided to stay enabled while their plugin is off (#226, and
  * #287's narrowing of it), each pinned to the `METHOD /api/route` it sends
@@ -157,6 +157,7 @@ const WHILE_OFF_ACTIONS: Readonly<Record<string, string>> = {
   "payments.accept-receipts": "POST /api/payments/attempts/[id]/reconcile",
 };
 
+type Problems = string[];
 type RouteFile = { route: string; text: string };
 type Binding = { module: string; name: string };
 interface Facts {
@@ -173,9 +174,9 @@ interface Facts {
   writes?: (literal: string) => boolean;
   /** The actions allowed to be "unsafe" while their key is built; REPEAT_KEY_PENDING unless given. */
   repeatKeyPending?: Readonly<Record<string, RepeatKeyPending>>;
-}
   /** The actions allowed to declare whilePluginOff, with their routes; WHILE_OFF_ACTIONS unless given. */
   whileOffActions?: Readonly<Record<string, string>>;
+}
 
 /** The capability whose gating decides what runs while Payments or Pesapal is off. */
 const PAYMENTS_CONTRACT = "PaymentsCapabilityContract";
@@ -235,6 +236,16 @@ function parsedSchemas(text: string, handler: string): { schemas: Binding[]; pro
   return { schemas, problems };
 }
 
+/**
+ * The action inputs a route's schema stands for: the schema itself, or each
+ * option of a discriminated union, which a route parses when several
+ * actions, each with its own input, send to it (the two reconciliations).
+ * Compared by identity, as check 2 compares an input with its schema.
+ */
+function inputsOf(schema: unknown): unknown[] {
+  return schema instanceof z.ZodDiscriminatedUnion ? [...schema.options] : [schema];
+}
+
 function actionProblems(plugin: MgmPluginName, a: ActionDef, facts: Facts): Problems {
   const problems: Problems = [];
   const text = facts.apiRoutes.find((r) => r.route === a.path)?.text;
@@ -251,7 +262,7 @@ function actionProblems(plugin: MgmPluginName, a: ActionDef, facts: Facts): Prob
     else {
       const [{ module, name }] = parsed.schemas;
       if (module !== expected) problems.push(`parses with ${name} from ${module}, not from ${expected ?? `a schemas module for ${plugin}`}`);
-      else if (facts.schemas(module)?.[name] !== a.input) problems.push(`input is not ${module}'s ${name}, which the route parses with`);
+      else if (!inputsOf(facts.schemas(module)?.[name]).includes(a.input)) problems.push(`input is not ${module}'s ${name}, which the route parses with`);
     }
   }
   // route-surface.test.ts already holds every write handler of a non-core
@@ -273,27 +284,16 @@ function actionProblems(plugin: MgmPluginName, a: ActionDef, facts: Facts): Prob
   // plugin is off, and check 8 holds them to LOADER_READS, so every Payments
   // method listed there must run then, as check 9 asks of a listed view.
   if (a.whilePluginOff !== undefined) {
+    const gating = facts.gating ?? paymentsGating();
+    const pinned = (facts.whileOffActions ?? WHILE_OFF_ACTIONS)[a.id];
+    if (pinned === undefined) problems.push("declares whilePluginOff, but WHILE_OFF_ACTIONS does not list it");
+    else if (pinned !== exemptionKey(a.method, a.path)) problems.push(`declares whilePluginOff, but WHILE_OFF_ACTIONS pins it to ${pinned}`);
     if (typeof exemption !== "object") {
       problems.push("declares whilePluginOff, but its route is not a PaymentExemption in UNGATED_WRITES");
     } else if (gating.get(exemption.reaches) !== WHILE_OFF) {
       problems.push(`declares whilePluginOff, but ${exemption.reaches} refuses while the plugin is off`);
     }
     if (!PAYMENT_EXEMPTION_OWNERS.has(plugin)) problems.push(`declares whilePluginOff, but ${plugin}'s routes carry no PaymentExemption`);
-  }
-  if (!facts.released(a.path.replace(/\[[^\]]+\]/g, "0"))) problems.push("the route is not released");
-  // Check 10. The route answers the code, often from a capability module, so
-  // either place counts; a prepareAgainOn list itself does not.
-  for (const code of a.prepareAgainOn ?? []) {
-    const gating = facts.gating ?? paymentsGating();
-    const pinned = (facts.whileOffActions ?? WHILE_OFF_ACTIONS)[a.id];
-    if (pinned === undefined) problems.push("declares whilePluginOff, but WHILE_OFF_ACTIONS does not list it");
-    else if (pinned !== exemptionKey(a.method, a.path)) problems.push(`declares whilePluginOff, but WHILE_OFF_ACTIONS pins it to ${pinned}`);
-    const literal = `"${code}"`;
-    if (!withoutPrepareAgainOn(text ?? "").includes(literal) && !(facts.writes ?? libWrites)(literal)) {
-      problems.push(`lists "${code}" in prepareAgainOn, which neither its route nor src/lib writes`);
-    }
-  }
-  // Check 12. `plugin` is the contributing plugin the registry stored with
     const owner = getRouteOwner(a.path)?.name;
     if (owner !== plugin) problems.push(`declares whilePluginOff, but its route belongs to ${owner ?? "no plugin"}, not ${plugin}`);
     for (const method of (facts.reads ?? LOADER_READS)[PAYMENTS_CONTRACT] ?? []) {
@@ -301,6 +301,17 @@ function actionProblems(plugin: MgmPluginName, a: ActionDef, facts: Facts): Prob
         problems.push(`declares whilePluginOff, but LOADER_READS lets its available() and prepare call ${method}, which refuses while the plugin is off`);
       }
     }
+  }
+  if (!facts.released(a.path.replace(/\[[^\]]+\]/g, "0"))) problems.push("the route is not released");
+  // Check 10. The route answers the code, often from a capability module, so
+  // either place counts; a prepareAgainOn list itself does not.
+  for (const code of a.prepareAgainOn ?? []) {
+    const literal = `"${code}"`;
+    if (!withoutPrepareAgainOn(text ?? "").includes(literal) && !(facts.writes ?? libWrites)(literal)) {
+      problems.push(`lists "${code}" in prepareAgainOn, which neither its route nor src/lib writes`);
+    }
+  }
+  // Check 12. `plugin` is the contributing plugin the registry stored with
   // the action, and registration holds an action's path to its own plugin's
   // routes (contribution-schema.ts), so an action on a billing route is a
   // billing action. If registration stops checking route ownership, revisit.
@@ -505,17 +516,6 @@ function untiedFunctions(snapshot: SurfaceSnapshot, plugin: MgmPluginName, expor
   return [...held].filter(([fn]) => !reached.has(fn)).map(([, at]) => `${at} is not reached from ${plugin}'s SURFACE_MODULES exports`);
 }
 
-function surfaceProblems(snapshot: SurfaceSnapshot, facts: Facts): Problems {
-  return [
-    ...[...snapshot.actions.values()].flatMap(({ plugin, def }) => actionProblems(plugin, def, facts)),
-    ...snapshot.views.flatMap(({ plugin, def }) => [...viewProblems(plugin, def, facts), ...whileOffViewProblems(plugin, def, facts)]),
-    ...snapshot.signals.flatMap((entry) => [...signalProblems(entry.plugin, entry, facts), ...whileOffSignalProblems(entry.plugin, entry, facts)]),
-  ];
-}
-
-// ── Capability writes (check 8) ─────────────────────────────────────────────
-
-function classContract(cls: ts.ClassDeclaration): string | null {
 /** Each WHILE_OFF_ACTIONS entry that names no registered action declaring whilePluginOff on that route. */
 function staleWhileOffActions(snapshot: SurfaceSnapshot, list: Readonly<Record<string, string>> = WHILE_OFF_ACTIONS): Problems {
   return Object.entries(list).flatMap(([id, route]) => {
@@ -527,6 +527,17 @@ function staleWhileOffActions(snapshot: SurfaceSnapshot, list: Readonly<Record<s
   });
 }
 
+function surfaceProblems(snapshot: SurfaceSnapshot, facts: Facts): Problems {
+  return [
+    ...[...snapshot.actions.values()].flatMap(({ plugin, def }) => actionProblems(plugin, def, facts)),
+    ...snapshot.views.flatMap(({ plugin, def }) => [...viewProblems(plugin, def, facts), ...whileOffViewProblems(plugin, def, facts)]),
+    ...snapshot.signals.flatMap((entry) => [...signalProblems(entry.plugin, entry, facts), ...whileOffSignalProblems(entry.plugin, entry, facts)]),
+  ];
+}
+
+// ── Capability writes (check 8) ─────────────────────────────────────────────
+
+function classContract(cls: ts.ClassDeclaration): string | null {
   const implemented = (cls.heritageClauses ?? []).filter((c) => c.token === ts.SyntaxKind.ImplementsKeyword);
   return implemented.flatMap((c) => c.types.map((t) => t.expression.getText())).find((n) => CONTRACT.test(n)) ?? null;
 }
@@ -720,6 +731,7 @@ describe("GUI surface contributions", () => {
     const snapshot = (await getMgmRuntime()).mgmSurface.snapshot();
     const facts = repoFacts(snapshot.actions.size ? await loadSchemaModules() : undefined);
     expect(surfaceProblems(snapshot, facts)).toEqual([]);
+    expect(staleWhileOffActions(snapshot)).toEqual([]);
   });
 
   it("come from listed modules that write nothing through a capability", async () => {
@@ -731,7 +743,6 @@ describe("GUI surface contributions", () => {
     const { program, host, roots } = projectProgram(listed.map(([, module]) => module));
     expect(capabilityWrites(program, host, roots)).toEqual([]);
     const untied = await Promise.all(listed.map(async ([plugin], i) => untiedFunctions(s, plugin, await import(/* @vite-ignore */ roots[i]))));
-    expect(staleWhileOffActions(snapshot)).toEqual([]);
     expect(untied.flat()).toEqual([]);
   }, 120_000);
 
@@ -797,9 +808,9 @@ describe("the GUI surface guard", () => {
     const IMPORTS = 'import { parseJsonBody } from "@/lib/validation/parse-body";\nimport { Body } from "@/lib/billing/schemas";\n';
     const PARSE = "await parseJsonBody(request, Body);";
     const file = (body = PARSE, imports = IMPORTS) => `${imports}export async function POST(request: Request) { ${body} }`;
-    const check = (text: string | null, o: { path?: string; module?: Record<string, unknown> } = {}) => {
+    const check = (text: string | null, o: { path?: string; module?: Record<string, unknown>; input?: unknown } = {}) => {
       const route = o.path ?? "/api/billing-periods";
-      return actionProblems("billing", { ...createPeriod, path: route } as ActionDef, {
+      return actionProblems("billing", { ...createPeriod, path: route, ...(o.input ? { input: o.input } : {}) } as ActionDef, {
         apiRoutes: text === null ? [] : [{ route, text }],
         schemas: (m) => (m === "@/lib/billing/schemas" ? (o.module ?? { Body: createPeriod.input }) : undefined),
         released: (p) => p !== "/api/unreleased",
@@ -823,6 +834,12 @@ describe("the GUI surface guard", () => {
 
     expect(check(file("await request.json();"))).toEqual(["does not parse its body with parseJsonBody(request, <schema>)"]);
     expect(check(file(), { module: { Body: generateFromMeters.input } })).toEqual(["input is not @/lib/billing/schemas's Body, which the route parses with"]);
+    // A route several actions send to parses their discriminated union: each option is an input, nothing else is.
+    const [first, second] = [z.strictObject({ kind: z.literal("a") }), z.strictObject({ kind: z.literal("b") })];
+    const union = z.discriminatedUnion("kind", [first, second]);
+    expect(check(file(), { module: { Body: union }, input: first })).toEqual([]);
+    expect(check(file(), { module: { Body: union }, input: second })).toEqual([]);
+    expect(check(file(), { module: { Body: union } })).toEqual(["input is not @/lib/billing/schemas's Body, which the route parses with"]);
     expect(check(file(PARSE, IMPORTS.replace("billing/schemas", "metering/schemas")))).toEqual(["parses with Body from @/lib/metering/schemas, not from @/lib/billing/schemas"]);
     expect(check(file(`const Body = z.object({}); ${PARSE}`)))
       .toEqual(["parses with Body, which is not an imported schema", "does not parse its body with parseJsonBody(request, <schema>)"]);
@@ -854,9 +871,14 @@ describe("the GUI surface guard", () => {
         schemas: (m) => (m === schemas ? { Body: createPeriod.input } : undefined),
         released: () => true,
         gating: o.gating,
+        reads: o.reads,
+        // Listed, on the route it sends to, unless the case says otherwise.
+        whileOffActions: o.list ?? { [createPeriod.id]: exemptionKey(method, route) },
       }).map((p) => p.replace(/^.*?\): /, ""));
     };
     const notExempt = "declares whilePluginOff, but its route is not a PaymentExemption in UNGATED_WRITES";
+    const ownedBy = (owner: string | undefined, plugin: string) =>
+      `declares whilePluginOff, but its route belongs to ${owner ?? "no plugin"}, not ${plugin}`;
 
     // Each names a method capability-gating.test.ts says runs while Payments is off.
     expect(check("payments", REFRESH)).toEqual([]);
@@ -882,38 +904,16 @@ describe("the GUI surface guard", () => {
     ]);
     // An exemption whose method came to refuse while the plugin is off.
     const refusing = new Map([...paymentsGating(), ["reconcile", "refuses-when-disabled"]]);
-        reads: o.reads,
-        // Listed, on the route it sends to, unless the case says otherwise.
-        whileOffActions: o.list ?? { [createPeriod.id]: exemptionKey(method, route) },
     expect(check("payments", RECONCILE, { gating: refusing })).toEqual(["declares whilePluginOff, but reconcile refuses while the plugin is off"]);
-    // Without the field, an exempt route needs nothing more.
-    expect(actionProblems("billing", { ...createPeriod, path: "/api/billing-periods" } as ActionDef, facts).filter((p) => p.includes("whilePluginOff"))).toEqual([]);
-    const ownedBy = (owner: string | undefined, plugin: string) =>
-      `declares whilePluginOff, but its route belongs to ${owner ?? "no plugin"}, not ${plugin}`;
-  });
-
-  it("refuses repeat \"unsafe\" on a billing, payments or Pesapal action unless REPEAT_KEY_PENDING lists it", () => {
-    const check = (plugin: MgmPluginName, a: ActionDef, pending: Readonly<Record<string, RepeatKeyPending>> = {}) =>
-      actionProblems(plugin, a, { ...facts, repeatKeyPending: pending })
-        .filter((p) => p.includes("declares repeat"))
-        .map((p) => p.replace(/^.*?\): /, ""));
-    const unsafe = { ...createPeriod, repeat: "unsafe" } as ActionDef;
-    const refusal = (plugin: string) =>
-      `declares repeat "unsafe", which a ${plugin} action may not: make a second send write nothing, or list it in REPEAT_KEY_PENDING with the issue building its key`;
-
-    for (const plugin of ["billing", "payments", "pesapal"] as const) expect(check(plugin, unsafe), plugin).toEqual([refusal(plugin)]);
-    // Another plugin may declare it: a repeat there writes twice, and says so.
-    expect(check("metering", unsafe)).toEqual([]);
-    // Listed with the issue building its key, while that key is built.
     // Its available() and prepare run while off too, so LOADER_READS may not let them call a method that refuses then.
     const reads = { ...LOADER_READS, PaymentsCapabilityContract: ["listHistory", "ensureCheckout"] };
     expect(check("payments", RECONCILE, { reads })).toEqual([
       "declares whilePluginOff, but LOADER_READS lets its available() and prepare call ensureCheckout, which refuses while the plugin is off",
     ]);
-    expect(check("billing", unsafe, { [unsafe.id]: { reason: "inserts a row on each send", key: "#999" } })).toEqual([]);
-    expect(check("billing", unsafe, { "billing.other": { reason: "inserts a row on each send", key: "#999" } })).toEqual([refusal("billing")]);
-    // "safe" and "keyed" need no entry.
-    expect(check("billing", createPeriod)).toEqual([]);
+    // Without the field, an exempt route needs nothing more.
+    expect(actionProblems("billing", { ...createPeriod, path: "/api/billing-periods" } as ActionDef, facts).filter((p) => p.includes("whilePluginOff"))).toEqual([]);
+  });
+
   it("refuses a WHILE_OFF_ACTIONS entry that no registered action declaring whilePluginOff on that route matches", () => {
     const route = exemptionKey(createPeriod.method, createPeriod.path);
     const snapshotOf = (def: ActionDef) => ({ actions: new Map([[def.id, { plugin: "billing", def }]]) }) as unknown as SurfaceSnapshot;
@@ -931,6 +931,23 @@ describe("the GUI surface guard", () => {
     ]);
   });
 
+  it("refuses repeat \"unsafe\" on a billing, payments or Pesapal action unless REPEAT_KEY_PENDING lists it", () => {
+    const check = (plugin: MgmPluginName, a: ActionDef, pending: Readonly<Record<string, RepeatKeyPending>> = {}) =>
+      actionProblems(plugin, a, { ...facts, repeatKeyPending: pending })
+        .filter((p) => p.includes("declares repeat"))
+        .map((p) => p.replace(/^.*?\): /, ""));
+    const unsafe = { ...createPeriod, repeat: "unsafe" } as ActionDef;
+    const refusal = (plugin: string) =>
+      `declares repeat "unsafe", which a ${plugin} action may not: make a second send write nothing, or list it in REPEAT_KEY_PENDING with the issue building its key`;
+
+    for (const plugin of ["billing", "payments", "pesapal"] as const) expect(check(plugin, unsafe), plugin).toEqual([refusal(plugin)]);
+    // Another plugin may declare it: a repeat there writes twice, and says so.
+    expect(check("metering", unsafe)).toEqual([]);
+    // Listed with the issue building its key, while that key is built.
+    expect(check("billing", unsafe, { [unsafe.id]: { reason: "inserts a row on each send", key: "#999" } })).toEqual([]);
+    expect(check("billing", unsafe, { "billing.other": { reason: "inserts a row on each send", key: "#999" } })).toEqual([refusal("billing")]);
+    // "safe" and "keyed" need no entry.
+    expect(check("billing", createPeriod)).toEqual([]);
     expect(check("billing", { ...createPeriod, repeat: "keyed" } as ActionDef)).toEqual([]);
   });
 

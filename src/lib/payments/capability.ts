@@ -835,14 +835,19 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
         field: "externalAmount",
       };
     }
-    if (action === "record_external" && (!externalReference || !notes || typeof rec.externalAmount !== "number" || !Number.isFinite(rec.externalAmount))) {
-      return {
-        ok: false as const,
-        status: 400 as const,
-        code: "payments_invalid_action",
-        message: RECONCILE_COPY.adjustmentFields,
-        field: "externalReference",
-      };
+    if (action === "record_external") {
+      // The first missing field, in the form's order, so a form marks the right one.
+      const amountOk = typeof rec.externalAmount === "number" && Number.isFinite(rec.externalAmount);
+      const missing = !amountOk ? "externalAmount" : !externalReference ? "externalReference" : !notes ? "notes" : null;
+      if (missing) {
+        return {
+          ok: false as const,
+          status: 400 as const,
+          code: "payments_invalid_action",
+          message: RECONCILE_COPY.adjustmentFields,
+          field: missing,
+        };
+      }
     }
     if (action === "record_external") {
       // A completed adjustment records an amount from outside MGM, so the

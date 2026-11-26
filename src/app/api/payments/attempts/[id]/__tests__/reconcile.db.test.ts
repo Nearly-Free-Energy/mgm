@@ -248,7 +248,7 @@ async function state(billId: string, attemptId: string) {
 describe.skipIf(shouldSkip())("POST /api/payments/attempts/[id]/reconcile on the database", () => {
   it("refuses a body that does not parse before anything else", async () => {
     caller = manager;
-    expect(await reconcile(A_HELD, { action: "record_external", attemptId: A_HELD })).toEqual({
+    expect(await reconcile(A_HELD, { ...record({ typed: "Akello Grace" }), attemptId: A_HELD })).toEqual({
       status: 400,
       body: { error: "Unknown field: attemptId", code: "invalid_body" },
     });

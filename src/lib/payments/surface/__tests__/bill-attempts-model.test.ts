@@ -142,14 +142,14 @@ describe("one bill's attempts", () => {
     }
   });
 
-  it("offers Refresh status only on tracked attempts, and both reconciliations, prefilled, on one that needs reconciliation", () => {
+  it("offers Refresh status only on tracked attempts, and both reconciliations on one that needs reconciliation", () => {
     const model = billModel(
       history([raw({}), raw({ id: A2, status: "verified", provider_tracking_id: null, failure_code: null })], [receipt({})]),
     );
     expect(model.body.rows[0].actions).toEqual([
       { action: REFRESH_ATTEMPT_ACTION.id, params: { id: A1 } },
-      { action: RECORD_ADJUSTMENT_ACTION.id, params: { id: A1 }, prefill: { action: "record_external" } },
-      { action: ACCEPT_RECEIPTS_ACTION.id, params: { id: A1 }, prefill: { action: "accept_exact" } },
+      { action: RECORD_ADJUSTMENT_ACTION.id, params: { id: A1 } },
+      { action: ACCEPT_RECEIPTS_ACTION.id, params: { id: A1 } },
     ]);
     expect(model.body.rows[1].actions).toEqual([]);
   });

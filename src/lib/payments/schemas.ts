@@ -10,10 +10,11 @@
  * stay in the capability (PaymentsCapability.reconcile in ./capability.ts)
  * and in fn_payment_reconcile, which check them whoever calls the route:
  * a completed adjustment's amount, reference, notes and typed name, and an
- * exact acceptance's lack of an amount. The schemas stay objects of fields,
- * so the host can clean a loader's prefill against them field by field
- * (cleanPrefill in src/lib/gui/host/server/merge.ts) and the kit can draw
- * them as a form.
+ * exact acceptance's lack of an amount. Each action's input is an object of
+ * fields, so the host can clean a loader's prefill against it field by
+ * field (cleanPrefill in src/lib/gui/host/server/merge.ts) and the kit can
+ * draw it as a form; a route both reconciliations send to parses their
+ * discriminated union.
  *
  * Client-safe: its only runtime import is zod. If it gains a server-only or
  * side-effecting runtime import, revisit, and revisit payments-route-
@@ -40,64 +41,100 @@ export const RECONCILE_ACTIONS = ["accept_exact", "record_external"] as const;
 export type ReconcileAction = (typeof RECONCILE_ACTIONS)[number];
 
 const CONFIRMATION = "confirmation must be { acknowledged: string[], typed?: string }.";
+const ACTION = "action must be 'accept_exact' or 'record_external'.";
+
+// The fields the two reconciliations share. Each call builds a new schema,
+// so the two actions' inputs hold no zod object in common.
+const resolution = <A extends ReconcileAction>(action: A) => z.literal(action, { error: ACTION }).meta({ title: "Resolution" });
+const reference = () =>
+  z
+    .string({ error: "externalReference must be a string." })
+    .trim()
+    .max(RECONCILE_REFERENCE_MAX, { error: `externalReference must be ${RECONCILE_REFERENCE_MAX} characters or fewer.` });
+const notes = () =>
+  z
+    .string({ error: "notes must be a string." })
+    .trim()
+    .max(RECONCILE_NOTES_MAX, { error: `notes must be ${RECONCILE_NOTES_MAX} characters or fewer.` });
+const confirmation = () =>
+  z
+    .strictObject(
+      {
+        acknowledged: z
+          .array(z.string({ error: CONFIRMATION }).max(64, { error: CONFIRMATION }), { error: CONFIRMATION })
+          .max(20, { error: CONFIRMATION }),
+        typed: z.string({ error: CONFIRMATION }).optional(),
+      },
+      { error: CONFIRMATION }
+    )
+    .optional();
 
 /**
- * POST /api/payments/attempts/[id]/reconcile. The attempt comes from the path.
- *
- * - accept_exact: the verified receipts settle the bill exactly. It takes
- *   no amount; a reference and notes are kept with the event if given.
- * - record_external: a collection or refund completed outside MGM, with
- *   the amount (negative for a refund), a reference and notes, and the
- *   tenant's name typed in `confirmation` (the host's Confirmation,
- *   src/lib/gui/contract.ts, sent with a typed action).
+ * payments.accept-receipts: the verified receipts settle the bill exactly.
+ * It takes no amount; a reference and notes are kept with the event if
+ * given. `action` admits one value, so the kit's form sends it without
+ * showing it (kit/action-form.tsx).
+ */
+export const AcceptReceiptsBody = z.strictObject(
+  {
+    action: resolution("accept_exact"),
+    externalReference: reference().optional().meta({ title: "External reference" }),
+    notes: notes().optional().meta({ title: "Notes" }),
+    confirmation: confirmation(),
+  },
+  { error: bodyError }
+);
+export const ACCEPT_RECEIPTS_BODY_VERSION = 2;
+
+/**
+ * payments.record-adjustment: a collection or refund completed outside MGM,
+ * with the amount, a reference and notes, and the tenant's name typed in
+ * `confirmation` (the host's Confirmation, src/lib/gui/contract.ts, sent
+ * with a typed action). `externalAmount` is in the currency's major units,
+ * as a bill's total_amount is (fn_payment_reconcile adds it to the
+ * received total and compares that with the bill), not in the minor units
+ * the period review copies.
+ */
+export const RecordAdjustmentBody = z.strictObject(
+  {
+    action: resolution("record_external"),
+    // z.number() refuses NaN and Infinity (zod 4).
+    externalAmount: z.number({ error: "externalAmount must be a number." }).meta({
+      title: "External amount (negative for a refund)",
+      description: "In the currency's major units, as the bill's total: 2500 for UGX 2,500, 12.5 for USD 12.50.",
+    }),
+    externalReference: reference()
+      .min(1, { error: "externalReference is required." })
+      .meta({ title: "External reference" }),
+    notes: notes().min(1, { error: "notes are required." }).meta({ title: "Notes" }),
+    confirmation: confirmation(),
+  },
+  { error: bodyError }
+);
+export const RECORD_ADJUSTMENT_BODY_VERSION = 2;
+
+/**
+ * POST /api/payments/attempts/[id]/reconcile, which both actions above send
+ * to: one of them, told apart by `action`. The attempt comes from the path.
+ * The route parses with this, and gui-surface.test.ts check 2 accepts each
+ * action's input as one of its options.
  *
  * A reference over RECONCILE_REFERENCE_MAX characters or notes over
  * RECONCILE_NOTES_MAX (./reconcile-limits.ts), after trimming, are refused.
- * Before this schema the route took any reference and cut notes to 500
+ * Before these schemas the route took any reference and cut notes to 500
  * characters (PaymentsCapability.reconcile still cuts them, for callers
  * other than the route); refusing says so instead of saving less than was
  * typed. `typed` has no length limit: the capability compares it with
  * tenants.display_name, which has none either (TEXT); if display_name gets
  * a limit, cap typed at it. There is no digest, because prepare returns
  * none; if it comes to, add one with a version bump.
+ *
+ * Version 1 was one object for both, whose form showed the raw Resolution
+ * choice, and an amount on Accept that had to stay blank (#218, #287).
  */
-export const ReconcileAttemptBody = z.strictObject(
-  {
-    action: z
-      .enum(RECONCILE_ACTIONS, { error: "action must be 'accept_exact' or 'record_external'." })
-      .meta({ title: "Resolution" }),
-    // z.number() refuses NaN and Infinity (zod 4).
-    externalAmount: z
-      .number({ error: "externalAmount must be a number." })
-      .optional()
-      .meta({ title: "External amount (negative for a refund)" }),
-    externalReference: z
-      .string({ error: "externalReference must be a string." })
-      .trim()
-      .max(RECONCILE_REFERENCE_MAX, { error: `externalReference must be ${RECONCILE_REFERENCE_MAX} characters or fewer.` })
-      .optional()
-      .meta({ title: "External reference" }),
-    notes: z
-      .string({ error: "notes must be a string." })
-      .trim()
-      .max(RECONCILE_NOTES_MAX, { error: `notes must be ${RECONCILE_NOTES_MAX} characters or fewer.` })
-      .optional()
-      .meta({ title: "Notes" }),
-    confirmation: z
-      .strictObject(
-        {
-          acknowledged: z
-            .array(z.string({ error: CONFIRMATION }).max(64, { error: CONFIRMATION }), { error: CONFIRMATION })
-            .max(20, { error: CONFIRMATION }),
-          typed: z.string({ error: CONFIRMATION }).optional(),
-        },
-        { error: CONFIRMATION }
-      )
-      .optional(),
-  },
-  { error: bodyError }
-);
-export const RECONCILE_ATTEMPT_BODY_VERSION = 1;
+export const ReconcileAttemptBody = z.discriminatedUnion("action", [AcceptReceiptsBody, RecordAdjustmentBody], {
+  error: (issue) => (issue.code === "invalid_union" ? ACTION : "Request body must be an object"),
+});
 export type ReconcileAttemptInput = z.output<typeof ReconcileAttemptBody>;
 
 /**

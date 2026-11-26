@@ -117,7 +117,7 @@ describe("payments.bill-attempts under the period review", () => {
     ]);
     // Typed, but neither a DELETE nor destructive, so no danger tone (actionTone in merge-actions.ts).
     const record = row.actions.find((a) => a.action === "payments.record-adjustment");
-    expect(record).toMatchObject({ prefill: { action: "record_external" } });
+    expect(record?.prefill).toBeUndefined();
     expect(record?.tone).toBeUndefined();
   });
 

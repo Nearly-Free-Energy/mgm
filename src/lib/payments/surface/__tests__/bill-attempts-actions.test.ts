@@ -10,7 +10,9 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createFmt } from "@/lib/gui/fmt";
 import { managerOf, tableClient } from "@/lib/gui/host/server/__tests__/host-fakes";
+import { describeInput } from "@/lib/gui/host/server/input-spec";
 import { cleanPrefill } from "@/lib/gui/host/server/merge";
+import { fieldsOf } from "@/lib/gui/kit/action-form";
 import type { SurfaceRequest } from "@/lib/gui/surface";
 
 const composePayments = vi.fn();
@@ -215,9 +217,25 @@ describe("prepareAcceptReceipts", () => {
 describe("the contributed actions", () => {
   const def = (id: string) => PAYMENTS_SURFACE.actions!.find((a) => a.id === id)!;
 
-  it("keep each reconciliation's prefill through the host's cleaning", () => {
-    expect(cleanPrefill(def("payments.record-adjustment"), { action: "record_external" })).toEqual({ action: "record_external" });
-    expect(cleanPrefill(def("payments.accept-receipts"), { action: "accept_exact" })).toEqual({ action: "accept_exact" });
+  it("fix each reconciliation's resolution in its own input, which the kit sends without showing, and show only that action's fields", () => {
+    const form = (id: string) => fieldsOf(describeInput(def(id)))?.map((f) => (f.kind === "rows" ? [f.key, f.kind] : [f.key, f.kind, f.required, f.kind === "fixed" ? f.value : undefined]));
+    expect(form("payments.record-adjustment")).toEqual([
+      ["action", "fixed", true, "record_external"],
+      ["externalAmount", "number", true, undefined],
+      ["externalReference", "text", true, undefined],
+      ["notes", "text", true, undefined],
+    ]);
+    // Accepting takes no amount, so its form has no amount field to leave blank.
+    expect(form("payments.accept-receipts")).toEqual([
+      ["action", "fixed", true, "accept_exact"],
+      ["externalReference", "text", false, undefined],
+      ["notes", "text", false, undefined],
+    ]);
+    // The amount's description says it is in major units.
+    expect(fieldsOf(describeInput(def("payments.record-adjustment")))?.find((f) => f.key === "externalAmount")?.hint).toMatch(/major units/);
+    // A prefill naming the other resolution is not this action's, so the host drops it.
+    expect(cleanPrefill(def("payments.accept-receipts"), { action: "record_external" })).toBeUndefined();
+    expect(cleanPrefill(def("payments.accept-receipts"), { notes: "Paid at the office" })).toEqual({ notes: "Paid at the office" });
   });
 
   it("are human-only, offered only where the view links them, and safe to send twice", () => {

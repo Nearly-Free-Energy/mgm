@@ -3,13 +3,15 @@
  *
  * Audited manager reconciliation for a `needs_reconciliation` attempt
  * (payments.record-adjustment and payments.accept-receipts). The body is
- * ReconcileAttemptBody (src/lib/payments/schemas.ts):
- * - { action: "accept_exact", externalReference?, notes? } — accept the
- *   verified receipts as exact settlement; it takes no amount.
- * - { action: "record_external", externalAmount, externalReference, notes,
- *   confirmation: { acknowledged: [], typed } } — record a collection or
- *   refund (negative amount) completed outside MGM, with the tenant's name
- *   typed.
+ * ReconcileAttemptBody (src/lib/payments/schemas.ts), one of the two
+ * actions' inputs:
+ * - AcceptReceiptsBody, { action: "accept_exact", externalReference?,
+ *   notes? }: accept the verified receipts as exact settlement; it has no
+ *   amount field.
+ * - RecordAdjustmentBody, { action: "record_external", externalAmount,
+ *   externalReference, notes, confirmation: { acknowledged: [], typed } }:
+ *   record a collection or refund (negative amount, in major units)
+ *   completed outside MGM, with the tenant's name typed.
  *
  * Answers:
  *   400 { error, field?, code: "invalid_body" } — the body does not parse,
@@ -18,8 +20,10 @@
  *       RECONCILE_NOTES_MAX in src/lib/payments/reconcile-limits.ts)
  *       included. Notes used to be cut to 500 and saved; now they are
  *       refused;
- *   400 { error, reason } — a completed adjustment without its amount,
- *       reference or notes, or an exact acceptance with an amount;
+ *   400 { error, reason } — the capability's own check of a completed
+ *       adjustment's amount, reference and notes, or of an exact
+ *       acceptance with an amount, which the schema refuses first (as a
+ *       400 naming the field), so a body that parses does not reach it;
  *   401 without a live session; 404 for an attempt that does not exist;
  *   403 for another organization's attempt, or an actor
  *       fn_payment_reconcile refuses;
