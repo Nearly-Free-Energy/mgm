@@ -147,6 +147,11 @@ describe("SaveConnectionBody", () => {
     expect(message(SaveConnectionBody, null)).toBe("Request body must be an object");
     expect(firstIssue(SaveConnectionBody, { ...DIRECT, password: "x" })).toEqual({ field: undefined, message: "Unknown field: password" });
   });
+
+  it("is not drawn by the kit's form, which draws no array of strings: known_edge_ids alone stops it", () => {
+    expect(fieldsOf(personInput(SaveConnectionBody))).toBeNull();
+    expect(fieldsOf(personInput(SaveConnectionBody, ["known_edge_ids"]))).not.toBeNull();
+  });
 });
 
 describe("CheckConnectionBody", () => {

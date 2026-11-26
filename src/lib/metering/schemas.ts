@@ -99,6 +99,12 @@ export const SaveConnectionBody = z.strictObject(
         title: "Backend address",
         description: "An absolute https:// address (http:// for localhost only), with no credentials in it",
       }),
+    // The kit's form (fieldsOf in src/lib/gui/kit/action-form.tsx) draws an
+    // array only as rows of an object's fields, so it draws no fields for
+    // this input, and a host form for metering.save-connection would offer
+    // only Cancel. The OpenEMS Backend page is the way to save a connection,
+    // and no view links the action (`targeted: false`). If the kit comes to
+    // draw an array of strings, or a view is to link the action, revisit.
     known_edge_ids: z.array(z.string({ error: EDGE_IDS }), { error: EDGE_IDS }).meta({
       title: "Known edge ids",
       description:
