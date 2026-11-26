@@ -287,7 +287,7 @@ describe("SaveDevicesBody", () => {
             additionalProperties: false,
           },
           title: "Devices",
-          description: "Devices discovered on the edge and not saved yet. Change a saved device with metering.edit-device.",
+          description: "Devices discovered on the edge and not saved yet. A list naming a saved device is refused whole; change a saved device with metering.edit-device.",
         },
       },
       required: ["edgeId", "devices"],

@@ -11,6 +11,10 @@
  *   (e) Valid UUID + valid device row → 200 { saved: [...] }
  *   (g) componentId format: trimmed and stored; outside the pattern → 400
  *       `invalid_component_id`
+ *   (h) a device already saved on the edge, by its trimmed componentId →
+ *       409 `metering_devices_already_saved` naming it, alone or in a batch
+ *       with new devices, and nothing is inserted; so too when another
+ *       request saves it between the check and the insert (23505)
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -19,8 +23,14 @@ import { NextRequest } from "next/server";
 // ─── Supabase mock ────────────────────────────────────────────────────────────
 
 const mockSelect = vi.fn();
-const mockUpsert = vi.fn(() => ({ select: mockSelect }));
-const mockFrom = vi.fn(() => ({ upsert: mockUpsert }));
+const mockInsert = vi.fn(() => ({ select: mockSelect }));
+// The check for devices already saved: select().eq("edge_id").in("openems_component_id").
+// By default none is.
+type Read = { data: { openems_component_id: string }[]; error: unknown };
+const mockIn = vi.fn<(column: string, ids: string[]) => Promise<Read>>(async () => ({ data: [], error: null }));
+const mockEq = vi.fn(() => ({ in: mockIn }));
+const mockRead = vi.fn(() => ({ eq: mockEq }));
+const mockFrom = vi.fn(() => ({ select: mockRead, insert: mockInsert }));
 
 // The MGM runtime gate is covered by src/app/api/__tests__/runtime-gate-wiring.test.ts.
 vi.mock("@/lib/runtime/gate", () => ({ gateRoute: vi.fn(async () => null) }));
@@ -122,17 +132,16 @@ describe("POST /api/devices", () => {
 
     // Verify Supabase was called with snake_case mapped rows
     expect(mockFrom).toHaveBeenCalledWith("devices");
-    expect(mockUpsert).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({
-          edge_id: VALID_UUID,
-          openems_component_id: "meter0",
-          device_type: "consumption_meter",
-          name: "Main Meter",
-        }),
-      ]),
-      expect.objectContaining({ onConflict: "edge_id,openems_component_id" })
-    );
+    expect(mockEq).toHaveBeenCalledWith("edge_id", VALID_UUID);
+    expect(mockIn).toHaveBeenCalledWith("openems_component_id", ["meter0"]);
+    expect(mockInsert).toHaveBeenCalledWith([
+      expect.objectContaining({
+        edge_id: VALID_UUID,
+        openems_component_id: "meter0",
+        device_type: "consumption_meter",
+        name: "Main Meter",
+      }),
+    ]);
   });
 
   // (f) openemsChannelAddress: null is accepted — non-billable devices registered for observability
@@ -177,15 +186,12 @@ describe("POST /api/devices", () => {
         })
       );
       expect(res.status).toBe(200);
-      expect(mockUpsert).toHaveBeenCalledWith(
-        [
-          expect.objectContaining({
-            openems_component_id: "meter0",
-            name: "meter0",
-          }),
-        ],
-        expect.anything()
-      );
+      expect(mockInsert).toHaveBeenCalledWith([
+        expect.objectContaining({
+          openems_component_id: "meter0",
+          name: "meter0",
+        }),
+      ]);
     });
 
     it.each([
@@ -207,6 +213,83 @@ describe("POST /api/devices", () => {
       const json = await res.json();
       expect(json.reason).toBe("invalid_component_id");
       expect(mockFrom).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("(h) devices already saved on the edge", () => {
+    const saved = (...ids: string[]) => ({ data: ids.map((id) => ({ openems_component_id: id })), error: null });
+
+    it("refuses a device already saved with 409 naming it, and inserts nothing", async () => {
+      mockIn.mockResolvedValueOnce(saved("meter0"));
+      const { POST } = await import("../route");
+      const res = await POST(makeRequest({ edgeId: VALID_UUID, devices: [VALID_DEVICE] }));
+
+      expect(res.status).toBe(409);
+      const json = await res.json();
+      expect(json).toEqual({
+        error: "Already saved on this edge: meter0. Nothing was saved. Discover devices again to see which are new.",
+        code: "metering_devices_already_saved",
+        componentIds: ["meter0"],
+      });
+      expect(mockInsert).not.toHaveBeenCalled();
+    });
+
+    it("refuses a batch of new and saved devices whole, naming only the saved ones", async () => {
+      mockIn.mockResolvedValueOnce(saved("meter2", "meter0"));
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeRequest({
+          edgeId: VALID_UUID,
+          devices: [
+            VALID_DEVICE,
+            { ...VALID_DEVICE, componentId: "meter1", name: "New meter" },
+            { ...VALID_DEVICE, componentId: "meter2", deviceType: "battery" },
+          ],
+        })
+      );
+
+      expect(res.status).toBe(409);
+      const json = await res.json();
+      expect(json.code).toBe("metering_devices_already_saved");
+      // In the body's order.
+      expect(json.componentIds).toEqual(["meter0", "meter2"]);
+      expect(mockIn).toHaveBeenCalledWith("openems_component_id", ["meter0", "meter1", "meter2"]);
+      expect(mockInsert).not.toHaveBeenCalled();
+    });
+
+    it("checks the trimmed componentId, as it is stored", async () => {
+      mockIn.mockResolvedValueOnce(saved("meter0"));
+      const { POST } = await import("../route");
+      const res = await POST(makeRequest({ edgeId: VALID_UUID, devices: [{ ...VALID_DEVICE, componentId: "  meter0 " }] }));
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).componentIds).toEqual(["meter0"]);
+      expect(mockIn).toHaveBeenCalledWith("openems_component_id", ["meter0"]);
+      expect(mockInsert).not.toHaveBeenCalled();
+    });
+
+    it("answers 409 naming a device another request saved after the check", async () => {
+      mockIn.mockResolvedValueOnce(saved()).mockResolvedValueOnce(saved("meter0"));
+      mockSelect.mockResolvedValueOnce({
+        data: null,
+        error: { code: "23505", message: 'duplicate key value violates unique constraint "devices_edge_id_openems_component_id_key"' },
+      });
+      const { POST } = await import("../route");
+      const res = await POST(makeRequest({ edgeId: VALID_UUID, devices: [VALID_DEVICE] }));
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ code: "metering_devices_already_saved", componentIds: ["meter0"] });
+      expect(mockInsert).toHaveBeenCalledTimes(1);
+    });
+
+    it("answers 503 and inserts nothing when the saved devices cannot be read", async () => {
+      mockIn.mockResolvedValueOnce({ data: [], error: { code: "57014", message: "canceling statement due to statement timeout" } });
+      const { POST } = await import("../route");
+      const res = await POST(makeRequest({ edgeId: VALID_UUID, devices: [VALID_DEVICE] }));
+
+      expect(res.status).toBe(503);
+      expect((await res.json()).error).toBe("Could not check this edge's saved devices. Try again shortly.");
+      expect(mockInsert).not.toHaveBeenCalled();
     });
   });
 });

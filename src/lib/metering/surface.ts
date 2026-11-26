@@ -214,6 +214,11 @@ export const METERING_SURFACE: Contribution = {
       targeted: false,
       prepare: prepareDeleteEdge,
     },
+    // New devices only: the route refuses a list naming a saved device
+    // (409 metering_devices_already_saved) and saves none of it. No
+    // prepareAgainOn: the action has no prepare or confirmation step, and
+    // the 409 means the list itself names a saved device, not that something
+    // a person confirmed changed after prepare.
     {
       ...SAVE_DEVICES_ACTION,
       target: "edge",

@@ -16,7 +16,9 @@
  *      - alreadyAdded → disabled row + "Already added" chip
  *      - a note naming any components the route skipped because MGM cannot
  *        store their id (`skipped` in the response)
- *   3. POSTing selected rows to /api/devices (server-side transactional upsert)
+ *   3. POSTing selected rows to /api/devices (server-side, in one insert; the
+ *      route refuses the whole list with 409 if any row is already saved,
+ *      which the alreadyAdded rows left out above avoid)
  *      Selected rows with openemsChannelAddress: null are saved for observability
  *      (no billing channel) — previously these were silently excluded.
  */

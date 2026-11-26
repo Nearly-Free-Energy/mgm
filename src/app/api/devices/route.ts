@@ -5,10 +5,15 @@ import { OPENEMS_ID_FORMAT_HINT, parseOpenEmsId } from "@/lib/openems/ids";
 import { SaveDevicesBody } from "@/lib/metering/schemas";
 import { parseJsonBody } from "@/lib/validation/parse-body";
 
+/** The code of the 409 that names devices already saved on the edge. */
+const DEVICES_ALREADY_SAVED = "metering_devices_already_saved";
+
+type Client = Awaited<ReturnType<typeof createClient>>;
+
 /**
  * POST /api/devices
  *
- * Transactional upsert of discovered devices (F #57).
+ * Saves devices newly discovered on an edge (F #57).
  * Browser NEVER writes `devices` directly — this route is the only write path.
  *
  * Request body:
@@ -30,12 +35,24 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  * 400 `invalid_body`, with the messages below where the old checks gave
  * them. The component id's format stays this route's own check.
  *
- * Upsert key: (edge_id, openems_component_id)
- * On conflict: updates device_type and name (idempotent re-discovery).
+ * New devices only. A body naming any device already saved on the edge
+ * (the same edge and trimmed component id) is refused whole, before any
+ * write: 409 { error, code: "metering_devices_already_saved", componentIds }
+ * names each one, and nothing is saved. A saved device is changed only by
+ * PATCH /api/devices/[id] (`metering.edit-device`), which checks a change of
+ * type against the device's tenant links; saving over it here would skip
+ * that check and reset its `config`. The rows go in one INSERT, so a device
+ * another request saves between the check and the insert fails the whole
+ * insert on UNIQUE (edge_id, openems_component_id) (00001_schema.sql), and
+ * is answered the same way.
+ *
+ * 200 { saved: [{ id, name, device_type, openems_component_id }] }.
  *
  * RLS: Supabase Row Level Security on the `devices` table enforces that only
  * users with user_can_access_microgrid() for the edge's microgrid can insert.
- * The server client uses the caller's auth session (cookies) so RLS applies.
+ * The server client uses the caller's auth session (cookies) so RLS applies,
+ * to the check as well: it reads only devices the caller may read, so a
+ * refusal names nothing the caller could not read directly.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // Presence, the edge's UUID, a non-empty devices array and each row's
@@ -65,7 +82,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   });
   if (pluginGate) return pluginGate;
 
-  // Build upsert rows. openems_component_id is required for OpenEMS-sourced edges.
+  // The rows as stored. openems_component_id is required for OpenEMS-sourced edges.
   const rows = devices.map((d) => {
     // Checked in the loop above, so never null here.
     const componentId = parseOpenEmsId(d.componentId) as string;
@@ -77,19 +94,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       config: {} as Record<string, never>,
     };
   });
+  const componentIds = rows.map((r) => r.openems_component_id);
 
-  // Upsert: INSERT ... ON CONFLICT (edge_id, openems_component_id) DO UPDATE
-  // The UNIQUE constraint on devices(edge_id, openems_component_id) was added in
-  // 00001_schema.sql (AB #50). This upsert is atomic per Postgres transaction semantics.
+  const saved = await alreadySaved(supabase, edgeId, componentIds);
+  if (saved === null) {
+    return NextResponse.json(
+      { error: "Could not check this edge's saved devices. Try again shortly." },
+      { status: 503 }
+    );
+  }
+  if (saved.length > 0) return alreadySavedResponse(saved);
+
   const { data, error } = await supabase
     .from("devices")
-    .upsert(rows, {
-      onConflict: "edge_id,openems_component_id",
-      ignoreDuplicates: false, // update device_type + name on conflict
-    })
+    .insert(rows)
     .select("id, name, device_type, openems_component_id");
 
   if (error) {
+    // Saved by another request since the check above: the insert wrote nothing.
+    if (error.code === "23505") {
+      const now = await alreadySaved(supabase, edgeId, componentIds);
+      if (now !== null && now.length > 0) return alreadySavedResponse(now);
+    }
     // RLS violation surfaces as a PostgREST 403 / error code.
     if (error.code === "42501" || error.message.includes("row-level security")) {
       return NextResponse.json(
@@ -104,4 +130,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   return NextResponse.json({ saved: data ?? [] }, { status: 200 });
+}
+
+/**
+ * Which of `componentIds` are saved on the edge, in the body's order, each
+ * once; null when they could not be read.
+ */
+async function alreadySaved(supabase: Client, edgeId: string, componentIds: string[]): Promise<string[] | null> {
+  const { data, error } = await supabase
+    .from("devices")
+    .select("openems_component_id")
+    .eq("edge_id", edgeId)
+    .in("openems_component_id", componentIds);
+  if (error) return null;
+  const stored = new Set((data ?? []).map((d) => d.openems_component_id));
+  return [...new Set(componentIds.filter((id) => stored.has(id)))];
+}
+
+function alreadySavedResponse(componentIds: string[]): NextResponse {
+  return NextResponse.json(
+    {
+      error: `Already saved on this edge: ${componentIds.join(", ")}. Nothing was saved. Discover devices again to see which are new.`,
+      code: DEVICES_ALREADY_SAVED,
+      componentIds,
+    },
+    { status: 409 }
+  );
 }

@@ -61,7 +61,7 @@ export const METERING_CASES: CaseModule = {
         second: 404,
       },
     ],
-    // The device is saved with these values: 200, upserted onto the same row.
+    // The device is already saved on the edge: 409 metering_devices_already_saved, nothing written.
     "metering.save-devices": [
       {
         as: "manager",
@@ -71,7 +71,7 @@ export const METERING_CASES: CaseModule = {
           devices: [{ componentId: "meter7", factoryId: "Meter.Socomec", openemsChannelAddress: null, deviceType: "consumption_meter", name: "Repeat meter 7" }],
         }),
         first: 200,
-        second: 200,
+        second: 409,
       },
     ],
     // The device is already of this type and name: 200, the same row.
