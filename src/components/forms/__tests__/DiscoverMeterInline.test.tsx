@@ -66,7 +66,10 @@ describe("DiscoverMeterInline", () => {
     );
   }
 
-  const devicePosts = () => fetchMock.mock.calls.filter(([url]) => url === "/api/devices");
+  // fetch's own parameters; the spy's type does not carry them.
+  type FetchCall = Parameters<typeof fetch>;
+  const devicePosts = () =>
+    (fetchMock.mock.calls as FetchCall[]).filter(([url]) => url === "/api/devices");
 
   it("(a) takes a saved meter out of the candidates, so it is not posted again", async () => {
     fetchMock
