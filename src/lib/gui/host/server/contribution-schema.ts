@@ -424,9 +424,10 @@ const actionSchema = z
     bind: z.strictObject({ path: kindMap.optional(), body: kindMap.optional() }),
     available: fn.optional(),
     targeted: z.literal(false).optional(),
-    // Which actions may declare it (a PaymentExemption route) is checked in
-    // CI by gui-surface.test.ts, which can read UNGATED_WRITES; contribute()
-    // reads no test data.
+    // Which actions may declare it (a PaymentExemption route, and only an
+    // action WHILE_OFF_ACTIONS pins to that route) is checked in CI by
+    // gui-surface.test.ts, which can read UNGATED_WRITES; contribute() reads
+    // no test data.
     whilePluginOff: z.literal("enabled").optional(),
     // That each code is one the route answers is checked in CI by
     // gui-surface.test.ts, which reads the source; contribute() reads none.

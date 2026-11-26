@@ -161,7 +161,9 @@ read a stored credential, or to send data to another origin.
      only a Payments or Pesapal view may declare
      `attach.whilePluginOff`, and only while every Payments capability
      method a surface module may call runs while the plugin is off.
-     `gui-surface.test.ts` checks both. The registration check refuses
+     `gui-surface.test.ts` checks both, and holds an action declaring
+     `whilePluginOff` to that same condition, since its `available()` and
+     `prepare` run while the plugin is off too. The registration check refuses
      `attach.whilePluginOff` on a section or a `vendor` view.
    - Its watchers are not run, and are listed as neither checked nor
      unchecked, unless the watcher declares `whilePluginOff: "checked"`;
