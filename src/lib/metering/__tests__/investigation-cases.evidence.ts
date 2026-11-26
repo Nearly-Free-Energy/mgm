@@ -125,9 +125,10 @@ const KAMPALA: SiteDayZone = { tz: "Africa/Kampala", zone: "microgrid" };
 
 /**
  * A pinned day the fixture refuses with a provider code (C19, C20, C24): the
- * sources were read and chosen, so all four are facts; the fixture's 502
- * reaches the capture as 503 (capability.ts, `fromMeteringError`). If that
- * mapping changes, revisit.
+ * sources were read and chosen, so all four are facts. C19's and C24's 502
+ * reaches the capture as 503 (capability.ts, `fromMeteringError`), and C20 is
+ * a 503 from the fixture (fixture/pinned-days.ts). If that mapping or those
+ * statuses change, revisit.
  */
 function providerRefusal(reason: SiteDayRefusalReason, code: string): CaseEvidence {
   return {
