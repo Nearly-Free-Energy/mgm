@@ -175,3 +175,33 @@ describe("DELETE /api/tenants/[id]/access/[accessId]", () => {
     expect(source).not.toMatch(/@\/lib\/supabase\/service|createServiceClient/);
   });
 });
+
+describe("DELETE /api/tenants/[id]/access/[accessId] with the GUI host's confirmation", () => {
+  async function withBody(body: string) {
+    const res = await DELETE(
+      new NextRequest(`http://localhost/api/tenants/${TENANT_ID}/access/${ACCESS_ID}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body,
+      }),
+      { params: Promise.resolve({ id: TENANT_ID, accessId: ACCESS_ID }) }
+    );
+    const text = await res.text();
+    return { status: res.status, text, body: text ? JSON.parse(text) : null };
+  }
+
+  it("removes the access for the ceremony's confirmation, which has nothing to check", async () => {
+    const out = await withBody(JSON.stringify({ confirmation: { acknowledged: [] } }));
+    expect(out.status).toBe(204);
+    expect(rpcSpy).toHaveBeenCalledWith("fn_tenant_access_revoke", { _tenant_id: TENANT_ID, _access_id: ACCESS_ID });
+  });
+
+  it("answers 400 invalid_body for a body that is not one, and removes nothing", async () => {
+    for (const body of ["{not json", JSON.stringify({ confirmation: { acknowledged: [], typed: "a@example.test" } })]) {
+      const out = await withBody(body);
+      expect(out.status).toBe(400);
+      expect(out.body.code).toBe("invalid_body");
+    }
+    expect(rpcSpy).not.toHaveBeenCalled();
+  });
+});

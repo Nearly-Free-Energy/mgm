@@ -262,6 +262,68 @@ export type SiteDayReadFacts = {
 /** One site day as getSiteDay answers it. */
 export type SiteDayRead = SiteDayOperations & { read: SiteDayReadFacts };
 
+/**
+ * A reading that decided a range: its series, its bin position from the
+ * day's start (negative in the previous day, the carry-in) and its value.
+ * The value is the first sample in that bin, as computeSiteDay reads it, or
+ * for a negative position the previous day's last non-null sample of the
+ * series.
+ */
+export type DecidingReading = { series: "gridV" | "soc"; pos: number; v: number };
+/** [start, end) in elapsed minutes after the day's start. */
+export type MinuteRange = [start: number, end: number];
+/**
+ * What decided a day's dark and no-data time, which SiteDayOperations does
+ * not keep. The keys are the item keys of the investigation evidence
+ * snapshot (docs/investigation-evidence.md §4), which maps them one to one;
+ * if a key or a cause changes there, revisit these. Each list's ranges are
+ * one per gap (a maximal run of offline bins), in order, and its
+ * `decidedBy` or `ruledOut` entry `i` is about range `i`.
+ *
+ * It is worked out from the series alone and does not know which site
+ * sources were readable: with no battery (C07) a floor gap comes out as
+ * `no_data`, and with no grid meter (C08) a dark evening comes out as
+ * `dark_lowbat` while `cutMinutes` is null. The capture (A2-3) must not
+ * pass such ranges on as they are: it stores an item whose source is
+ * unavailable as unavailable, with nulls (evidence §4's key table, rule Z).
+ * If this detail starts reading source availability itself, revisit.
+ */
+export type SiteDayDetail = {
+  /** The previous day's last voltage and SoC readings, as `[pos, v]`; null when it had none. */
+  carry_in: { gridV: [pos: number, v: number] | null; soc: [pos: number, v: number] | null };
+  /** Gaps that began with the grid known to be off: decided by the voltage reading below GRID_PRESENT_MIN_V. */
+  dark_cut: { ranges: MinuteRange[]; min: number; decidedBy: DecidingReading[] };
+  /** Gaps that began with the battery at or below LOW_BATTERY_PCT: decided by that SoC reading. */
+  dark_lowbat: { ranges: MinuteRange[]; min: number; decidedBy: DecidingReading[] };
+  /**
+   * Gaps that began while the grid was still carried as off after a
+   * low-battery gap: decided by that gap, as its index in `dark_lowbat.ranges`.
+   */
+  dark_after_lowbat: { ranges: MinuteRange[]; min: number; decidedBy: { lowbatRange: number }[] };
+  /**
+   * Gaps that were not dark: ruled out by the reading that set the carried
+   * grid state (at or above GRID_PRESENT_MIN_V) and the last SoC reading
+   * (above LOW_BATTERY_PCT), each null when there was none yet.
+   */
+  no_data: {
+    ranges: MinuteRange[];
+    min: number;
+    ruledOut: { grid: DecidingReading | null; soc: DecidingReading | null }[];
+  };
+};
+
+/** What computeSiteDay and computeSiteDayDetail work a day out from. */
+export type SiteDayInput = {
+  date: string;
+  timezone: string;
+  samples: SiteSamples;
+  sources: SiteSourceAvailability;
+  resolutionMinutes: number;
+  nowMs: number;
+};
+
+type GapCause = "dark_cut" | "dark_lowbat" | "dark_after_lowbat" | "no_data";
+
 type Bin = {
   startMs: number;
   online: boolean;
@@ -276,6 +338,8 @@ type Bin = {
   dark: boolean;
   /** Dark because the gap began with the battery at its floor. */
   darkInferred: boolean;
+  /** The cause of the gap an offline bin is in, decided when the gap started; null online. */
+  cause: GapCause | null;
 };
 
 const MINUTE = 60_000;
@@ -351,14 +415,18 @@ const minutesOf = (list: TimeRange[]) =>
  * day's tail tells whether the day began in a cut); bins outside the day
  * only feed that carried state.
  */
-export function computeSiteDay(input: {
-  date: string;
-  timezone: string;
-  samples: SiteSamples;
-  sources: SiteSourceAvailability;
-  resolutionMinutes: number;
-  nowMs: number;
-}): SiteDayOperations {
+export function computeSiteDay(input: SiteDayInput): SiteDayOperations {
+  return computeSiteDayDetail(input).day;
+}
+
+/**
+ * computeSiteDay's day, with what decided its dark and no-data time: the
+ * ranges by cause and the readings behind each. The day is exactly
+ * computeSiteDay's; the detail is kept apart from it so nothing that
+ * carries a day (the site-day and savings views among them) carries the
+ * positions and readings too.
+ */
+export function computeSiteDayDetail(input: SiteDayInput): { day: SiteDayOperations; detail: SiteDayDetail } {
   const { date, timezone, samples, sources, resolutionMinutes, nowMs } = input;
   if (!isSiteResolution(resolutionMinutes)) {
     throw new RangeError("resolutionMinutes must be a whole number of minutes that divides an hour");
@@ -391,15 +459,28 @@ export function computeSiteDay(input: {
   // whether it is read alone (from the day before) or inside a longer range.
   const carryStartMs = startOfDayInZone(addDaysToDateKey(date, -1), timezone).getTime();
   let carried: boolean | null = null;
-  let lastSoc: number | null = null;
+  // What set `carried`: a voltage reading, or a low-battery gap (by its
+  // index among the day's low-battery gaps). Set wherever `carried` is.
+  let carriedBy: DecidingReading | { lowbatRange: number } | null = null;
+  let lastSoc: DecidingReading | null = null;
+  const carryIn: SiteDayDetail["carry_in"] = { gridV: null, soc: null };
   const byBin = new Map<number, number>();
   samples.timestamps.forEach((t, i) => {
     if (t < carryStartMs) return;
     if (t < dayStartMs) {
+      // A negative position: the bin of the previous day's sample.
+      const pos = Math.floor((t - dayStartMs) / binMs);
       const v = samples.gridVoltageV[i];
-      if (v !== null) carried = v >= GRID_PRESENT_MIN_V;
+      if (v !== null) {
+        carried = v >= GRID_PRESENT_MIN_V;
+        carriedBy = { series: "gridV", pos, v };
+        carryIn.gridV = [pos, v];
+      }
       const soc = samples.batterySocPct[i];
-      if (soc !== null) lastSoc = soc;
+      if (soc !== null) {
+        lastSoc = { series: "soc", pos, v: soc };
+        carryIn.soc = [pos, soc];
+      }
       return;
     }
     if (t >= readUntilMs) return;
@@ -411,6 +492,15 @@ export function computeSiteDay(input: {
   const binCount = Math.round((readUntilMs - dayStartMs) / binMs);
   // What the current gap is, decided when it starts; null while online.
   let gap: "dark" | "inferred" | "no_data" | null = null;
+  // The same decision by cause, and what decided it: one entry per gap, in
+  // the order the gaps start. A gap is a maximal run of offline bins and
+  // online bins separate gaps, so each gap is exactly one range of its
+  // cause's list and entry i is about range i.
+  let cause: GapCause | null = null;
+  const darkCutBy: DecidingReading[] = [];
+  const darkLowbatBy: DecidingReading[] = [];
+  const darkAfterLowbatBy: { lowbatRange: number }[] = [];
+  const noDataRuledOut: SiteDayDetail["no_data"]["ruledOut"] = [];
   for (let index = 0; index < binCount; index++) {
     const i = byBin.get(index);
     const pick = (series: (number | null)[]) => (i === undefined ? null : series[i] ?? null);
@@ -423,16 +513,41 @@ export function computeSiteDay(input: {
     const online = [soc, batteryW, gridW, volts, loadW, pvW].some((v) => v !== null);
     if (online) {
       gap = null;
-      if (volts !== null) carried = volts >= GRID_PRESENT_MIN_V;
-      if (soc !== null) lastSoc = soc;
+      cause = null;
+      if (volts !== null) {
+        carried = volts >= GRID_PRESENT_MIN_V;
+        carriedBy = { series: "gridV", pos: index, v: volts };
+      }
+      if (soc !== null) lastSoc = { series: "soc", pos: index, v: soc };
     } else if (gap === null) {
-      if (carried === false) gap = "dark";
-      else if (lastSoc !== null && lastSoc <= LOW_BATTERY_PCT) {
+      if (carried === false) {
+        gap = "dark";
+        // carried is false only once something set it: a reading below
+        // GRID_PRESENT_MIN_V, or a low-battery gap below.
+        const by = carriedBy as DecidingReading | { lowbatRange: number };
+        if ("lowbatRange" in by) {
+          cause = "dark_after_lowbat";
+          darkAfterLowbatBy.push(by);
+        } else {
+          cause = "dark_cut";
+          darkCutBy.push(by);
+        }
+      } else if (lastSoc !== null && lastSoc.v <= LOW_BATTERY_PCT) {
         gap = "inferred";
+        cause = "dark_lowbat";
+        darkLowbatBy.push(lastSoc);
         // The houses went dark, so the grid was off: a cut from here until
         // a voltage reading shows the grid back.
         carried = false;
-      } else gap = "no_data";
+        carriedBy = { lowbatRange: darkLowbatBy.length - 1 };
+      } else {
+        gap = "no_data";
+        cause = "no_data";
+        // carried is null or true here, so carriedBy is null or the voltage
+        // reading at or above GRID_PRESENT_MIN_V that set it: only a
+        // low-battery gap sets it to an inference, and that sets carried false.
+        noDataRuledOut.push({ grid: carriedBy as DecidingReading | null, soc: lastSoc });
+      }
     }
     bins.push({
       startMs: dayStartMs + index * binMs,
@@ -446,6 +561,7 @@ export function computeSiteDay(input: {
       gridPresent: carried,
       dark: !online && (gap === "dark" || gap === "inferred"),
       darkInferred: !online && gap === "inferred",
+      cause: online ? null : cause,
     });
   }
 
@@ -552,6 +668,21 @@ export function computeSiteDay(input: {
   // Time with no data and no known cut is neither lit nor dark: it is left
   // out of the share rather than counted as lit.
   const knownMinutes = (readUntilMs - dayStartMs) / MINUTE - noDataMinutes;
+  // The same gaps by cause, as elapsed minutes after the day's start.
+  const causeRanges = (of: GapCause) => {
+    const list: MinuteRange[] = ranges(bins, (b) => b.cause === of, binMs).map((r) => [
+      (r.startMs - dayStartMs) / MINUTE,
+      (r.endMs - dayStartMs) / MINUTE,
+    ]);
+    return { ranges: list, min: list.reduce((sum, [start, end]) => sum + end - start, 0) };
+  };
+  const detail: SiteDayDetail = {
+    carry_in: carryIn,
+    dark_cut: { ...causeRanges("dark_cut"), decidedBy: darkCutBy },
+    dark_lowbat: { ...causeRanges("dark_lowbat"), decidedBy: darkLowbatBy },
+    dark_after_lowbat: { ...causeRanges("dark_after_lowbat"), decidedBy: darkAfterLowbatBy },
+    no_data: { ...causeRanges("no_data"), ruledOut: noDataRuledOut },
+  };
 
   let lowestSoc: SiteDayOperations["lowestSoc"] = null;
   for (const b of bins) {
@@ -593,7 +724,7 @@ export function computeSiteDay(input: {
   };
   for (const s of evening) eveningHours[s.supply] += (s.endMs - s.startMs) / 3_600_000;
 
-  return {
+  const day: SiteDayOperations = {
     date,
     timezone,
     dayStartMs,
@@ -626,4 +757,5 @@ export function computeSiteDay(input: {
     eveningHours,
     flows,
   };
+  return { day, detail };
 }

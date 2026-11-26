@@ -5,7 +5,8 @@
  * each column that has one, in the table's order, as a button that copies
  * the ext's figure.
  */
-import type { GuiKit, LiveState, ModelOf } from "@/lib/gui/contract";
+import type { LiveState, ModelOf } from "@/lib/gui/contract";
+import type { GuiKit } from "@/lib/gui/contract-react";
 import { ValueText } from "./controls";
 import type { Copier } from "./copy";
 import { cls, type PeriodReviewFigures } from "./ext";

@@ -6,8 +6,15 @@ import {
   composeCommunityManagement,
   type CommunityManagementError,
 } from "@/lib/community-management";
+import {
+  DeleteCommunityBody,
+  UPDATE_COMMUNITY_REFUSALS,
+  UpdateCommunityBody,
+} from "@/lib/community-management/schemas";
 import { countEntityDescendants } from "@/lib/entity-descendants";
 import { gateRoute } from "@/lib/runtime/gate";
+import { parseJsonBody } from "@/lib/validation/parse-body";
+import { typedNameMatches } from "@/lib/validation/typed-name";
 import {
   errorBody,
   mapPgError,
@@ -31,10 +38,14 @@ function mapError(error: CommunityManagementError): NextResponse {
 }
 
 /**
- * PATCH /api/communities/[id] — update a community (#76).
+ * PATCH /api/communities/[id] — update a community (#76), as
+ * `community.update-community`.
  *
- * Dirty-fields semantics: only keys present in body are applied. Re-parenting
- * via `org_id` is NOT supported through this endpoint — ignored if present.
+ * Dirty-fields semantics: only keys present in body are applied. The body
+ * is UpdateCommunityBody (src/lib/community-management/schemas.ts), refused
+ * with this route's own answers (UPDATE_COMMUNITY_REFUSALS). Re-parenting
+ * via `org_id` is NOT supported through this endpoint: the schema refuses
+ * the key, which the route ignored before it parsed with a schema.
  *
  * Released mutations route through the community-management Cordis
  * capability. The route resolves the parent organization needed for the
@@ -54,12 +65,9 @@ export async function PATCH(
     );
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, UpdateCommunityBody, UPDATE_COMMUNITY_REFUSALS);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
 
   const supabase = await createClient();
   const { data: parent } = await supabase
@@ -110,6 +118,17 @@ export async function PATCH(
  *
  * Idempotency: first-delete wins, repeats 404 (AC-ROUTE-7).
  *
+ * Confirmation: `community.delete-community` is a typed action. The body is
+ * DeleteCommunityBody (src/lib/community-management/schemas.ts), and a
+ * DELETE often has none, so an empty one is read as `{}`. The route checks
+ * the confirmation on every request, as billing's period delete does:
+ *   - no `confirmation`: 428 `community_delete_confirmation_required`,
+ *     naming the community to type. Nothing is deleted.
+ *   - a name that is not the community's, or none typed: 428
+ *     `community_delete_name_mismatch`.
+ * The GUI host sends the name typed in its step, and the community page's
+ * delete dialog (DeleteEntityButton) the name it asked for.
+ *
  * Cascade chain: communities → microgrids → (edges/devices/tenants/
  * billing_periods/billing_line_items/rate_schedules/tenant_devices), and
  * tenants → user_roles for the tenant role rows (scope_tenant_id, migration
@@ -123,7 +142,7 @@ export async function PATCH(
  * layouts are busted so nested nav + top-level community list refresh.
  */
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   const { id } = await params;
@@ -134,6 +153,13 @@ export async function DELETE(
       { status: 400 }
     );
   }
+
+  // A DELETE often has no body; an empty one is read as `{}`, which asks for the name.
+  const empty = (await request.clone().text()).trim() === "";
+  const parsed = empty
+    ? ({ ok: true, data: DeleteCommunityBody.parse({}) } as const)
+    : await parseJsonBody(request, DeleteCommunityBody);
+  if (!parsed.ok) return parsed.response;
 
   const supabase = await createClient();
 
@@ -167,6 +193,20 @@ export async function DELETE(
     return NextResponse.json(
       errorBody("Unnamed entity cannot be typed-to-confirm."),
       { status: 409 }
+    );
+  }
+  const { confirmation } = parsed.data;
+  const typeTheName = `Type the community's name, ${community.name.trim()}, to delete it.`;
+  if (!confirmation) {
+    return NextResponse.json(
+      { error: typeTheName, code: "community_delete_confirmation_required" },
+      { status: 428 }
+    );
+  }
+  if (!typedNameMatches(confirmation.typed, community.name)) {
+    return NextResponse.json(
+      { error: typeTheName, code: "community_delete_name_mismatch", field: "confirmation" },
+      { status: 428 }
     );
   }
 

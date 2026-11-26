@@ -4,8 +4,9 @@
  * Client-safe: no server imports. Server routes and UI share these definitions
  * so Settings, navigation, and mutation gates cannot drift from each other.
  * Database state lives in `mgm_plugins`. A missing row means the plugin's
- * `defaultEnabled`, which is "enabled" for every plugin but the tenant app,
- * so existing deployments keep working without a backfill.
+ * `defaultEnabled`, which is "enabled" for every plugin but the tenant app
+ * and the operations plugin, so existing deployments keep working without a
+ * backfill.
  */
 
 export const ORGANIZATION_DIRECTORY_PLUGIN_NAME =
@@ -17,6 +18,7 @@ export const BILLING_PLUGIN_NAME = "billing" as const;
 export const PAYMENTS_PLUGIN_NAME = "payments" as const;
 export const PESAPAL_PLUGIN_NAME = "pesapal" as const;
 export const TENANT_APP_PLUGIN_NAME = "tenant-app" as const;
+export const OPERATIONS_PLUGIN_NAME = "operations" as const;
 
 export type MgmPluginName =
   | typeof ORGANIZATION_DIRECTORY_PLUGIN_NAME
@@ -25,7 +27,8 @@ export type MgmPluginName =
   | typeof BILLING_PLUGIN_NAME
   | typeof PAYMENTS_PLUGIN_NAME
   | typeof PESAPAL_PLUGIN_NAME
-  | typeof TENANT_APP_PLUGIN_NAME;
+  | typeof TENANT_APP_PLUGIN_NAME
+  | typeof OPERATIONS_PLUGIN_NAME;
 
 export const ORGANIZATION_DIRECTORY_PLUGIN_VERSION = "0.1.0";
 export const COMMUNITY_MANAGEMENT_PLUGIN_VERSION = "0.1.0";
@@ -34,6 +37,7 @@ export const BILLING_PLUGIN_VERSION = "0.1.0";
 export const PAYMENTS_PLUGIN_VERSION = "0.1.0";
 export const PESAPAL_PLUGIN_VERSION = "0.1.0";
 export const TENANT_APP_PLUGIN_VERSION = "0.1.0";
+export const OPERATIONS_PLUGIN_VERSION = "0.1.0";
 
 /**
  * The kinds of core record whose owning organization MGM can resolve. Kept
@@ -90,12 +94,13 @@ export interface BundledPlugin {
    * Whether the plugin is on for an organization that has no `mgm_plugins`
    * row for it. Absent means true. `false` makes the plugin off until an
    * operator turns it on for each organization (the tenant app, RFC
-   * mgm#197 § 3). The database answers the same question in
-   * `mgm_plugin_enabled_for_org`, which lists these plugins by name; the
-   * gate, the GUI host and the composers read plugin state there, Settings →
-   * Plugins reads it here (resolvePluginStatuses). If a plugin's default
-   * changes, change that function's list in a new migration in the same
-   * commit: default-off-plugins.test.ts fails while the two lists differ.
+   * mgm#197 § 3, and the operations plugin, #133). The database answers the
+   * same question in `mgm_plugin_enabled_for_org`, which lists these plugins
+   * by name; the gate, the GUI host and the composers read plugin state
+   * there, Settings → Plugins reads it here (resolvePluginStatuses). If a
+   * plugin's default changes, change that function's list in a new migration
+   * in the same commit: default-off-plugins.test.ts fails while the two
+   * lists differ.
    */
   defaultEnabled?: false;
   provides: string[];
@@ -413,8 +418,8 @@ export const TENANT_APP_PLUGIN: BundledPlugin = {
     "A tenant's own view of their unit, its meters and their use by day and hour, for the tenants the organization gives access to. Off until it is turned on for the organization.",
   dependencies: [METERING_PLUGIN_NAME, COMMUNITY_MANAGEMENT_PLUGIN_NAME],
   core: false,
-  // The only plugin that is off without a state row: an operator turns it
-  // on for the organizations whose tenants get the app (RFC mgm#197 § 3).
+  // Off without a state row: an operator turns it on for the organizations
+  // whose tenants get the app (RFC mgm#197 § 3).
   defaultEnabled: false,
   // Read-only for tenants. It reads tenants and their meter assignments
   // through the tenant's own row-level access, and its meters' use through
@@ -437,6 +442,40 @@ export const TENANT_APP_PLUGIN: BundledPlugin = {
   tables: [],
 };
 
+export const OPERATIONS_PLUGIN: BundledPlugin = {
+  name: OPERATIONS_PLUGIN_NAME,
+  // ADR-007 names the plugin "operations"; its gate code is therefore
+  // operations_disabled. The display name differs because metering already
+  // owns a page called Operations (/microgrids/[id]/operations, the site's
+  // day), which a switch named "Operations" in Settings would read as.
+  alias: "operations",
+  version: OPERATIONS_PLUGIN_VERSION,
+  displayName: "Investigations",
+  description:
+    "Investigations of a site's day. Nothing uses this plugin yet; it is off until an organization manager turns it on.",
+  // Community management only, not metering: an investigation of a site
+  // whose organization has metering off records metering's refusal as
+  // evidence (docs/investigation-cases.md, case C14), and
+  // validatePluginToggle would refuse that setup if this listed metering. If
+  // that case stops expecting the refusal as evidence, revisit.
+  dependencies: [COMMUNITY_MANAGEMENT_PLUGIN_NAME],
+  core: false,
+  // Off without a state row (#133): investigations share one
+  // installation-wide evidence budget and retention pass across
+  // organizations (ADR-007 decision 3; investigation-evidence.md Q5), so
+  // each organization opts in. If the budget becomes per organization,
+  // revisit. Off also keeps it from blocking community management from
+  // being turned off: validatePluginToggle counts a dependent with no row
+  // at its default.
+  defaultEnabled: false,
+  provides: ["investigations"],
+  // Nothing yet: its tables, composer, routes and views arrive with their
+  // first consumer (ADR-007 decision 2).
+  routes: [],
+  pages: [],
+  tables: [],
+};
+
 export const MGM_BUNDLED_PLUGINS: readonly BundledPlugin[] = [
   ORGANIZATION_DIRECTORY_PLUGIN,
   COMMUNITY_MANAGEMENT_PLUGIN,
@@ -445,6 +484,7 @@ export const MGM_BUNDLED_PLUGINS: readonly BundledPlugin[] = [
   PAYMENTS_PLUGIN,
   PESAPAL_PLUGIN,
   TENANT_APP_PLUGIN,
+  OPERATIONS_PLUGIN,
 ] as const;
 
 /** Whether `plugin` is on for an organization with no `mgm_plugins` row for it. */

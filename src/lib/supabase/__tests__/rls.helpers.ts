@@ -71,7 +71,7 @@ export async function assertEnvironmentReady(): Promise<void> {
       `[RLS tests] Missing required environment variables: ${missing.join(", ")}.\n` +
         "These tests require a running local Supabase CLI instance.\n" +
         "Run ./setup.sh to set up your local environment.\n" +
-        "Retrieve SUPABASE_JWT_SECRET with: supabase status | grep 'JWT secret'\n" +
+        "Retrieve SUPABASE_JWT_SECRET with: supabase status -o env | grep '^JWT_SECRET='\n" +
         "Set SKIP_RLS_TESTS=1 to bypass this check (CI without local Supabase)."
     );
   }
@@ -325,7 +325,7 @@ export function runAsDatabaseOwner(sql: string): {
 } {
   const result = spawnSync(
     "supabase",
-    ["db", "query", "--local", "--agent=no", "-o", "json", sql],
+    ["db", "query", "--agent=no", "-o", "json", sql],
     { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 60_000 }
   );
   if (result.error) {
@@ -349,7 +349,7 @@ function runAsDatabaseOwnerInBackground(sql: string): {
 } {
   let finished = false;
   const done = new Promise<OwnerQueryResult>((resolve, reject) => {
-    const child = spawn("supabase", ["db", "query", "--local", "--agent=no", "-o", "json", sql]);
+    const child = spawn("supabase", ["db", "query", "--agent=no", "-o", "json", sql]);
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => (stdout += chunk));

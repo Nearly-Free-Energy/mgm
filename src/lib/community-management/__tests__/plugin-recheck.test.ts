@@ -50,6 +50,7 @@ function stubRepo(
     updateCommunity: async () => ({ data: { id: COMMUNITY_ID } as never, error: null }),
     insertMicrogrid: async () => ({ data: { id: MG_ID } as never, error: null }),
     updateMicrogrid: async () => ({ data: { id: MG_ID } as never, error: null }),
+    getMicrogridCurrencyUse: async () => ({ data: { currency: "UGX", closedPeriods: 0 }, error: null }),
     createTenant: async () => ({ data: HH_ID, error: null }),
     findDeviceLink: async () => null,
     getOpenDeviceLink: async () => null,

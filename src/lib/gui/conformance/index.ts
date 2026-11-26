@@ -9,7 +9,7 @@
  * import it (gui-boundary.test.ts).
  */
 import { describe, it } from "vitest";
-import type { GuiPlugin } from "../contract";
+import type { GuiPlugin } from "../contract-react";
 import { registerConformance } from "./describe";
 
 export { CHECKS, WIDTHS, type CheckId, type Finding } from "./checks";
