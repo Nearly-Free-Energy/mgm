@@ -37,8 +37,9 @@ const composeMetering = vi.fn();
 vi.mock("@/lib/metering/compose", () => ({ composeMetering: (...args: unknown[]) => composeMetering(...args) }));
 
 import { METERING_SURFACE } from "@/lib/metering/surface";
-import { ASSISTANT_READ_MAX_CHARS, WITHHELD_NOTE, readForAssistant, type AssistantView } from "../assistant-read";
-import { viewModelSchema } from "../model-schema";
+import { ASSISTANT_READ_MAX_CHARS, WITHHELD_NOTE, readForAssistant } from "../assistant-read";
+import { actionRefSchema, viewModelSchema } from "../model-schema";
+import { DATA_KEYS } from "../parse";
 import { WITHHELD_EMBED, dispatchView } from "../view";
 import { ORG_A, ORG_B, managerOf, superAdmin, tableClient, tenantOf } from "./host-fakes";
 
@@ -390,6 +391,68 @@ describe("readForAssistant, for a view", () => {
     expect(loadOf(other)).not.toHaveBeenCalled();
   });
 
+  it("withholds an embed inside an embedded feed, records its entry, and never loads it", async () => {
+    const entry = (id: string, href: string) => ({ id, at: "2026-11-09T07:00:00Z", author: { kind: "system", name: "MGM" }, text: [{ p: ["x"] }], embed: { type: "view", href } });
+    const feed = view("metering", { id: "metering.feed", kind: "feed", path: "/microgrids/[id]/operations", agent: "read", declares: { keys: [] } } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
+    const inner = view("metering", { id: "metering.inner", kind: "feed", path: "/microgrids/[id]/setup/openems-backend", agent: "read", declares: { keys: [] } } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
+    const other = view("metering", { id: "metering.other", path: "/microgrids/[id]/setup/edges" });
+    loadOf(feed).mockResolvedValue({ ok: true, model: { title: "Feed", actions: [], body: { entries: [entry("e1", `/microgrids/${MG}/setup/openems-backend`)] } } });
+    loadOf(inner).mockResolvedValue({ ok: true, model: { title: "Inner", actions: [], body: { entries: [entry("e2", `/microgrids/${MG}/setup/edges`)] } } });
+    snapshot = snapshotOf([feed, inner, other]);
+    list({ kind: "view", id: "metering.feed" }, { kind: "view", id: "metering.inner" });
+    const out = await read(DAY);
+    if (!out.ok || out.value.model.kind !== "feed") throw new Error("refused");
+    const embed = out.value.model.body.entries[0].embed;
+    expect(embed?.type === "view" && embed.model.kind === "feed" && embed.model.body.entries[0].embed).toEqual(WITHHELD_EMBED);
+    expect(out.value.withheld).toEqual([{ what: "embed", entry: "e2", note: WITHHELD_NOTE }]);
+    expect(loadOf(inner)).toHaveBeenCalledOnce();
+    expect(loadOf(other)).not.toHaveBeenCalled();
+  });
+
+  it("removes a flow step's action and a collection's empty action, keeping ext and declared keys named like actions", async () => {
+    const link = { action: "metering.check", params: { id: MG } };
+    const flow = view("metering", { id: "metering.flow", kind: "flow", path: "/microgrids/[id]/setup", agent: "read", declares: { keys: [] } } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
+    loadOf(flow).mockResolvedValue({ ok: true, model: { title: "Flow", actions: [], body: { steps: [{ id: "s1", title: "Check", state: "current", action: link }] } } });
+    const listing = view("metering", {
+      id: "metering.list",
+      kind: "collection",
+      path: "/microgrids/[id]/operations",
+      agent: "read",
+      declares: { keys: ["action"] },
+      ext: { schema: "metering.list@1", zod: z.strictObject({ actions: z.array(z.string()), action: z.string() }) },
+    } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
+    const ext = { schema: "metering.list@1", data: { actions: ["kept"], action: "kept" } };
+    loadOf(listing).mockResolvedValue({
+      ok: true,
+      model: {
+        title: "List",
+        actions: [],
+        ext,
+        body: {
+          columns: [{ key: "action", label: "Action", type: "text", priority: 1 }],
+          rows: [{ id: "r1", cells: { action: { t: "text", text: "kept" } }, actions: [link] }],
+          empty: { title: "None", action: link },
+        },
+      },
+    });
+    snapshot = snapshotOf([flow, listing], { actions: [action("metering", "metering.check", "/api/microgrids/[id]/openems-backend")] });
+    list({ kind: "view", id: "metering.flow" }, { kind: "view", id: "metering.list" });
+
+    const pages = [await dispatchView(ctx(), `/microgrids/${MG}/setup`), await dispatchView(ctx(), DAY)];
+    expect(pages.map((p) => p.ok && JSON.stringify(p.value).includes("metering.check"))).toEqual([true, true]);
+
+    const steps = await read(`/microgrids/${MG}/setup`);
+    if (!steps.ok || steps.value.model.kind !== "flow") throw new Error("refused");
+    expect(steps.value.model.body.steps).toEqual([{ id: "s1", title: "Check", state: "current" }]);
+
+    const rows = await read(DAY);
+    if (!rows.ok || rows.value.model.kind !== "collection") throw new Error("refused");
+    expect(rows.value.model.body.empty).toEqual({ title: "None" });
+    expect(rows.value.model.body.rows).toEqual([{ id: "r1", cells: { action: { t: "text", text: "kept" } }, actions: [] }]);
+    expect(rows.value.model.ext).toEqual(ext);
+    expect(JSON.stringify([steps, rows])).not.toContain("metering.check");
+  });
+
   it("removes every action, proposal and composer, keeping the data subtrees", async () => {
     const feed = view("metering", { id: "metering.feed", kind: "feed", path: "/microgrids/[id]/operations", agent: "read", declares: { keys: [] } } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
     loadOf(feed).mockResolvedValue({
@@ -440,13 +503,71 @@ describe("readForAssistant, for a view", () => {
     expect(page.ok && JSON.stringify(page.value).length).toBeGreaterThan(ASSISTANT_READ_MAX_CHARS);
     expect(await read(DAY)).toMatchObject({ ok: false, status: 500, code: "assistant_output_too_large" });
   });
+});
 
-  it("gives a copy, so nothing the host holds is shared", async () => {
-    const a = await read(DAY);
-    const b = await read(DAY);
-    if (!a.ok || !b.ok) throw new Error("refused");
-    (a.value as AssistantView).model.title = "changed";
-    expect(b.value.model.title).not.toBe("changed");
+describe("the positions stripActions removes", () => {
+  type Def = {
+    type: string;
+    shape?: Record<string, z.ZodType>;
+    element?: z.ZodType;
+    items?: z.ZodType[];
+    rest?: z.ZodType | null;
+    options?: z.ZodType[];
+    innerType?: z.ZodType;
+    valueType?: z.ZodType;
+    getter?: () => z.ZodType;
+    values?: unknown[];
+  };
+  const defOf = (s: z.ZodType) => s._zod.def as unknown as Def;
+  const LEAVES = new Set(["string", "number", "boolean", "literal", "enum", "template_literal", "null", "int"]);
+  /** The names whose whole value stripActions removes or empties. */
+  const REMOVED = new Set(["actions", "action", "stop", "compose"]);
+
+  it("finds every ActionRef in a view model under a name it removes, or in an action embed", () => {
+    const problems: string[] = [];
+    let found = 0;
+    const seen = new Map<z.ZodType, Set<string>>();
+    // `removed`: an enclosing name or action embed takes this value away; `data`: under DATA_KEYS, which are kept as they are.
+    const visit = (s: z.ZodType, prop: string, removed: boolean, data: boolean, at: string): void => {
+      if (s === actionRefSchema) {
+        found++;
+        if (data || !removed) problems.push(`${at}: an ActionRef stripActions would keep`);
+        return;
+      }
+      const state = `${removed}:${data}`;
+      const states = seen.get(s) ?? new Set<string>();
+      if (states.has(state)) return;
+      seen.set(s, states.add(state));
+      const d = defOf(s);
+      switch (d.type) {
+        case "object": {
+          const type = d.shape!.type;
+          const actionEmbed = prop === "embed" && type !== undefined && defOf(type).type === "literal" && defOf(type).values!.includes("action");
+          for (const [key, child] of Object.entries(d.shape!)) {
+            visit(child, key, removed || actionEmbed || (!data && REMOVED.has(key)), data || DATA_KEYS.has(key), `${at}.${key}`);
+          }
+          return;
+        }
+        case "optional":
+        case "nullable":
+          return visit(d.innerType!, prop, removed, data, at);
+        case "lazy":
+          return visit(d.getter!(), prop, removed, data, at);
+        case "union":
+          return d.options!.forEach((o) => visit(o, prop, removed, data, at));
+        case "array":
+          return visit(d.element!, prop, removed, data, `${at}[]`);
+        case "tuple":
+          return [...d.items!, ...(d.rest ? [d.rest] : [])].forEach((i) => visit(i, prop, removed, data, `${at}[]`));
+        case "record":
+          return visit(d.valueType!, prop, removed, data, `${at}.*`);
+        default:
+          if (!LEAVES.has(d.type)) problems.push(`${at}: a ${d.type} the audit does not know`);
+      }
+    };
+    visit(viewModelSchema, "", false, false, "(value)");
+    expect(problems).toEqual([]);
+    expect(found).toBeGreaterThan(5);
   });
 });
 

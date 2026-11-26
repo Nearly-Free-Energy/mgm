@@ -160,6 +160,8 @@ const isPlain = (v: unknown): v is Record<string, unknown> => v !== null && type
  * emptied, so the model keeps its shape, and each `action`, `stop` and
  * `compose`, and each action embed, removed. Data subtrees (DATA_KEYS) are
  * copied as they are, and a record's keys are a view's declared keys.
+ * __tests__/assistant-read.test.ts walks the view model schema and fails
+ * if an ActionRef sits under any other name.
  */
 function stripActions(node: unknown, keysAreData = false): unknown {
   if (Array.isArray(node)) return node.map((item) => stripActions(item));
@@ -274,7 +276,13 @@ async function readView(
   };
 }
 
-/** `value` as an answer, unless it is too large; a copy, so nothing the host holds is shared. */
+/**
+ * `value` as an answer, unless it is too large. It is not copied: every
+ * object in it is built here or comes out of the host's strict parse of the
+ * model or signals (parseOrFail, ./parse.ts), which builds new objects, so
+ * it shares nothing a loader, watcher or cache holds. If dispatchView or
+ * assistantSignals starts returning a cached or unparsed value, copy it here.
+ */
 function bounded<T>(value: T): AssistantOutcome<T> {
   let length: number;
   try {
@@ -282,7 +290,7 @@ function bounded<T>(value: T): AssistantOutcome<T> {
   } catch {
     return TOO_LARGE;
   }
-  return length > ASSISTANT_READ_MAX_CHARS ? TOO_LARGE : { ok: true, value: structuredClone(value) };
+  return length > ASSISTANT_READ_MAX_CHARS ? TOO_LARGE : { ok: true, value };
 }
 
 async function readSignals(ctx: HostContext, requested: string | null | undefined): Promise<AssistantOutcome<AssistantSignals>> {
@@ -338,6 +346,10 @@ export async function readForAssistant(
     return request.type === "view" ? NOT_FOUND : fail(403, "gui_no_access", "Your account has no organization yet.");
   }
   if (request.type === "signals") {
+    // Bounded, though no answer can reach the bound today: the host gives at
+    // most MAX_TOP (20) signals of at most 4,000 characters each
+    // (./signals.ts), about 80,000, so no test reaches it. If those caps grow
+    // past ASSISTANT_READ_MAX_CHARS, test this refusal too.
     const out = await readSignals(ctx, request.org);
     return out.ok ? bounded(out.value) : out;
   }
