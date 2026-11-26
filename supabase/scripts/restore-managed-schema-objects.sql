@@ -1,9 +1,12 @@
 -- Re-creates the objects MGM's migrations attach to tables in schemas that
--- Supabase manages (auth, storage). A logical restore loses them: the
--- Supabase CLI's schema dump leaves those schemas out, and pg_dump writes a
--- table's triggers and policies only together with the table. Restoring the
--- migration history afterwards marks the defining migrations as applied, so
--- nothing would bring them back.
+-- Supabase manages (auth, storage), and MGM's one grant of a role to a role
+-- Supabase manages. A logical restore loses them: the Supabase CLI's schema
+-- dump leaves those schemas out, pg_dump writes a table's triggers and
+-- policies only together with the table, and roles.sql comments out every
+-- grant to a role Supabase manages (filter_roles in
+-- scripts/backup/export-database.sh). Restoring the migration history
+-- afterwards marks the defining migrations as applied, so nothing would
+-- bring them back.
 --
 -- Run it after data.sql, in the same transaction, from a checkout of the MGM
 -- release being restored (docs/runbooks/backup-and-restore.md, the logical
@@ -82,5 +85,16 @@ CREATE POLICY "invoice_logos_delete" ON storage.objects
         AND user_can_access_org(comm.org_id)
     )
   );
+
+-- From supabase/migrations/20261126160000_mgm_agent_role.sql. roles.sql
+-- creates mgm_agent, and schema.sql its grants and policy, but without this
+-- PostgREST cannot switch an agent client's token to it. A grant that is
+-- already there is left as it is. An export from a database that never ran
+-- 20261126160000 has no such role, since migrations are pushed apart from
+-- releases, so the grant is skipped there rather than stopping the restore;
+-- schema.sql would already have failed had it granted the missing role
+-- anything. (One line: a BEGIN that starts a line reads as transaction
+-- control to scripts/tests/test_restore_managed_schema_objects.py.)
+DO $$ BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'mgm_agent') THEN GRANT mgm_agent TO authenticator; END IF; END $$;
 
 RESET search_path;

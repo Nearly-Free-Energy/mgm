@@ -1,7 +1,8 @@
 /**
- * auth_access_token_hook_clients.test.ts — #270, ADR-008 decisions 1, 2
- * and 7; migrations 20261126090000 (mgm_clients, mgm_client_approvals) and
- * 20261126090100 (the hook's rules for clients that are not a browser).
+ * auth_access_token_hook_clients.test.ts — #270 and #274, ADR-008 decisions
+ * 1, 2 and 7; migrations 20261126090000 (mgm_clients, mgm_client_approvals),
+ * 20261126090100 (the hook's rules for clients that are not a browser) and
+ * 20261126160100 (an agent client's token runs as mgm_agent).
  *
  * 1. Direct calls of fn_auth_access_token_hook, as the database owner, with
  *    crafted events: every rule, one at a time.
@@ -16,7 +17,8 @@
  *    policy: the direct calls run as the owner, who bypasses both.
  *
  * Browser sign-in through the hook (the email and emergency links, and the
- * password refusal) is auth_access_token_hook.test.ts.
+ * password refusal) is auth_access_token_hook.test.ts; what mgm_agent may
+ * read and run is agent_role.test.ts.
  *
  * Opt-out: SKIP_RLS_TESTS=1, for running without a local Supabase.
  */
@@ -40,6 +42,7 @@ import {
 
 const skip = shouldSkip();
 const KIND_CLAIM = "mgm_client_kind";
+const AGENT_ROLE = "mgm_agent";
 const EMAILS = ["hook-client-a@test.local", "hook-client-b@test.local"];
 const REDIRECT_URI = "http://127.0.0.1:3000/oauth/test-code";
 
@@ -96,6 +99,11 @@ function clientEvent(
 
 function withKind(event: ReturnType<typeof clientEvent>, kind: string) {
   return { ...event, claims: { ...event.claims, [KIND_CLAIM]: kind } };
+}
+
+/** What the hook returns for an agent client: its kind, and the role mgm_agent. */
+function asAgent(event: ReturnType<typeof clientEvent>) {
+  return { ...event, claims: { ...event.claims, [KIND_CLAIM]: "agent", role: AGENT_ROLE } };
 }
 
 // ── Supabase Auth helpers ──────────────────────────────────────────────────
@@ -241,6 +249,29 @@ async function unlist(clientId: string) {
   expect(error).toBeNull();
 }
 
+/**
+ * A token Supabase Auth issued with the role mgm_agent: Supabase Auth itself
+ * answers GET /user with it, and PostgREST runs it as mgm_agent, which reads
+ * the caller's own role rows and organizations and is refused a write and a
+ * table or column it is not granted (agent_role.test.ts has the rest).
+ */
+async function expectAgentToken(token: string, userId: string) {
+  const user = await auth("GET", "/user", { token });
+  expect(user.status, JSON.stringify(user.body)).toBe(200);
+  expect(user.body.id).toBe(userId);
+  const db = clientAs(token);
+  const own = await db.from("user_roles").select("user_id");
+  expect(own.error).toBeNull();
+  expect(own.data).toEqual([]); // the fixture users hold no role rows
+  const orgs = await db.from("organizations").select("id, name");
+  expect(orgs.error).toBeNull();
+  expect(orgs.data).toEqual([]); // and so reach no organization
+  expect((await db.from("organizations").select("address_city")).error?.code).toBe("42501");
+  expect((await db.from("communities").select("id")).error?.code).toBe("42501");
+  const write = await db.from("user_roles").insert({ user_id: userId, role: "super_admin", scope_type: "org" });
+  expect(write.error?.code).toBe("42501");
+}
+
 // ── Fixtures ───────────────────────────────────────────────────────────────
 
 const OPERATOR = randomUUID();
@@ -313,13 +344,31 @@ describe.skipIf(skip)("access-token hook: clients that are not a browser (#270)"
       expect(hook(operator)).toEqual(withKind(operator, "operator"));
     });
 
-    // Until #274 gives an agent client a role of its own: as authenticated it
-    // would hold the person's full authority at the database API.
-    it("refuses a listed agent client, sign-in and refresh, and uses no record up", async () => {
+    // As authenticated it would hold the person's full authority at the
+    // database API; mgm_agent reads only what migrations grant it (#274).
+    it("gives a listed agent client's token the role mgm_agent, and changes nothing else", () => {
+      const refreshed = clientEvent("token_refresh", userA, AGENT);
+      expect(hook(refreshed)).toEqual(asAgent(refreshed));
+    });
+
+    it("counts an agent client's new sign-in only against a fresh record, as an operator's", async () => {
+      const event = clientEvent("oauth_provider/authorization_code", userA, AGENT);
+      expect(hook(event)).toEqual(refusal(NOT_APPROVED));
       await record(userA, AGENT);
-      expect(hook(clientEvent("token_refresh", userA, AGENT))).toEqual(refusal(REFUSED));
-      expect(hook(clientEvent("oauth_provider/authorization_code", userA, AGENT))).toEqual(refusal(REFUSED));
-      expect(approvals(userA, AGENT)).toEqual([{ used: false }]);
+      expect(hook(event)).toEqual(asAgent(event));
+      expect(approvals(userA, AGENT)).toEqual([{ used: true }]);
+      expect(hook(event)).toEqual(refusal(NOT_APPROVED));
+    });
+
+    it("refuses an agent client sign-in or refresh that asks for scope openid, and uses no record up", async () => {
+      await record(userA, AGENT);
+      for (const scope of ["openid", "email openid", "email \u00a0openid"]) {
+        expect(hook(clientEvent("token_refresh", userA, AGENT, { scope }))).toEqual(refusal(NO_OPENID));
+        expect(hook(clientEvent("oauth_provider/authorization_code", userA, AGENT, { scope }))).toEqual(
+          refusal(NO_OPENID)
+        );
+      }
+      expect(approvals(userA, AGENT)).toEqual([{ used: true }, { used: false }]);
     });
 
     it("refuses a client the table does not list, or a client_id that is not one", () => {
@@ -406,21 +455,33 @@ describe.skipIf(skip)("access-token hook: clients that are not a browser (#270)"
     it("refuses a client token by any other method", () => {
       for (const method of ["otp", "magiclink", "sso/saml", "oauth", "", "anonymous"]) {
         expect(hook(clientEvent(method, userA, OPERATOR))).toEqual(refusal(REFUSED));
+        expect(hook(clientEvent(method, userA, AGENT))).toEqual(refusal(REFUSED));
       }
       const noMethod: Record<string, unknown> = { ...clientEvent("token_refresh", userA, OPERATOR) };
       delete noMethod.authentication_method;
       expect(hook(noMethod)).toEqual(refusal(REFUSED));
     });
 
-    it("never hands out service_role or supabase_admin, and a client token runs as authenticated", () => {
+    it("never hands out service_role or supabase_admin, and takes a client token only as authenticated", () => {
       for (const role of ["service_role", "supabase_admin"]) {
-        expect(hook(clientEvent("token_refresh", userA, OPERATOR, { role }))).toEqual(refusal(REFUSED));
+        for (const client of [OPERATOR, AGENT]) {
+          expect(hook(clientEvent("token_refresh", userA, client, { role }))).toEqual(refusal(REFUSED));
+        }
         const browser = { user_id: userA, authentication_method: "otp", claims: { sub: userA, role } };
         expect(hook(browser)).toEqual(refusal(REFUSED));
       }
-      for (const role of ["anon", "postgres", "mgm_agent", ""]) {
-        expect(hook(clientEvent("token_refresh", userA, OPERATOR, { role }))).toEqual(refusal(REFUSED));
+      // An agent token that already says mgm_agent is refused too: Supabase
+      // Auth v2.198.0 builds every event's role from the user, authenticated.
+      for (const role of ["anon", "postgres", AGENT_ROLE, ""]) {
+        for (const client of [OPERATOR, AGENT]) {
+          expect(hook(clientEvent("token_refresh", userA, client, { role }))).toEqual(refusal(REFUSED));
+        }
       }
+      // Every token the hook accepts runs as authenticated or as mgm_agent.
+      const roles = [OPERATOR, AGENT].map(
+        (client) => (hook(clientEvent("token_refresh", userA, client)) as { claims: { role: string } }).claims.role
+      );
+      expect(roles).toEqual(["authenticated", AGENT_ROLE]);
     });
 
     it("still refuses a password or recovery session, a client's included", () => {
@@ -493,8 +554,8 @@ describe.skipIf(skip)("access-token hook: clients that are not a browser (#270)"
       ]);
     });
 
-    it("gives anon and authenticated no privilege on either table", () => {
-      const checks = ["anon", "authenticated"].flatMap((role) =>
+    it("gives anon, authenticated and mgm_agent no privilege on either table", () => {
+      const checks = ["anon", "authenticated", AGENT_ROLE].flatMap((role) =>
         ["public.mgm_clients", "public.mgm_client_approvals"].flatMap((table) => [
           ...["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"].map(
             (p) => `has_table_privilege('${role}', '${table}', '${p}')`
@@ -735,18 +796,37 @@ describe.skipIf(skip)("access-token hook: clients that are not a browser (#270)"
       refreshToken = again.body.refresh_token as string;
     }, 30_000);
 
-    it("refuses the refresh while the client is listed as an agent (#274)", async () => {
+    it("refreshes as mgm_agent while the client is listed as an agent, and as authenticated once it is an operator again (#274)", async () => {
       const svc = await serviceClient();
       const kind = (k: string) => svc.from("mgm_clients").update({ kind: k }).eq("client_id", listedClient);
       expect((await kind("agent")).error).toBeNull();
+      let agentToken = "";
       try {
-        const refused = await refresh(listedClient, refreshToken);
-        expect(refused.status, JSON.stringify(refused.body)).toBe(403);
-        expect(JSON.stringify(refused.body)).toContain(REFUSED);
-        expect(refused.body.access_token).toBeUndefined();
+        const refreshed = await refresh(listedClient, refreshToken);
+        expect(refreshed.status, JSON.stringify(refreshed.body)).toBe(200);
+        refreshToken = refreshed.body.refresh_token as string;
+        agentToken = refreshed.body.access_token as string;
       } finally {
         expect((await kind("operator")).error).toBeNull();
       }
+      expect(claimsOf(agentToken)).toMatchObject({
+        sub: userA,
+        role: AGENT_ROLE,
+        client_id: listedClient,
+        [KIND_CLAIM]: "agent",
+      });
+      await expectAgentToken(agentToken, userA);
+
+      const back = await refresh(listedClient, refreshToken);
+      expect(back.status, JSON.stringify(back.body)).toBe(200);
+      refreshToken = back.body.refresh_token as string;
+      expect(claimsOf(back.body.access_token as string)).toMatchObject({
+        role: "authenticated",
+        [KIND_CLAIM]: "operator",
+      });
+      // Neither refresh needed a record. (Unlisting the client above removed
+      // the earlier, used one.)
+      expect(approvals(userA, listedClient)).toEqual([]);
     }, 30_000);
 
     // Supabase Auth reads ["email", "openid"] from this scope and accepts it at
@@ -785,6 +865,35 @@ describe.skipIf(skip)("access-token hook: clients that are not a browser (#270)"
       expect(JSON.stringify(refused.body)).toContain(NOT_ACCEPTED);
       expect(refused.body.access_token).toBeUndefined();
       expect(clientSessions(userA, unlistedClient)).toBe(0);
+    }, 60_000);
+
+    it("signs an agent client in as mgm_agent, against a recorded approval (#274)", async () => {
+      const svc = await serviceClient();
+      const kind = (k: string) => svc.from("mgm_clients").update({ kind: k }).eq("client_id", listedClient);
+      const usedBefore = approvals(userB, listedClient).filter((a) => a.used).length;
+      expect(clientSessions(userB, listedClient)).toBe(0);
+      expect((await kind("agent")).error).toBeNull();
+      let accepted: AuthAnswer;
+      try {
+        const browser = await browserSession(EMAILS[1]);
+        const { code, verifier } = await codeFor(listedClient, browser, "email");
+        await record(userB, listedClient);
+        accepted = await exchange(listedClient, code, verifier);
+      } finally {
+        expect((await kind("operator")).error).toBeNull();
+      }
+      expect(accepted.status, JSON.stringify(accepted.body)).toBe(200);
+      expect(accepted.body.id_token).toBeUndefined();
+      const token = accepted.body.access_token as string;
+      expect(claimsOf(token)).toMatchObject({
+        sub: userB,
+        role: AGENT_ROLE,
+        client_id: listedClient,
+        [KIND_CLAIM]: "agent",
+      });
+      expect(approvals(userB, listedClient).filter((a) => a.used)).toHaveLength(usedBefore + 1);
+      expect(clientSessions(userB, listedClient)).toBe(1);
+      await expectAgentToken(token, userB);
     }, 60_000);
   });
 });

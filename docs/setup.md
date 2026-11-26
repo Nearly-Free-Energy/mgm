@@ -278,7 +278,8 @@ belong to the Supabase project rather than to MGM's environment.
   / Providers › Email). The link says it works for 15 minutes.
 - **The Custom Access Token hook** (Authentication › Auth Hooks): a
   Postgres function, `public.fn_auth_access_token_hook`, which migration
-  `20261117210000` creates and `20261126090100` replaces. It refuses a token
+  `20261117210000` creates and `20261126090100` and `20261126160100`
+  replace. It refuses a token
   for a session that a password or a recovery started, new or refreshed, so
   Supabase's own password endpoints sign nobody in. For a client of the OAuth
   server it applies the rules in
@@ -317,7 +318,10 @@ Auth calls the function for every sign-in and every refresh, the email link
 and the emergency link included. If the function is missing or fails,
 nobody can sign in. While it is off, Supabase Auth still issues tokens to
 clients of the OAuth server, with no kind, no approval record and no check of
-MGM's table of clients (ADR-008 decision 2). So, in this order:
+MGM's table of clients (ADR-008 decision 2), and an agent client's token
+runs as `authenticated`, with the person's full authority at the database
+API, not as `mgm_agent` (ADR-008 decision 7). MGM's routes refuse a client
+token with no kind; the database API does not. So, in this order:
 
 1. If the project's OAuth server is on, turn it off first
    ([Clients that are not a browser](#clients-that-are-not-a-browser)), and
@@ -329,7 +333,8 @@ MGM's table of clients (ADR-008 decision 2). So, in this order:
    `hook_custom_access_token_enabled: false`), and read the setting back
    with `GET` to check it is `false`.
 3. Only then change, replace or drop `public.fn_auth_access_token_hook`.
-   Pushing a migration that replaces it, such as `20261126090100`, counts.
+   Pushing a migration that replaces it, such as `20261126090100` or
+   `20261126160100`, counts.
 4. Turn the hook back on, if it should be, once the function is in place.
 5. If you turned the OAuth server off in step 1, turn it back on last, only
    once the hook is on again.
@@ -348,11 +353,15 @@ Supabase Auth and lists them in MGM's table, `public.mgm_clients`:
 | Client | Kind | Lists it when |
 |--------|------|---------------|
 | The CLI | `operator` | The installation wants the CLI |
-| The assistant bridge | `agent` | The release includes the assistant's database role (#274). Until then, register and list the operator client only: the hook refuses every sign-in and refresh of an `agent` client, listed or not |
+| The assistant bridge | `agent` | The installation runs the assistant bridge, and the migrations up to `20261126160100` are pushed: the hook gives an `agent` client's token the database role `mgm_agent`, which reads only what migrations grant it (`20261126160000`). Before `20261126160100` the hook refuses every sign-in and refresh of an `agent` client, listed or not |
 
 The access-token hook (above) refuses a token for a client that
 `mgm_clients` does not list, and writes the client's kind into the token as
-the `mgm_client_kind` claim. It refuses a client sign-in that asks for scope
+the `mgm_client_kind` claim. An operator client's token runs as
+`authenticated`, as a browser session's does; an agent client's runs as
+`mgm_agent`. Nothing on Supabase's side sets up that role: the migration
+creates it and grants it to `authenticator`, the role the database API
+connects as. The hook refuses a client sign-in that asks for scope
 `openid`: MGM's clients get an access token and a refresh token, and nothing
 else. A new client sign-in counts only after MGM's own consent page has
 recorded the person's approval (`public.mgm_client_approvals`, written by
@@ -425,14 +434,113 @@ in the dashboard as a public client with the same return address. For the assist
 assistant bridge"`.
 
 **3. List each client in MGM's table.** Locally with `supabase db query`,
-on a hosted project in the SQL editor:
+on a hosted project in the SQL editor.
+
+On a hosted project, before listing the assistant bridge, check that
+`20261126160000` and `20261126160100` were pushed (both appear in
+`supabase_migrations.schema_migrations`) and that the role reaches what
+`src/lib/supabase/__tests__/agent_role.test.ts` pins and nothing more. A
+long-lived database can differ from the migrations: enabling an extension or
+turning Realtime on for a table in the dashboard changes the role's reach
+with no migration. A hosted project may also refuse the grant to
+`authenticator`; a refused grant stops the push before `20261126160100`, so
+no agent token runs as anything. Run the queries before listing the bridge,
+and again after a restore from `roles.sql` or any change made in the
+dashboard. In the SQL editor, run each query on its own (select it and run
+the selection: the editor shows only the last result of a batch), and
+compare each answer with its comment:
+
+```sql
+-- Every column false:
+SELECT rolcanlogin, rolinherit, rolsuper, rolcreaterole, rolcreatedb,
+       rolreplication, rolbypassrls
+  FROM pg_roles WHERE rolname = 'mgm_agent';
+
+-- authenticator with SET only, and at most one row with ADMIN only
+-- (the role that created it), and no row with mgm_agent as the member:
+SELECT pg_get_userbyid(roleid) AS role, pg_get_userbyid(member) AS member,
+       admin_option, inherit_option, set_option
+  FROM pg_auth_members
+ WHERE 'mgm_agent'::regrole IN (roleid, member);
+
+-- Exactly two rows, both RESTRICTIVE and ALL, with the same qual and
+-- with_check: organizations, user_can_access_org(id); and user_roles,
+-- (user_id = auth.uid()):
+SELECT tablename, policyname, permissive, cmd, qual, with_check
+  FROM pg_policies WHERE 'mgm_agent' = ANY (roles);
+
+-- information_schema, pg_catalog, public, and any extension schema PUBLIC
+-- may use (net, where pg_net is enabled):
+SELECT nspname FROM pg_namespace
+ WHERE has_schema_privilege('mgm_agent', oid, 'USAGE') ORDER BY 1;
+
+-- Exactly is_super_admin(), mgm_plugin_enabled_for_org(uuid,text) and
+-- user_can_access_org(uuid):
+SELECT p.oid::regprocedure FROM pg_proc p
+ WHERE p.prosecdef AND has_schema_privilege('mgm_agent', p.pronamespace, 'USAGE')
+   AND has_function_privilege('mgm_agent', p.oid, 'EXECUTE');
+
+-- Exactly two rows: user_roles SELECT and organizations column SELECT
+-- (its id and name only; the next query shows which):
+SELECT c.relname, p FROM pg_class c, unnest(ARRAY['SELECT']) p
+ WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r','p','v','m','f')
+   AND has_table_privilege('mgm_agent', c.oid, p)
+UNION ALL
+SELECT c.relname, 'column ' || p FROM pg_class c, unnest(ARRAY['SELECT']) p
+ WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r','p','v','m','f')
+   AND NOT has_table_privilege('mgm_agent', c.oid, p)
+   AND has_any_column_privilege('mgm_agent', c.oid, p);
+
+-- Exactly organizations id and name:
+SELECT c.relname, a.attname FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+ WHERE c.relnamespace = 'public'::regnamespace AND a.attnum > 0 AND NOT a.attisdropped
+   AND NOT has_table_privilege('mgm_agent', c.oid, 'SELECT')
+   AND has_column_privilege('mgm_agent', c.oid, a.attnum, 'SELECT');
+
+-- Nothing in public. Outside it, exactly what PUBLIC_WRITES in
+-- agent_role.test.ts lists: pg_settings UPDATE, and pg_net's two tables
+-- and its sequence where pg_net is enabled:
+SELECT c.relnamespace::regnamespace AS schema, c.relname, p FROM pg_class c,
+       unnest(ARRAY['INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p
+ WHERE has_schema_privilege('mgm_agent', c.relnamespace, 'USAGE')
+   AND c.relkind IN ('r','p','v','m','f')
+   AND has_table_privilege('mgm_agent', c.oid, p)
+UNION ALL
+SELECT c.relnamespace::regnamespace, c.relname, 'column ' || p FROM pg_class c,
+       unnest(ARRAY['INSERT','UPDATE','REFERENCES']) p
+ WHERE has_schema_privilege('mgm_agent', c.relnamespace, 'USAGE')
+   AND c.relkind IN ('r','p','v','m','f')
+   AND NOT has_table_privilege('mgm_agent', c.oid, p)
+   AND has_any_column_privilege('mgm_agent', c.oid, p)
+UNION ALL
+SELECT c.relnamespace::regnamespace, c.relname, 'sequence ' || p FROM pg_class c,
+       unnest(ARRAY['USAGE','SELECT','UPDATE']) p
+ WHERE has_schema_privilege('mgm_agent', c.relnamespace, 'USAGE')
+   AND c.relkind = 'S' AND has_sequence_privilege('mgm_agent', c.oid, p);
+
+-- No row: no default privilege names mgm_agent or PUBLIC (a global entry's
+-- EXECUTE for PUBLIC on functions only repeats Postgres's own default):
+SELECT d.defaclrole::regrole, d.defaclnamespace::regnamespace, d.defaclobjtype,
+       a.privilege_type
+  FROM pg_default_acl d, aclexplode(d.defaclacl) a
+ WHERE a.grantee IN ('mgm_agent'::regrole, 0)
+   AND NOT (a.grantee = 0 AND d.defaclnamespace = 0 AND d.defaclobjtype = 'f'
+            AND a.privilege_type = 'EXECUTE');
+
+-- No row, unless a decision about mgm_agent came with the table (CLAUDE.md):
+SELECT schemaname, tablename FROM pg_publication_tables
+ WHERE pubname = 'supabase_realtime';
+```
+
+Any other answer: leave the assistant bridge out of the table, and record
+what you found in your private operations records.
 
 ```sql
 -- The CLI:
 INSERT INTO public.mgm_clients (client_id, kind, label)
 VALUES ('<client_id>', 'operator', 'MGM CLI');
 
--- The assistant bridge, once the release includes #274:
+-- The assistant bridge, once 20261126160100 is pushed and checked:
 INSERT INTO public.mgm_clients (client_id, kind, label)
 VALUES ('<client_id>', 'agent', 'MGM assistant bridge');
 ```
@@ -468,8 +576,13 @@ release that ships the CLI lists them in `src/lib/mgm/released-routes.ts`.
 tokens already issued keep working at MGM's routes and at the database
 until they expire (`jwt_expiry`, one hour by default). Deleting the client
 in Supabase is the same: it ends no session either. To replace a client,
-list the new one before removing the old. An installation that wants no
-assistant at all leaves the agent client out of the table.
+list the new one before removing the old. Never change a listed client's
+`kind` in place: the hook reads it at every refresh, so each live session
+of that client changes role at its next refresh with no new approval, and
+an assistant's sessions listed again as `operator` would hold the person's
+full authority at the database API. Register a new client, list it with the
+new kind, then delete the old row. An installation that wants no assistant
+at all leaves the agent client out of the table.
 
 Only a revoke ends a client's sessions (ADR-008 decision 4): a person who
 revokes the app ends its sessions for them, and MGM's routes refuse its

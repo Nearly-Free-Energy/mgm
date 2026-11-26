@@ -7,13 +7,13 @@
  * (middleware.test.ts).
  *
  * The client is stood in, recorded as the caller each case names, as
- * createClient records a client built on a bearer token. The view route's
- * cases are the part of the agent refusal that
- * src/lib/runtime/__tests__/bearer-session.db.test.ts cannot reach yet: there
- * a real agent token reaches this route as an agent client, but until #274
- * creates the `mgm_agent` role no role rows are read for it, so the route
- * refuses it with 403 `gui_no_access` before any view is looked up. When
- * #274 lands, that file can expect these answers end to end.
+ * createClient records a client built on a bearer token, and so is the GUI
+ * surface, which marks a view for an assistant while ASSISTANT_READS lists
+ * none. End to end, with a real agent token running as `mgm_agent`,
+ * src/lib/runtime/__tests__/bearer-session.db.test.ts shows the view route's
+ * 404 `gui_not_found` for a view not marked for an assistant and the
+ * catalog's 409 `assistant_disabled`; a marked view's 409 waits there for
+ * the first view on ASSISTANT_READS.
  */
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";

@@ -43,9 +43,11 @@ export type ConsentRead =
 /**
  * What each kind of client is, and what it may do once connected. An
  * operator client's token is the person's own (ADR-008 decision 1). An agent
- * client's runs as mgm_agent, which reads only what migrations grant it and
- * writes nothing (decision 7); until #274 the token hook refuses agent
- * clients altogether. If either changes, revisit this text.
+ * client's token runs as mgm_agent, which the token hook sets
+ * (20261126160100); the role reads only what migrations grant it and writes
+ * no table the database API serves (decision 7, pinned by
+ * agent_role.test.ts). If the hook stops setting the role or the role is
+ * granted a write, revisit this text.
  */
 export const CLIENT_KINDS: Record<ClientKind, { name: string; may: string }> = {
   operator: {

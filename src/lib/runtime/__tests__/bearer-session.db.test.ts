@@ -5,14 +5,16 @@
  *
  * Of that early warning, this file signs the operator client in through the
  * OAuth server, calls a route with its token, revokes the grant, and checks
- * that both the refresh and Supabase Auth's answer then fail. Signing the
- * agent client in, and checking that its token runs as `mgm_agent` and is
- * refused a write, wait for #274, which lets the hook issue one.
+ * that both the refresh and Supabase Auth's answer then fail. It also signs
+ * the agent client in and checks that the hook gives its token the role
+ * `mgm_agent` (#274); that the role is refused a write is
+ * `agent_role.test.ts`'s.
  *
  * A client signs in through Supabase Auth's OAuth server as `mgm login`
  * will: authorize, the person's approval with their browser session, the
  * approval record MGM's consent page writes (written here with the service
- * role, as #271's sign-in test is not on main yet), and the code exchanged
+ * role; src/app/api/auth/oauth/approvals/__tests__/sign-in.db.test.ts signs
+ * in through the page's own route), and the code exchanged
  * with its PKCE verifier. Its token then goes through the real middleware
  * and, with the headers middleware passes on, to a real route handler, whose
  * createClient (@/lib/supabase/server) builds the client from the request
@@ -26,19 +28,20 @@
  * fails; a request with both a session cookie and the token is refused; an
  * agent client's token is refused that route and, let on to the view route,
  * builds a client the route reads as that agent client and is refused by
- * the route itself (see that case for which refusal, until #274); a browser
- * session's token is refused as a bearer;
+ * the route's own agent check (404 for a view not marked for an
+ * assistant); the same token at the catalog route reads the person's
+ * organizations as `mgm_agent` and reaches the assistant's gate (409
+ * `assistant_disabled`); a browser session's token is refused as a bearer;
  * a live token with a mark set by hand, as on a route middleware skipped, is
  * refused by the route's createClient.
  *
  * Opt-out: SKIP_RLS_TESTS=1, for running without a local Supabase.
  */
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { SignJWT } from "jose";
 
 import {
   LOCAL_SUPABASE_URL,
@@ -76,6 +79,7 @@ let svc: SupabaseClient;
 let staff: Person;
 let tenant: Person;
 let clientId = "";
+let agentClientId = "";
 
 const anonClient = () =>
   createClient(LOCAL_SUPABASE_URL, testAnonKey()!, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -117,11 +121,11 @@ async function browserFor(userId: string, email: string): Promise<Person> {
 }
 
 /** A whole client sign-in for `person`, ending in an access token and its refresh token. */
-async function signIn(person: Person): Promise<{ access: string; refresh: string }> {
+async function signIn(person: Person, client: string = clientId): Promise<{ access: string; refresh: string }> {
   const verifier = randomBytes(32).toString("base64url");
   const query = new URLSearchParams({
     response_type: "code",
-    client_id: clientId,
+    client_id: client,
     redirect_uri: REDIRECT_URI,
     code_challenge: createHash("sha256").update(verifier).digest("base64url"),
     code_challenge_method: "S256",
@@ -143,13 +147,13 @@ async function signIn(person: Person): Promise<{ access: string; refresh: string
     redirect = consent.body.redirect_url as string;
   }
   // The record MGM's consent page writes when the person clicks (ADR-008 decision 2).
-  const { error } = await svc.from("mgm_client_approvals").insert({ user_id: person.userId, client_id: clientId });
+  const { error } = await svc.from("mgm_client_approvals").insert({ user_id: person.userId, client_id: client });
   expect(error).toBeNull();
   const token = await auth("POST", "/oauth/token", {
     form: {
       grant_type: "authorization_code",
       code: new URL(redirect).searchParams.get("code")!,
-      client_id: clientId,
+      client_id: client,
       redirect_uri: REDIRECT_URI,
       code_verifier: verifier,
     },
@@ -221,24 +225,32 @@ describe.skipIf(skip)("a client's bearer token at MGM's routes (#272)", { timeou
     staff = await browserFor(staffUser.userId, EMAIL.staff);
     tenant = await browserFor(tenantUser.userId, EMAIL.tenant);
 
-    // Registered and listed as docs/setup.md registers and lists the CLI.
-    const created = await admin("POST", "/admin/oauth/clients", {
-      client_name: "mgm-bearer-session-test",
-      redirect_uris: [REDIRECT_URI],
-      grant_types: ["authorization_code", "refresh_token"],
-      token_endpoint_auth_method: "none",
-    });
-    expect(created.status, JSON.stringify(created.body)).toBe(201);
-    clientId = created.body.client_id as string;
-    const { error } = await svc.from("mgm_clients").insert({ client_id: clientId, kind: "operator", label: "MGM CLI (bearer test)" });
-    expect(error).toBeNull();
+    // Registered and listed as docs/setup.md registers and lists the CLI and
+    // the assistant bridge.
+    const register = async (name: string, kind: "operator" | "agent", label: string) => {
+      const created = await admin("POST", "/admin/oauth/clients", {
+        client_name: name,
+        redirect_uris: [REDIRECT_URI],
+        grant_types: ["authorization_code", "refresh_token"],
+        token_endpoint_auth_method: "none",
+      });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      const id = created.body.client_id as string;
+      const { error } = await svc.from("mgm_clients").insert({ client_id: id, kind, label });
+      expect(error).toBeNull();
+      return id;
+    };
+    clientId = await register("mgm-bearer-session-test", "operator", "MGM CLI (bearer test)");
+    agentClientId = await register("mgm-bearer-session-agent-test", "agent", "MGM assistant bridge (bearer test)");
     staffToken = (await signIn(staff)).access;
   }, 90_000);
 
   afterAll(async () => {
     vi.unstubAllEnvs();
-    if (svc && clientId) await svc.from("mgm_clients").delete().eq("client_id", clientId);
-    if (clientId) await admin("DELETE", `/admin/oauth/clients/${clientId}`);
+    for (const id of [clientId, agentClientId].filter(Boolean)) {
+      if (svc) await svc.from("mgm_clients").delete().eq("client_id", id);
+      await admin("DELETE", `/admin/oauth/clients/${id}`);
+    }
     if (svc) await cleanupTestData({ orgIds: [F.org], userEmails: Object.values(EMAIL) });
   }, 60_000);
 
@@ -294,22 +306,11 @@ describe.skipIf(skip)("a client's bearer token at MGM's routes (#272)", { timeou
   });
 
   it("refuses an agent client on that route before it runs, and lets it on to the view route, which refuses it itself", async () => {
-    // No agent client can sign in until #274 (the hook refuses it), so this
-    // token carries the claims one will, signed with the project's secret;
-    // Supabase Auth answers GET /user for it, as for a client's token.
-    const now = Math.floor(Date.now() / 1000);
-    const agentClientId = randomUUID();
-    const agentToken = await new SignJWT({
-      sub: staff.userId,
-      aud: "authenticated",
-      role: "mgm_agent",
-      client_id: agentClientId,
-      mgm_client_kind: "agent",
-      iat: now,
-      exp: now + 600,
-    })
-      .setProtectedHeader({ alg: "HS256" })
-      .sign(new TextEncoder().encode(process.env.SUPABASE_JWT_SECRET!));
+    // A whole sign-in of the agent client: the hook gives its token the
+    // role mgm_agent (20261126160100).
+    const agentToken = (await signIn(staff, agentClientId)).access;
+    const claims = JSON.parse(Buffer.from(agentToken.split(".")[1], "base64url").toString()) as Record<string, unknown>;
+    expect(claims).toMatchObject({ sub: staff.userId, role: "mgm_agent", client_id: agentClientId, mgm_client_kind: "agent" });
     const { from, res } = await getPlugins(agentToken);
     expect(from).toBe("middleware");
     expect(res.status).toBe(403);
@@ -331,21 +332,45 @@ describe.skipIf(skip)("a client's bearer token at MGM's routes (#272)", { timeou
 
     // The view route itself, on the same headers. openHostRequest checks the
     // session with getUser() on the agent's client and reads the person's
-    // role rows on it. Until #274 creates the mgm_agent role, the database
-    // cannot run as it, so no role rows come back and hostContext refuses
-    // with 403 gui_no_access, before the route's agent checks: this case
-    // does not yet show those. They are shown on this route with the client
-    // stood in, recorded as an agent client as above
-    // (src/app/api/gui/__tests__/agent-client.test.ts): 404 for a view not
-    // marked for an assistant, 409 assistant_disabled at the assistant gate
-    // for a marked one, the loader never called. When #274 lands, this case
-    // expects those answers here, with a marked view, and the stand-in is
-    // no longer the only evidence.
+    // role rows on it, now as mgm_agent (#274), so the request reaches the
+    // route's own agent checks: no view is marked for an assistant yet
+    // (ASSISTANT_READS is empty), so the home view answers 404
+    // gui_not_found and no loader runs. The 409 assistant_disabled a marked
+    // view meets at the assistant gate is shown with a mark stood in
+    // (src/app/api/gui/__tests__/agent-client.test.ts); once a view is
+    // marked, this case can ask for it here too, with the grants for the
+    // rows its path names (a community's, a microgrid's or an edge's).
     const { GET } = await import("@/app/api/gui/view/route");
     const res2 = await GET(new NextRequest(viewUrl, { headers: headers! }));
-    expect(res2.status).toBe(403);
-    expect(await res2.json()).toMatchObject({ ok: false, code: "gui_no_access" });
+    expect(res2.status).toBe(404);
+    expect(await res2.json()).toMatchObject({ ok: false, code: "gui_not_found" });
     expect(res2.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("lets an agent client's token read the person's organizations at the catalog route, which the assistant's gate then refuses", async () => {
+    const agentToken = (await signIn(staff, agentClientId)).access;
+    // Middleware answers 404 for the catalog until it is released (RFC #259
+    // § 7), before it looks at the token, so the route is called directly
+    // with the headers middleware passes on to an accepted agent request:
+    // the token and its mark (GET /api/gui/view above shows both).
+    const headers = new Headers({ authorization: `Bearer ${agentToken}`, "x-mgm-credential": credentialMark(agentToken)! });
+    forwarded = headers;
+    const url = `${APP}/api/gui/catalog`;
+    const { GET } = await import("@/app/api/gui/catalog/route");
+    // Without entity=, the catalog picks the organization with
+    // visibleOrganizations, which reads organizations (id, name) on the
+    // agent's client as mgm_agent (20261126160000), and only then asks the
+    // assistant's gate. Without that grant the read fails and the answer is
+    // 503 gui_unavailable.
+    const res = await GET(new NextRequest(url, { headers }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ok: false, code: "assistant_disabled" });
+    expect(res.headers.get("set-cookie")).toBeNull();
+
+    // Asked for this organization by id, the same: it is one the person reaches.
+    const named = await GET(new NextRequest(`${url}?org=${F.org}`, { headers }));
+    expect(named.status).toBe(409);
+    expect(await named.json()).toMatchObject({ code: "assistant_disabled" });
   });
 
   it("refuses a live token whose mark the client set by hand, as on a route middleware skipped", async () => {

@@ -127,6 +127,39 @@ export async function mintUserJwt(userId: string): Promise<string> {
 }
 
 /**
+ * Mints a JWT for an agent client's token: the person `userId`, under the
+ * role the access-token hook gives an agent client, `mgm_agent`
+ * (20261126160000, #274), with the `client_id` and kind claims the hook's
+ * token carries (Supabase Auth writes `client_id`, the hook
+ * `mgm_client_kind`; 20261126160100). PostgREST switches to that role, so a
+ * client bound to this JWT reads only what migrations grant `mgm_agent`. A
+ * test that loads a marked view with an agent token mints it here. The
+ * client need not exist in `mgm_clients`: nothing on the database side reads
+ * `client_id` from a token today. If something does, pass the id of a
+ * client the test lists.
+ */
+export const TEST_AGENT_CLIENT_ID = "00000000-0000-4000-8000-000000000274";
+
+export async function mintAgentJwt(
+  userId: string,
+  clientId: string = TEST_AGENT_CLIENT_ID
+): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  return new SignJWT({
+    sub: userId,
+    aud: "authenticated",
+    role: "mgm_agent",
+    client_id: clientId,
+    mgm_client_kind: "agent",
+    iss: `${LOCAL_SUPABASE_URL}/auth/v1`,
+    iat: now,
+    exp: now + 3600,
+  })
+    .setProtectedHeader({ alg: "HS256" })
+    .sign(jwtSecretBytes());
+}
+
+/**
  * Mints a service-role JWT from the local JWT secret.
  * Used for fixture setup — bypasses all RLS policies — and as the
  * SUPABASE_SERVICE_ROLE_KEY a test stubs when the code under test builds

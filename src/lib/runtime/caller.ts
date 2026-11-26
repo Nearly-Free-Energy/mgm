@@ -52,11 +52,11 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * The database role each client kind's token runs as. An operator token is
- * the person's own (`authenticated`); an agent token runs as `mgm_agent`
- * once #274 makes the hook set it. Until then the hook refuses every agent
- * sign-in, so no agent token exists, and one with `authenticated` would
- * carry the person's full authority at the database API (ADR-008 decision
- * 7): it is refused here too. If the hook's roles change, revisit.
+ * the person's own (`authenticated`); an agent token runs as `mgm_agent`,
+ * the role the access-token hook gives an agent client (20261126160100).
+ * An agent token with `authenticated` would carry the person's full
+ * authority at the database API (ADR-008 decision 7), so it is refused
+ * here. If the hook's roles change, revisit.
  */
 const ROLE_OF: Record<"operator" | "agent", string> = { operator: "authenticated", agent: "mgm_agent" };
 
