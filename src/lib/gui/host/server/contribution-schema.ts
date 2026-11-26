@@ -24,7 +24,8 @@ import "server-only";
  * reached from configure or system navigation, of billing's, payments',
  * Pesapal's or the tenant app's views and watchers, of views whose path
  * names a tenant, a device or a billing or payment record, of views that
- * take signals, or of views that declare a key prefix;
+ * take signals, or of views that declare a key prefix; a marked view's
+ * declaration against the one its list entry pins;
  * tenant views without segments, attachments or assistant reading, reached
  * only from tenant navigation; `attach.whilePluginOff` only on a tab or tile
  * of cost "db"; `takesSignals` only on an organization's view that is not
@@ -158,6 +159,44 @@ function closedKeys(schema: z.ZodType): boolean {
   return false;
 }
 
+/** The keys a closed record key schema allows (closedKeys), as strings. */
+function recordKeys(schema: z.ZodType): string[] {
+  const def = schema._zod.def as unknown as Def & { entries?: Record<string, unknown>; values?: unknown[] };
+  if (def.type === "enum") return Object.values(def.entries!).map(String);
+  if (def.type === "literal") return def.values!.map(String);
+  if (def.type === "union") return def.options!.flatMap(recordKeys);
+  return [];
+}
+
+const STRUCTURES = new Set(["object", "array", "tuple", "union", "record"]);
+
+/**
+ * The schemas directly inside one an ext may use, each with the key it adds
+ * to the path: an object's property and a tuple's position add one; a
+ * wrapper's inner schema, an array's element, a tuple's rest, a union's
+ * option and a record's value add none. Any other type has none, and
+ * strictProblems refuses it. The walks below (strictProblems, extKeyPaths,
+ * withholdMode) all descend through this, so they agree on what a schema
+ * holds.
+ */
+function extChildren(def: Def): { schema: z.ZodType; key?: PropertyKey }[] {
+  if (WRAPPERS.has(def.type)) return [{ schema: def.innerType! }];
+  switch (def.type) {
+    case "object":
+      return Object.entries(def.shape!).map(([key, schema]) => ({ schema, key }));
+    case "array":
+      return [{ schema: def.element! }];
+    case "tuple":
+      return [...def.items!.map((schema, key) => ({ schema, key })), ...(def.rest ? [{ schema: def.rest }] : [])];
+    case "union":
+      return def.options!.map((schema) => ({ schema }));
+    case "record":
+      return [{ schema: def.valueType! }];
+    default:
+      return [];
+  }
+}
+
 /** Where a schema could accept keys or values nobody declared: loose objects, any, unknown, custom, lazy, transforms. */
 export function strictProblems(schema: z.ZodType): { path: Path; message: string }[] {
   const problems: { path: Path; message: string }[] = [];
@@ -167,32 +206,94 @@ export function strictProblems(schema: z.ZodType): { path: Path; message: string
     seen.add(s);
     const def = s._zod.def as unknown as Def;
     if (LEAVES.has(def.type)) return;
-    if (WRAPPERS.has(def.type)) return walk(def.innerType!, path);
-    switch (def.type) {
-      case "object":
-        if (def.catchall?._zod.def.type !== "never") problems.push({ path, message: "ext objects must be strict (z.strictObject)" });
-        for (const [key, child] of Object.entries(def.shape!)) walk(child, [...path, key]);
-        return;
-      case "array":
-        return walk(def.element!, path);
-      case "tuple":
-        def.items!.forEach((child, i) => walk(child, [...path, i]));
-        if (def.rest) walk(def.rest, path);
-        return;
-      case "union":
-        return def.options!.forEach((child) => walk(child, path));
-      case "record":
-        // A string key lets a loader send any key it likes, so a record must
-        // name its keys: an enum, a literal, or a union of those.
-        if (!closedKeys(def.keyType!))
-          problems.push({ path, message: "ext records must have enum or literal keys (z.record(z.enum([...]), ...))" });
-        return walk(def.valueType!, path);
-      default:
-        problems.push({ path, message: `ext schemas may not use ${def.type}` });
-    }
+    if (!WRAPPERS.has(def.type) && !STRUCTURES.has(def.type))
+      return void problems.push({ path, message: `ext schemas may not use ${def.type}` });
+    if (def.type === "object" && def.catchall?._zod.def.type !== "never")
+      problems.push({ path, message: "ext objects must be strict (z.strictObject)" });
+    // A string key lets a loader send any key it likes, so a record must
+    // name its keys: an enum, a literal, or a union of those.
+    if (def.type === "record" && !closedKeys(def.keyType!))
+      problems.push({ path, message: "ext records must have enum or literal keys (z.record(z.enum([...]), ...))" });
+    for (const child of extChildren(def)) walk(child.schema, child.key === undefined ? path : [...path, child.key]);
   };
   walk(schema, []);
   return problems;
+}
+
+/**
+ * Every key path an ext schema names, dotted, sorted and once each: each
+ * object property at any depth, each key of a record with closed keys
+ * (closedKeys), and the paths under them. An array or a tuple adds nothing,
+ * as its items sit at its own path, and a union's options add theirs at the
+ * same place. A listed view's entry pins these (ViewDeclaration in
+ * ../../assistant-reads.ts), so a field added to a listed view's ext at any
+ * depth refuses its mark until the entry names it. The path is pinned, not
+ * the type at it: a field that changes type keeps its path, and is a new
+ * ext version, which the entry's schema id pins.
+ */
+export function extKeyPaths(schema: z.ZodType): string[] {
+  const out = new Set<string>();
+  // The schemas on the way here, so a schema that holds itself through a
+  // getter ends the walk rather than looping.
+  const inside = new Set<z.ZodType>();
+  const walk = (s: z.ZodType, path: string[]) => {
+    if (inside.has(s)) return;
+    inside.add(s);
+    const def = s._zod.def as unknown as Def;
+    const keyed = (key: string, child: z.ZodType) => {
+      out.add([...path, key].join("."));
+      walk(child, [...path, key]);
+    };
+    if (def.type === "record" && closedKeys(def.keyType!)) {
+      for (const key of recordKeys(def.keyType!)) keyed(key, def.valueType!);
+    } else {
+      for (const child of extChildren(def)) {
+        if (typeof child.key === "string") keyed(child.key, child.schema);
+        else walk(child.schema, path);
+      }
+    }
+    inside.delete(s);
+  };
+  walk(schema, []);
+  return [...out].sort();
+}
+
+/**
+ * How an ext path is withheld from an assistant: "null" where the schema
+ * takes null at every place it has the path (each union option, each
+ * array's items), "omit" where it is optional at every one, and null
+ * otherwise, which includes a path the schema does not have. The read
+ * interface (./assistant-read.ts) sets the value to null or removes it
+ * accordingly, then parses the ext again.
+ */
+export function withholdMode(schema: z.ZodType, path: string): "null" | "omit" | null {
+  const found: z.ZodType[] = [];
+  const at = (s: z.ZodType, keys: string[]): void => {
+    if (keys.length === 0) return void found.push(s);
+    const def = s._zod.def as unknown as Def;
+    if (def.type === "object") {
+      if (Object.hasOwn(def.shape!, keys[0])) at(def.shape![keys[0]], keys.slice(1));
+    } else if (def.type === "record") {
+      if (closedKeys(def.keyType!) && recordKeys(def.keyType!).includes(keys[0])) at(def.valueType!, keys.slice(1));
+    } else {
+      // As in extKeyPaths, a tuple's positions sit at the tuple's own path.
+      for (const child of extChildren(def)) if (typeof child.key !== "string") at(child.schema, keys);
+    }
+  };
+  at(schema, path.split("."));
+  if (found.length === 0) return null;
+  const flags = found.map((s) => {
+    const seen = { nullable: false, optional: false };
+    for (let def = s._zod.def as unknown as Def; ; def = def.innerType!._zod.def as unknown as Def) {
+      if (def.type === "nullable") seen.nullable = true;
+      else if (def.type === "optional") seen.optional = true;
+      else if (def.type !== "readonly") break;
+    }
+    return seen;
+  });
+  if (flags.every((f) => f.nullable)) return "null";
+  if (flags.every((f) => f.optional)) return "omit";
+  return null;
 }
 
 // ── Assistant reading ───────────────────────────────────────────────────────
@@ -216,6 +317,14 @@ export function strictProblems(schema: z.ZodType): { path: Path; message: string
  * - a view that takes signals, which carries every watcher's answer;
  * - a view that declares a key prefix, whose keys the list's review cannot
  *   see.
+ *
+ * A marked view's declaration must also be the one its entry pins (ADR-007
+ * decision 8): its declared keys, its ext's schema id and the key paths of
+ * its ext schema (extKeyPaths), so a view that widens what it carries is
+ * refused until its entry is edited and reviewed. The pin cannot see the
+ * text a loader puts at a key or path, which is the entry's review and
+ * CODEOWNERS' (ADR-007 decision 8); nor the links a model carries at run
+ * time, which the entry allows by id and the read interface drops otherwise.
  *
  * ASSISTANT_READING is keyed by every plugin name, so a new or renamed
  * plugin does not type-check until someone decides whether its views and
@@ -260,6 +369,59 @@ export const ASSISTANT_REFUSED_KINDS: ReadonlySet<string> = new Set<CoreEntityKi
 
 const READS_LIST = "src/lib/gui/assistant-reads.ts";
 const NOUN = { view: "views", watcher: "watchers" } as const;
+
+type ViewEntry = Extract<AssistantRead, { kind: "view" }>;
+type ViewShape = NonNullable<Shape["views"]>[number];
+
+/** What `wanted` has that `got` lacks, and the reverse, as a phrase; "" when they hold the same. */
+function difference(got: readonly string[], wanted: readonly string[]): string {
+  const extra = [...new Set(got)].filter((k) => !wanted.includes(k)).sort();
+  const missing = [...new Set(wanted)].filter((k) => !got.includes(k)).sort();
+  return [extra.length ? `not in the entry: ${extra.join(", ")}` : "", missing.length ? `not in the view: ${missing.join(", ")}` : ""]
+    .filter(Boolean)
+    .join("; ");
+}
+
+/**
+ * The pin (ADR-007 decision 8): a marked view's declaration must be its
+ * entry's, and the entry's links and withheld paths must make sense for it.
+ * `v` is a marked view, listed as `entry`. Keys and paths compare as sets,
+ * and an entry that names one twice is refused, so a copy cannot stand in
+ * for one the view dropped.
+ */
+function pinProblems(v: ViewShape, entry: ViewEntry, alias: string): { path: Path; message: string }[] {
+  const problems: { path: Path; message: string }[] = [];
+  const differs = (path: Path, what: string) =>
+    problems.push({ path, message: `"${v.id}"'s declaration differs from its entry in ${READS_LIST}: ${what}` });
+
+  const keys = difference(v.declares.keys, entry.declares.keys);
+  if (keys) differs(["declares", "keys"], `keys (${keys})`);
+  if (new Set(entry.declares.keys).size !== entry.declares.keys.length) differs(["declares", "keys"], "the entry names a key twice");
+
+  const pinned = entry.declares.ext;
+  if ((v.ext?.schema ?? null) !== (pinned?.schema ?? null))
+    differs(["ext", "schema"], `ext schema (the view's is ${v.ext?.schema ?? "none"}, the entry's ${pinned?.schema ?? "none"})`);
+  else if (v.ext && pinned) {
+    const paths = difference(extKeyPaths(v.ext.zod), pinned.paths);
+    if (paths) differs(["ext", "zod"], `ext paths (${paths})`);
+    if (new Set(pinned.paths).size !== pinned.paths.length) differs(["ext", "zod"], "the entry names an ext path twice");
+  }
+
+  for (const path of entry.withhold?.ext ?? []) {
+    const at: Path = ["ext"];
+    const withheld = (why: string) =>
+      problems.push({ path: at, message: `"${v.id}"'s entry in ${READS_LIST} withholds "${path}", ${why}` });
+    if (!pinned || !pinned.paths.includes(path)) withheld("which is not one of its pinned ext paths");
+    else if (v.ext && withholdMode(v.ext.zod, path) === null)
+      withheld("which the ext schema does not let be null everywhere it is, nor optional everywhere");
+  }
+  // An id of another plugin's would let this view hand on a link that the
+  // entry's review could not tell apart from one of that plugin's own.
+  for (const id of entry.links)
+    if (!id.startsWith(`${alias}.`))
+      problems.push({ path: ["agent"], message: `"${v.id}"'s entry in ${READS_LIST} lists the link "${id}", which must start with the alias "${alias}."` });
+  return problems;
+}
 
 // ── Views ───────────────────────────────────────────────────────────────────
 
@@ -566,7 +728,11 @@ function checkContribution(c: Shape, catalog: SurfaceCatalog, reads: readonly As
     if (typeof v.attach?.to === "string") kind(v.attach.to, ["views", i, "attach", "to"]);
     // A tenant view gets its own refusal (viewSchema) and only that one. If
     // tenant views may be listed (ADR-007 decision 10), revisit.
-    if (v.agent === "read" && v.scope !== "tenant") readable("view", v.id, ["views", i, "agent"]);
+    if (v.agent === "read" && v.scope !== "tenant") {
+      readable("view", v.id, ["views", i, "agent"]);
+      const listed = reads.find((r): r is ViewEntry => r.kind === "view" && r.id === v.id);
+      for (const p of listed ? pinProblems(v, listed, entry.alias) : []) add(ctx, ["views", i, ...p.path], p.message);
+    }
     if (v.ext && !v.ext.schema.startsWith(`${entry.alias}.`))
       add(ctx, ["views", i, "ext", "schema"], `"${v.ext.schema}" must start with the alias "${entry.alias}."`);
   });

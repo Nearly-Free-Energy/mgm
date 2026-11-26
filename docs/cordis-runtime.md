@@ -548,6 +548,14 @@ Cordis service, and it opens no scope and never uses the service role.
   embed of such a view into a fixed "Withheld from the assistant" value
   without loading it. Left out, `admit` admits every view, so pages are
   served as before.
+- A view's entry in `assistant-reads.ts` pins its declared keys, its ext's
+  schema id and the key paths of its ext schema (`extKeyPaths` in
+  `contribution-schema.ts`), and the contribution check refuses the mark
+  while the view differs, so a listed view carries nothing more until its
+  entry is edited and reviewed. The entry also names the only link ids the
+  view may hand an assistant (any other is dropped and logged by id) and the
+  ext paths withheld from one, set to null or removed and named in
+  `withheld` on every read, after which the ext must still parse.
 - Attached views it may not read are withheld in the answer's `withheld`,
   listed from the surface rather than from the model's `attached`, so the
   answer does not tell another plugin's state. One it may read is read the

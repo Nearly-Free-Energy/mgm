@@ -22,6 +22,11 @@ import "server-only";
  * - Every action, proposal and composer is removed (a proposal is not
  *   authority, ADR-007 decision 4), as are the attached-view list, the
  *   signals and the polling hints the shell uses.
+ * - Each view's model, and each view model embedded in it, keeps only the
+ *   links its list entry names (`links`), and each ext path the entry
+ *   withholds (`withhold.ext`) is set to null or removed and named in
+ *   `withheld` on every read, whatever it held; the ext must then still
+ *   parse with the view's own schema. A dropped link is logged by id.
  * - A model, attached view or signal carrying a reference
  *   assistant-references.ts refuses is refused whole, as
  *   `assistant_reference_refused`: a listed view that emits one is a review
@@ -55,10 +60,11 @@ import "server-only";
 import { isDeepStrictEqual } from "node:util";
 import { rolesIncludeStaff } from "@/lib/auth/access";
 import type { GateDecision } from "@/lib/runtime/gate";
-import { ASSISTANT_READS } from "../../assistant-reads";
+import { ASSISTANT_READS, type AssistantRead } from "../../assistant-reads";
 import type { Id, Signal, ViewModel } from "../../contract";
 import { requireIssued, type HostContext } from "./access";
 import { findRefusedReference } from "./assistant-references";
+import { withholdMode } from "./contribution-schema";
 import { pluginGate } from "./gate-state";
 import { isPageHref, parseHref } from "./hrefs";
 import { matchView } from "./match-view";
@@ -136,6 +142,7 @@ const REFERENCE_REFUSED = fail(500, "assistant_reference_refused", "This view co
 const TOO_LARGE = fail(500, "assistant_output_too_large", "This answer is too large to give to an assistant.");
 const VIEW_FAILED = fail(500, "gui_view_failed", "This view could not be loaded.");
 const NOT_ATTACHED = fail(404, "gui_not_found", "This view is not available for this page.");
+const OUTPUT_INVALID = fail(500, "gui_output_invalid", "This view could not be shown.");
 
 export const WITHHELD_NOTE = "Withheld: an assistant may not read this.";
 
@@ -183,6 +190,114 @@ function stripActions(node: unknown, keysAreData = false): unknown {
     out[key] = stripActions(child, !keysAreData && RECORD_KEYS.has(key));
   }
   return out;
+}
+
+type ViewEntry = Extract<AssistantRead, { kind: "view" }>;
+const entryOf = (id: unknown) => ASSISTANT_READS.find((r): r is ViewEntry => r.kind === "view" && r.id === id);
+
+/**
+ * `node` with each `links` list cut to the ids in `allowed`, the others'
+ * ids pushed to `dropped`. Data subtrees (DATA_KEYS) are copied as they
+ * are, as is an embedded view's model, which its own entry governs.
+ */
+function keepLinks(node: unknown, allowed: readonly string[], dropped: string[], keysAreData = false): unknown {
+  if (Array.isArray(node)) return node.map((item) => keepLinks(item, allowed, dropped));
+  if (!isPlain(node)) return node;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(node)) {
+    if (!keysAreData) {
+      if (DATA_KEYS.has(key) || (key === "embed" && isPlain(child) && child.type === "view")) {
+        out[key] = child;
+        continue;
+      }
+      if (key === "links" && Array.isArray(child)) {
+        out[key] = child.filter((link) => {
+          const id = isPlain(link) && typeof link.id === "string" ? link.id : null;
+          if (id !== null && allowed.includes(id)) return true;
+          dropped.push(id ?? "(no id)");
+          return false;
+        });
+        continue;
+      }
+    }
+    out[key] = keepLinks(child, allowed, dropped, !keysAreData && RECORD_KEYS.has(key));
+  }
+  return out;
+}
+
+/** `node` with the value at `keys` set to null ("null") or removed ("omit"), in every item of an array on the way. */
+function withholdAt(node: unknown, keys: readonly string[], mode: "null" | "omit"): unknown {
+  if (Array.isArray(node)) return node.map((item) => withholdAt(item, keys, mode));
+  if (!isPlain(node) || !Object.hasOwn(node, keys[0])) return node;
+  const [key, ...rest] = keys;
+  if (rest.length > 0) return { ...node, [key]: withholdAt(node[key], rest, mode) };
+  if (mode === "null") return { ...node, [key]: null };
+  const { [key]: _gone, ...kept } = node;
+  void _gone;
+  return kept;
+}
+
+/**
+ * `model`, and each view model embedded in it, as its list entry allows
+ * (ViewEntry in ../../assistant-reads.ts): only the entry's link ids, and
+ * each of its `withhold.ext` paths set to null or removed (withholdMode in
+ * ./contribution-schema.ts) and recorded in `withheld` at its path in the
+ * answer, after which the ext must still parse with the view's schema. The
+ * contribution check refuses an entry whose paths do not allow this, so a
+ * failure here is the host's (gui_output_invalid), never shown as empty.
+ */
+function applyEntry(
+  model: Record<string, unknown>,
+  snapshot: SurfaceSnapshot,
+  at: string,
+  withheld: AssistantWithheld[],
+): { ok: true; model: Record<string, unknown> } | HostFailure {
+  const entry = entryOf(model.view);
+  const def = snapshot.views.find((v) => v.def.id === model.view)?.def;
+  if (!entry || !def) return VIEW_FAILED;
+  const dropped: string[] = [];
+  let out = keepLinks(model, entry.links, dropped) as Record<string, unknown>;
+  // Logged by id, never recorded in the answer: whether a link is there can depend on the data.
+  for (const id of dropped) console.warn(`[gui] assistant read ${entry.id}: left out the link ${id}`);
+
+  const paths = entry.withhold?.ext ?? [];
+  for (const path of paths) {
+    withheld.push({ what: "field", path: `${at}ext.data.${path}`, note: WITHHELD_NOTE });
+    const ext = out.ext;
+    if (!isPlain(ext) || !Object.hasOwn(ext, "data")) continue;
+    const mode = def.ext ? withholdMode(def.ext.zod, path) : null;
+    if (mode === null) return OUTPUT_INVALID;
+    out = { ...out, ext: { ...ext, data: withholdAt(ext.data, path.split("."), mode) } };
+  }
+  if (paths.length > 0 && isPlain(out.ext) && Object.hasOwn(out.ext, "data")) {
+    let parsed: { success: boolean; data?: unknown } = { success: false };
+    try {
+      if (def.ext) parsed = def.ext.zod.safeParse(out.ext.data);
+    } catch {
+      // An ext schema that cannot be checked synchronously is refused at registration.
+    }
+    if (!parsed.success) {
+      console.error(`[gui] assistant read ${entry.id}: its ext does not parse once withheld`);
+      return OUTPUT_INVALID;
+    }
+    out = { ...out, ext: { ...out.ext, data: parsed.data } };
+  }
+
+  if (out.kind === "feed" && isPlain(out.body) && Array.isArray(out.body.entries)) {
+    const entries: unknown[] = [];
+    for (const [i, item] of out.body.entries.entries()) {
+      const embed = isPlain(item) ? item.embed : undefined;
+      if (!isPlain(item) || !isPlain(embed) || embed.type !== "view" || !isPlain(embed.model)) {
+        entries.push(item);
+        continue;
+      }
+      const inner = applyEntry(embed.model, snapshot, `${at}body.entries.${i}.embed.model.`, withheld);
+      if (!inner.ok) return inner;
+      entries.push({ ...item, embed: { ...embed, model: inner.model } });
+    }
+    out = { ...out, body: { ...out.body, entries } };
+  }
+  return { ok: true, model: out };
 }
 
 /** The feed entries, at any depth of embedded models, whose embed was withheld. */
@@ -255,7 +370,9 @@ async function readView(
 
   const { attached: _attached, signals: _signals, live: _live, ...rest } = loaded;
   void [_attached, _signals, _live];
-  const model = stripActions(rest) as AssistantViewModel;
+  const applied = applyEntry(stripActions(rest) as Record<string, unknown>, snapshot, "", withheld);
+  if (!applied.ok) return applied;
+  const model = applied.model as AssistantViewModel;
   const refusal = findRefusedReference(model, snapshot.views);
   if (refusal) {
     console.error(`[gui] assistant read ${view.def.id}: a ${refusal.kind} reference at ${refusal.path}`);

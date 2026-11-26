@@ -167,9 +167,10 @@ interface ViewDefBase<K extends ViewKind> {
   /**
    * Deny by default: only this lets an assistant read the view, and what an
    * assistant reads is decided by ADR-007, through the host. The view must be
-   * on the code-owned list in ./assistant-reads.ts, and contribution-schema.ts
-   * refuses the mark, listed or not, where #133's data boundary keeps the
-   * view from an assistant (ASSISTANT_READING there).
+   * on the code-owned list in ./assistant-reads.ts, whose entry pins its
+   * declared keys and ext, and contribution-schema.ts refuses the mark,
+   * listed or not, where #133's data boundary keeps the view from an
+   * assistant (ASSISTANT_READING there).
    */
   agent?: "read";
   /**
