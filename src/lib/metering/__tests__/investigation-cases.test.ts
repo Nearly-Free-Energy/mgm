@@ -218,7 +218,9 @@ function figuresOf(day: SiteDayRead): CaseFigures {
     cuts: day.cuts === null ? null : minutes(day, day.cuts),
     bins: day.soc.length,
     zone: day.read.zone,
+    timezone: day.timezone,
     unreadableTimestamps: day.read.unreadableTimestamps,
+    sources: day.sources,
   };
 }
 

@@ -11,6 +11,7 @@
  * `result`.
  */
 import type { SiteScenario } from "../fixture/site-samples";
+import type { SiteSourceAvailability } from "../site-operations";
 
 /** `[start, end)` in minutes after the local day's start (evidence §4 "Times"). */
 export type MinuteRange = [start: number, end: number];
@@ -47,7 +48,15 @@ export type CaseFigures = {
   /** The day's bins: `soc.length`. */
   bins: number;
   zone: "microgrid" | "fallback";
+  /** The zone the day was read in: the stored one, or UTC when it falls back. */
+  timezone: string;
   unreadableTimestamps: number | null;
+  /**
+   * Which site sources were readable. The only figure that marks C11 (§1:
+   * the solar meter changes no other), and the source configuration of
+   * C07, C08 and C09.
+   */
+  sources: SiteSourceAvailability;
 };
 
 export type CaseRead =
@@ -131,8 +140,19 @@ export const CLEAR_DEFAULTS: Omit<CaseFigures, "housesEveningKwh"> = {
   cuts: [],
   bins: 288,
   zone: "microgrid",
+  timezone: "Africa/Kampala",
   unreadableTimestamps: null,
+  sources: {
+    battery: true,
+    gridMeter: true,
+    load: true,
+    pv: true,
+    houses: true,
+    houseMetersUnreadable: 0,
+  },
 };
+
+const SOURCES = CLEAR_DEFAULTS.sources;
 
 const pending = (id: CaseId, microgrid: string, date: string): InvestigationCase => ({
   id,
@@ -187,11 +207,20 @@ export const CASES: readonly InvestigationCase[] = [
   },
   {
     id: "C06", microgrid: "02", date: "2026-10-25", mechanism: "exists", scenario: "clear",
-    read: { ok: true, figures: { bins: 300, knownMinutes: 1500, housesEveningKwh: 6.632 } },
+    read: {
+      ok: true,
+      figures: { bins: 300, knownMinutes: 1500, timezone: "Europe/London", housesEveningKwh: 6.632 },
+    },
   },
   {
     id: "C07", microgrid: "03", date: "2026-09-11", mechanism: "exists", scenario: "floor-at-dawn",
-    read: { ok: true, figures: { noDataMinutes: 90, knownMinutes: 1350, housesEveningKwh: 6.734 } },
+    read: {
+      ok: true,
+      figures: {
+        noDataMinutes: 90, knownMinutes: 1350, sources: { ...SOURCES, battery: false },
+        housesEveningKwh: 6.734,
+      },
+    },
   },
   {
     id: "C08", microgrid: "04", date: "2026-09-03", mechanism: "exists", scenario: "long-cut-dark",
@@ -199,21 +228,31 @@ export const CASES: readonly InvestigationCase[] = [
       ok: true,
       figures: {
         darkMinutes: 170, darkInferredMinutes: 170, dark: [[1180, 1350]], lightsOnPct: 88.19444444444444,
-        cutMinutes: null, cuts: null, housesEveningKwh: 2.9850000000000003,
+        cutMinutes: null, cuts: null, sources: { ...SOURCES, gridMeter: false },
+        housesEveningKwh: 2.9850000000000003,
       },
     },
   },
   {
     id: "C09", microgrid: "05", date: "2026-09-03", mechanism: "exists", scenario: "clear",
-    read: { ok: true, figures: { housesEveningMetersMissing: 1, housesEveningKwh: 6.725 } },
+    read: {
+      ok: true,
+      figures: {
+        housesEveningMetersMissing: 1, sources: { ...SOURCES, houseMetersUnreadable: 1 },
+        housesEveningKwh: 6.725,
+      },
+    },
   },
   {
     id: "C10", microgrid: "06", date: "2026-09-01", mechanism: "exists", scenario: "clear",
-    read: { ok: true, figures: { zone: "fallback", housesEveningKwh: 6.7379999999999995 } },
+    read: {
+      ok: true,
+      figures: { zone: "fallback", timezone: "UTC", housesEveningKwh: 6.7379999999999995 },
+    },
   },
   {
     id: "C11", microgrid: "07", date: "2026-09-01", mechanism: "exists", scenario: "clear",
-    read: { ok: true, figures: { housesEveningKwh: 6.679 } },
+    read: { ok: true, figures: { sources: { ...SOURCES, pv: false }, housesEveningKwh: 6.679 } },
   },
   {
     id: "C12", microgrid: "08", date: "2026-09-01", mechanism: "exists", scenario: "clear",
