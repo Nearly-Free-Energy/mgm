@@ -38,6 +38,10 @@ const BILL = "e2781000-0000-4000-8005-000000000001";
 const PLAIN = "e2781000-0000-4000-8004-000000000001";
 const BILLED = "e2781000-0000-4000-8004-000000000002";
 const OTHERS = "e2781000-0000-4000-8004-000000000003";
+/** A community, microgrid and tenant whose names are stored with outer spaces. */
+const SPACED_COMMUNITY = "e2781000-0000-4000-8001-000000000003";
+const SPACED_MG = "e2781000-0000-4000-8002-000000000003";
+const SPACED_TENANT = "e2781000-0000-4000-8004-000000000004";
 const ACCESS = "e2781000-0000-4000-800a-000000000001";
 const OTHER_ACCESS = "e2781000-0000-4000-800a-000000000002";
 const EMAILS = {
@@ -97,6 +101,7 @@ beforeAll(async () => {
       [
         { id: COMMUNITY, org_id: ORG, name: "Kisakye East" },
         { id: OTHER_COMMUNITY, org_id: OTHER_ORG, name: "Elsewhere" },
+        { id: SPACED_COMMUNITY, org_id: ORG, name: "  Spaced Community " },
       ],
     ],
     [
@@ -104,6 +109,7 @@ beforeAll(async () => {
       [
         { id: MG, community_id: COMMUNITY, name: "Kisakye Site", currency: "UGX", timezone: "Africa/Kampala" },
         { id: OTHER_MG, community_id: OTHER_COMMUNITY, name: "Elsewhere Site", currency: "UGX", timezone: "Africa/Kampala" },
+        { id: SPACED_MG, community_id: SPACED_COMMUNITY, name: " Spaced Site  ", currency: "UGX", timezone: "Africa/Kampala" },
       ],
     ],
     [
@@ -112,7 +118,12 @@ beforeAll(async () => {
     ],
     [
       "tenants",
-      [tenant(PLAIN, MG, "Nakato", 1), tenant(BILLED, MG, "Okello", 2), tenant(OTHERS, OTHER_MG, "Elsewhere tenant", 3)],
+      [
+        tenant(PLAIN, MG, "Nakato", 1),
+        tenant(BILLED, MG, "Okello", 2),
+        tenant(OTHERS, OTHER_MG, "Elsewhere tenant", 3),
+        tenant(SPACED_TENANT, SPACED_MG, "  Spaced Tenant ", 4),
+      ],
     ],
     [
       "billing_periods",
@@ -199,6 +210,22 @@ describe.skipIf(shouldSkip())("community management's prepared actions (live dat
       "People with app access": "1",
     });
     expect(out.ceremony.warnings).toEqual(["One person loses access to this unit's pages."]);
+  });
+
+  it("asks for a name stored with outer spaces without them, as the host compares what is typed trimmed", async () => {
+    for (const [action, id, name] of [
+      ["community.delete-community", SPACED_COMMUNITY, "Spaced Community"],
+      ["community.delete-microgrid", SPACED_MG, "Spaced Site"],
+      ["community.delete-tenant", SPACED_TENANT, "Spaced Tenant"],
+    ] as const) {
+      const out = await prepare(action, { id });
+      expect(out, action).toMatchObject({ ok: true, confirm: "typed" });
+      if (!out.ok) continue;
+      expect(out.ceremony.typed, action).toBe(name);
+      expect(out.ceremony.facts[0]?.value.text, action).toBe(name);
+      expect(out.ceremony.statement, action).toContain(` ${name}`);
+      expect(out.ceremony.statement, action).not.toMatch(/\s{2}/);
+    }
   });
 
   it("refuses to give access while the tenant app is off, and names the unit once it is on", async () => {

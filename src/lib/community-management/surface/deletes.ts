@@ -16,6 +16,14 @@ import "server-only";
  * is not offered for a delete the route would refuse. Neither replaces the
  * route's own refusal: billing hidden from the person's client, or added
  * after this ran, still stops the delete there.
+ *
+ * The name each step shows and asks for is the stored one trimmed: the GUI
+ * host sends a typed confirmation only when what the person typed, trimmed,
+ * is exactly the step's name (`required` in
+ * src/lib/gui/host/client/action-host.tsx), so a stored name with outer
+ * spaces could never be typed. The route compares names ignoring spacing
+ * (typedNameMatches), so it takes the trimmed name. If the host's
+ * comparison changes, revisit.
  */
 import type { Ceremony } from "@/lib/gui/contract";
 import type { Fmt, Loaded, SurfaceRequest } from "@/lib/gui/surface";
@@ -70,7 +78,7 @@ async function prepareHierarchyDelete(
     .maybeSingle<{ id: string; name: string | null }>();
   if (error) return unavailable(kind);
   if (!row) return { ok: false, status: 404, message: `This ${kind} could not be found.` };
-  const name = row.name?.trim() ? row.name : null;
+  const name = row.name?.trim() || null;
   if (name === null) return UNNAMED;
 
   let counts: DescendantCounts;
@@ -137,7 +145,7 @@ export async function prepareDeleteTenant(req: SurfaceRequest, input: Input): Pr
     .maybeSingle<{ id: string; display_name: string | null }>();
   if (error) return unavailable("tenant");
   if (!tenant) return { ok: false, status: 404, message: "This tenant could not be found." };
-  const name = tenant.display_name?.trim() ? tenant.display_name : null;
+  const name = tenant.display_name?.trim() || null;
   if (name === null) return UNNAMED;
 
   const [bills, links, access] = await Promise.all([
