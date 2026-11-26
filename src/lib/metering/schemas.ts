@@ -165,8 +165,10 @@ const RegisterEdgeEntry = z.strictObject(
 /**
  * POST /api/microgrids/[id]/edges/register: link edges the backend reports
  * to the microgrid, or rename those already linked. The microgrid comes from
- * the path. The id's format is the route's rule (`invalid_edge_id`, the id
- * named), so the schema describes it rather than refusing it.
+ * the path. The id's format and its being named once in the body are the
+ * route's rules (`invalid_edge_id` and `duplicate_edge_id` (#304), each with
+ * the id named), so the schema describes the format rather than refusing it
+ * and leaves repeats to the route.
  */
 export const RegisterEdgesBody = z.strictObject(
   {
