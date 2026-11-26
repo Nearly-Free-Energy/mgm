@@ -37,7 +37,10 @@ services:
       GOTRUE_MAILER_OTP_LENGTH: "10"
       GOTRUE_MAILER_OTP_EXP: "900"
       # Refuses a token for a password or recovery sign-in (RFC #186 § 6);
-      # migration 20261117210000 creates the function.
+      # migration 20261117210000 creates the function and 20261126090100
+      # replaces it. Docker mode leaves Supabase Auth's OAuth server off
+      # (no GOTRUE_OAUTH_SERVER_* settings), so it has no client sign-in
+      # (docs/setup.md, "Clients that are not a browser").
       GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: "true"
       GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI: "pg-functions://postgres/public/fn_auth_access_token_hook"
     healthcheck:
@@ -96,10 +99,19 @@ services:
       until psql -c "SELECT 1 FROM auth.users LIMIT 0" 2>/dev/null; do sleep 1; done
 
       if psql -c "SELECT 1 FROM organizations LIMIT 0" 2>/dev/null; then
-        # gotrue above calls this function for every token, so a database
-        # made before it existed gets it too (it is safe to re-run).
+        # gotrue above calls the access-token hook for every token, so a
+        # database made before the newest version of the hook gets it too:
+        # the tables it reads, once, then the function itself (CREATE OR
+        # REPLACE, safe to re-run). The tables go in one transaction (-1),
+        # so a run that stops part way leaves no mgm_clients and the next
+        # start applies them again. A later migration that replaces the
+        # hook again takes the place of the last psql line.
+        # (No apostrophes in this block: it is one single-quoted sh -c.)
         echo "Migrations already applied, skipping; applying the access-token hook."
-        psql -v ON_ERROR_STOP=1 -f /migrations/20261117210000_auth_access_token_hook.sql
+        if ! psql -c "SELECT 1 FROM mgm_clients LIMIT 0" >/dev/null 2>&1; then
+          psql -1 -v ON_ERROR_STOP=1 -f /migrations/20261126090000_mgm_clients_and_approvals.sql || exit 1
+        fi
+        psql -v ON_ERROR_STOP=1 -f /migrations/20261126090100_auth_access_token_hook_clients.sql || exit 1
         exit 0
       fi
 

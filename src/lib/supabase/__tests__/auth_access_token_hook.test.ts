@@ -2,8 +2,10 @@
  * auth_access_token_hook.test.ts — RFC #186 PR 5, migration 20261117210000.
  *
  * 1. fn_auth_access_token_hook refuses a token for a session a password or
- *    a recovery started, new or refreshed, and returns every other event
- *    unchanged.
+ *    a recovery started, new or refreshed, and returns every other browser
+ *    event unchanged. Since 20261126090100 it also checks an event that
+ *    carries a client_id (a client of Supabase Auth's OAuth server):
+ *    auth_access_token_hook_clients.test.ts.
  * 2. Only Supabase Auth (supabase_auth_admin) may call it.
  * 3. End to end against the local Supabase, where supabase/config.toml
  *    enables the hook: password sign-in and password sign-up get no
