@@ -21,7 +21,8 @@
  *     and no metering read;
  *   - maps that function's refusals to fixed copy: a bill another write
  *     added after the read (`bill_exists`), a period closed after the last
- *     status read (`period_closed`), a moved tariff (`tariff_changed`).
+ *     status read (`period_closed`), a period deleted before the insert
+ *     (`period_not_found`), a moved tariff (`tariff_changed`).
  *
  * Harness: a mocked Supabase client, as in generate-guard-existing.test.ts.
  * The database side is bill-from-readings.db.test.ts.
@@ -410,8 +411,25 @@ describe("runGenerationFor with newBillOnly", () => {
     });
   });
 
-  it("reports any other write failure as line_item_write_failed", async () => {
-    const h = harness({ writeError: { code: "P0002", message: "billing_period_not_found: the billing period does not exist" } });
+  it("reports a period deleted before the insert as period_not_found, in fixed copy", async () => {
+    const h = harness({
+      writeError: { code: "P0002", message: "billing_period_not_found: the billing period does not exist or is not yours to bill" },
+    });
+    expect(await only(h, 1)).toEqual({
+      kind: "error",
+      tenantId: tenant(1),
+      tenantName: "Unit 1",
+      error: BILL_FROM_READINGS_COPY.periodNotFound,
+      code: "period_not_found",
+    });
+  });
+
+  it.each([
+    ["another code with that token", { code: "23514", message: "billing_period_not_found: the billing period does not exist" }],
+    ["P0002 with another message", { code: "P0002", message: "query returned no rows" }],
+    ["a database error", { code: "40001", message: "could not serialize access due to concurrent update" }],
+  ])("reports any other write failure (%s) as line_item_write_failed", async (_label, writeError) => {
+    const h = harness({ writeError });
     expect(await only(h, 1)).toMatchObject({ kind: "error", code: "line_item_write_failed" });
   });
 });

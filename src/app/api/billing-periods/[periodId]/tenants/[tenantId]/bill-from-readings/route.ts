@@ -44,7 +44,8 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *         backwards); { error, reason: "bad_request" } (an id)
  *   401 → { error: "unauthorized" }
  *   404 → { error, reason: "not_found" } (period or microgrid hidden by RLS:
- *         another organization's, or a tenant-only account's);
+ *         another organization's, or a tenant-only account's; or a period
+ *         deleted before the insert, nothing written);
  *         { error, reason: "tenant_not_found" } (tenant hidden by RLS)
  *   409 → { error, reason: "period_closed" } (nothing written);
  *         { error, reason: "tenant_not_on_microgrid" };
@@ -64,7 +65,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const MAX_NAME = 80;
 const READINGS_INVALID = "The readings are not valid: each is a number of 0 or more, and the end reading is not below the start reading.";
 
-const notFound = () => NextResponse.json({ error: "Billing period not found.", reason: "not_found" }, { status: 404 });
+const notFound = () => NextResponse.json({ error: BILL_FROM_READINGS_COPY.periodNotFound, reason: "not_found" }, { status: 404 });
 const refuse = (status: number, error: string, reason: string) => NextResponse.json({ error, reason }, { status });
 const invalid = (error: string, field?: string) =>
   NextResponse.json({ error, ...(field ? { field } : {}), code: "invalid_body" }, { status: 400 });
@@ -211,6 +212,10 @@ export async function POST(
         // the insert found it closed under the period's lock.
         case "period_closed":
           return refuse(409, BILL_FROM_READINGS_COPY.closed, "period_closed");
+        // The period was deleted after this route read it, and the insert
+        // found none.
+        case "period_not_found":
+          return notFound();
         case "unknown_tenant":
           return refuse(409, BILL_FROM_READINGS_COPY.otherMicrogrid, "tenant_not_on_microgrid");
         case "tariff_changed":

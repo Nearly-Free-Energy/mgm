@@ -45,6 +45,7 @@ describe("summarizeGenerateFromMeters", () => {
         error("bill_changed"),
         error("period_closed"),
         error("bill_exists"),
+        error("period_not_found"),
         error("unmetered_no_manual"),
         error("meter_assignment_continuity"),
         error("no_meter_reading"),
@@ -58,7 +59,7 @@ describe("summarizeGenerateFromMeters", () => {
       unchanged: 2,
       kept: 1,
       left: 3,
-      changed: 3,
+      changed: 4,
       notBilled: { noMeter: 1, meterAssignment: 1, noReading: 1, failed: 2 },
     });
     expect(notBilledCount(s)).toBe(5);
@@ -66,11 +67,11 @@ describe("summarizeGenerateFromMeters", () => {
       ...Array(3).fill("generated"),
       ...Array(2).fill("unchanged"),
       "kept",
-      ...Array(6).fill("left"),
+      ...Array(7).fill("left"),
       ...Array(5).fill("not_billed"),
     ]);
     expect(s.message).toBe(
-      "Generated 3 bills from meter data; 2 already up to date. Not billed: 1 with no meter, 1 with a meter assignment gap, 1 with no meter data, 2 not saved. Left as they were: 1 entered by hand, 3 paid, invoiced or refunded, 3 changed meanwhile.",
+      "Generated 3 bills from meter data; 2 already up to date. Not billed: 1 with no meter, 1 with a meter assignment gap, 1 with no meter data, 2 not saved. Left as they were: 1 entered by hand, 3 paid, invoiced or refunded, 4 changed meanwhile.",
     );
   });
 

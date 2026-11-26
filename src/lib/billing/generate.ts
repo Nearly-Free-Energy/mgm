@@ -206,6 +206,13 @@ export type GenerationErrorCode =
    */
   | "bill_exists"
   /**
+   * A guarded run's first bill for a tenant, or a first bill from readings,
+   * found no period at its insert (fn_record_first_line_item_with_audit's
+   * billing_period_not_found): the period was deleted after the run read
+   * it. Nothing was written.
+   */
+  | "period_not_found"
+  /**
    * #339. The device has no prior MGM `end_kwh` and no seed was supplied, so
    * `start_kwh` is unknowable. Previously this fell to `?? 0`, which asserted
    * the meter read zero at period start and printed that on the invoice.
@@ -1459,15 +1466,21 @@ function expectedBillRefusal(err: { code?: string; message?: string }): { code: 
 
 /**
  * fn_record_first_line_item_with_audit's refusals (migration
- * 20261120130100_record_first_line_item.sql), by the token its message
- * starts with, in the copy of the action that ran: a first bill from
- * readings (`newBillOnly`) or a whole-period run from meter data. Its tariff
- * refusal keeps the upsert's text and is mapped to `tariff_changed` with the
- * other write failures below; anything else is an ordinary write failure.
+ * 20261120130100_record_first_line_item.sql, last issued by
+ * 20261124170000), by the token its message starts with, in the copy of the
+ * action that ran: a first bill from readings (`newBillOnly`) or a
+ * whole-period run from meter data. billing_period_not_found is its one
+ * P0002, raised when the period is gone (deleted after the run read it);
+ * the others are 23514. Its tariff refusal keeps the upsert's text and is
+ * mapped to `tariff_changed` with the other write failures below; anything
+ * else is an ordinary write failure.
  */
 function firstBillRefusal(err: { code?: string; message?: string }, newBillOnly: boolean): { code: GenerationErrorCode; error: string } | null {
-  if (err.code !== "23514") return null;
   const token = (err.message ?? "").split(":")[0].trim();
+  if (err.code === "P0002" && token === "billing_period_not_found") {
+    return { code: "period_not_found", error: newBillOnly ? BILL_FROM_READINGS_COPY.periodNotFound : GENERATE_FROM_METERS_COPY.periodNotFound };
+  }
+  if (err.code !== "23514") return null;
   if (token === "billing_period_closed") {
     return { code: "period_closed", error: newBillOnly ? BILL_FROM_READINGS_COPY.closed : GENERATE_FROM_METERS_COPY.closed };
   }

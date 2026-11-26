@@ -263,6 +263,7 @@ describe("POST /api/billing-periods/[periodId]/tenants/[tenantId]/bill-from-read
   it.each([
     ["bill_exists", 409, { error: BILL_FROM_READINGS_COPY.hasBill, reason: "has_bill" }],
     ["period_closed", 409, { error: BILL_FROM_READINGS_COPY.closed, reason: "period_closed" }],
+    ["period_not_found", 404, { error: BILL_FROM_READINGS_COPY.periodNotFound, reason: "not_found" }],
     ["unknown_tenant", 409, { error: BILL_FROM_READINGS_COPY.otherMicrogrid, reason: "tenant_not_on_microgrid" }],
     ["tariff_changed", 409, { error: BILL_FROM_READINGS_COPY.tariffChanged, reason: "tariff_changed" }],
     ["invalid_manual_reading", 400, { error: expect.any(String), code: "invalid_body" }],

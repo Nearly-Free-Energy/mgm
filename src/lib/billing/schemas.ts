@@ -580,6 +580,8 @@ export const GENERATE_FROM_METERS_COPY = {
   meters: "Could not read the meters right now. Nothing was changed. Try again shortly.",
   failed: "Bills could not be generated. Refresh the period to see its bills, and try again.",
   nothingToRead: "There is nothing to read from meters for this period.",
+  // The period was deleted while the run wrote (period_not_found in ./generate.ts).
+  periodNotFound: "Billing period not found.",
 } as const;
 
 /**
@@ -590,14 +592,17 @@ export const GENERATE_FROM_METERS_COPY = {
  * billing.bill-from-readings' availability (`closed`) and prepare (`closed`,
  * `tenantNotFound`, `otherMicrogrid`, `hasBill`) give the same refusals
  * before it runs (src/lib/billing/surface/not-billed.ts). The bill engine
- * gives `closed`, `hasBill` and `failed` itself (newBillOnly in
- * ./generate.ts).
+ * gives `closed`, `hasBill`, `periodNotFound` and `failed` itself
+ * (newBillOnly in ./generate.ts).
  *  - closed: a closed period's totals were reviewed and closed.
  *  - hasBill: the tenant already has a bill for the period; regenerating
  *    that bill (billing.regenerate-bill, manual readings) changes it.
  *  - otherMicrogrid: the tenant belongs to another microgrid than the
  *    period's.
  *  - tenantNotFound: no tenant the person can read has that id.
+ *  - periodNotFound: no period the person can read has that id, as the
+ *    route reads it, or the period was deleted before the insert
+ *    (period_not_found in ./generate.ts).
  *  - noTariff: the microgrid has no rate schedule to pin.
  *  - tariffChanged: the period's tariff changed between the pin and the
  *    write (fn_record_line_item_with_audit).
@@ -608,6 +613,7 @@ export const BILL_FROM_READINGS_COPY = {
   hasBill: "This tenant already has a bill for this period. Regenerate that bill to change its readings.",
   otherMicrogrid: "This tenant is not on this period's microgrid.",
   tenantNotFound: "Tenant not found.",
+  periodNotFound: GENERATE_FROM_METERS_COPY.periodNotFound,
   noTariff: GENERATE_FROM_METERS_COPY.noTariff,
   tariffChanged: "The period's tariff changed while the bill was calculated. Nothing was written. Try again.",
   failed: "The bill could not be written. Refresh the period to see its bills, and try again.",

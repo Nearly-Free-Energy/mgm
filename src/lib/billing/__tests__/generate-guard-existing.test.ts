@@ -502,12 +502,12 @@ describe("runGenerationFor with guardExistingBills", () => {
   });
 
   it.each([
-    ["billing_line_item_exists: the tenant already has a bill for this billing period", "bill_exists", "hasBill"],
-    ["billing_period_closed: a first bill is not added to a closed billing period", "period_closed", "closed"],
-  ] as const)("reports the first bill's refusal %j as fixed copy, for that tenant only", async (message, code, copy) => {
-    const h = harness({ writeError: (name) => (name === "fn_record_first_line_item_with_audit" ? { code: "23514", message } : null) });
+    ["billing_line_item_exists: the tenant already has a bill for this billing period", "23514", "bill_exists", BILL_FROM_READINGS_COPY.hasBill],
+    ["billing_period_closed: a first bill is not added to a closed billing period", "23514", "period_closed", GENERATE_FROM_METERS_COPY.closed],
+    ["billing_period_not_found: the billing period does not exist or is not yours to bill", "P0002", "period_not_found", GENERATE_FROM_METERS_COPY.periodNotFound],
+  ] as const)("reports the first bill's refusal %j as fixed copy, for that tenant only", async (message, sqlstate, code, error) => {
+    const h = harness({ writeError: (name) => (name === "fn_record_first_line_item_with_audit" ? { code: sqlstate, message } : null) });
     const by = await results(h);
-    const error = copy === "closed" ? GENERATE_FROM_METERS_COPY.closed : BILL_FROM_READINGS_COPY.hasBill;
     // The tenant had no bill as read, so no hadBill.
     expect(by.get(tenant(1))).toEqual({ kind: "error", tenantId: tenant(1), tenantName: "Unit 1", code, error });
     expect(by.get(tenant(2))).toMatchObject({ kind: "written" });

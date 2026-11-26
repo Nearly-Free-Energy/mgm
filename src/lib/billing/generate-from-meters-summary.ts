@@ -50,7 +50,7 @@ export type GenerateFromMetersCounts = {
   left: number;
   /**
    * Bills that changed, a bill another write added for a tenant who had
-   * none, or a period that closed, while the run wrote.
+   * none, or a period that closed or was deleted, while the run wrote.
    */
   changed: number;
   /**
@@ -98,6 +98,10 @@ const ERROR_BUCKET: Partial<Record<GenerationErrorCode, "left" | "changed" | Not
   // run). That bill is left as it is, and a second run reads it like any
   // other, so it counts with the bills that changed while the run wrote.
   bill_exists: "changed",
+  // period_not_found: fn_record_first_line_item_with_audit found the period
+  // gone (deleted after the run read it). Like period_closed, no second run
+  // can bill the tenant in it.
+  period_not_found: "changed",
   unmetered_no_manual: "noMeter",
   meter_assignment_continuity: "meterAssignment",
   no_meter_reading: "noReading",
