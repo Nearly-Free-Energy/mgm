@@ -48,7 +48,12 @@ import {
   UpdateTenantBody,
 } from "./schemas";
 import { prepareDeleteCommunity, prepareDeleteMicrogrid, prepareDeleteTenant } from "./surface/deletes";
-import { prepareGrantTenantAccess, prepareRevokeTenantAccess, tenantAccessOrganization } from "./surface/tenant-access";
+import {
+  grantTenantAccessAvailable,
+  prepareGrantTenantAccess,
+  prepareRevokeTenantAccess,
+  tenantAccessOrganization,
+} from "./surface/tenant-access";
 
 /** A tenant's access to its unit's pages: the role row id fn_tenant_access_list answers as `access_id`. */
 export const TENANT_ACCESS_KIND = "community.tenant-access";
@@ -237,7 +242,8 @@ const ACTIONS: ActionDef[] = [
   // ── Tenant app access (RFC mgm#197 § 6) ──
   // External: the route emails the address a notice, through the
   // organization's sender. Prepare runs before the address is typed, so its
-  // step says who in words, and refuses while the tenant app is off. A
+  // step says who in words, and refuses while the tenant app is off, which
+  // available() reports first, so the action shows disabled with why. A
   // second send for the same address answers 409 already_has_access and
   // sends no second notice, because the route reads the unit's access list
   // (fn_tenant_access_list) before it makes an account, grants or emails.
@@ -256,6 +262,7 @@ const ACTIONS: ActionDef[] = [
     confirm: "confirm",
     repeat: "safe",
     prepare: prepareGrantTenantAccess,
+    available: grantTenantAccessAvailable,
     ...SHARED,
   },
   // A DELETE, so a ceremony: the address and the unit, with nothing to tick

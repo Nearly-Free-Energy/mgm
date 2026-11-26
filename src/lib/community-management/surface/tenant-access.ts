@@ -55,6 +55,51 @@ async function unitName(req: SurfaceRequest, tenantId: string): Promise<string |
   return [data.display_name, data.unit_label].filter((part) => part?.trim()).join(", ") || "This unit";
 }
 
+type Embedded<T> = T | T[] | null | undefined;
+const one = <T>(value: Embedded<T>): T | null => (Array.isArray(value) ? (value[0] ?? null) : (value ?? null));
+type TenantOrgRow = { id: string; microgrids: Embedded<{ communities: Embedded<{ org_id: string }> }> };
+
+/**
+ * community.grant-tenant-access's availability for each tenant the host
+ * asks about: not available while the tenant app is off for the unit's
+ * organization, with the copy prepare and the route refuse it with
+ * (TENANT_APP_OFF), so the action shows disabled with the reason before
+ * anyone opens it. Each tenant's organization is read with the caller's own
+ * client, in one read for every id, through the join resolveTargetOrganization
+ * (src/lib/runtime/gate.ts) uses for a tenant, and each organization's state
+ * is asked once, with isPluginEnabledForOrg as prepare asks it. A tenant the
+ * caller cannot see answers NOT_FOUND's copy. A read that fails throws, so
+ * the host shows the action as not checked (askAvailability in
+ * src/lib/gui/host/server/merge.ts) and the person is not told the app is off
+ * when that is not known. Prepare still asks the state itself: this answer
+ * can be a second old.
+ */
+export async function grantTenantAccessAvailable(req: SurfaceRequest, ids: string[]): Promise<Record<string, true | string>> {
+  const valid = [...new Set(ids.filter((id) => UUID_RE.test(id)))];
+  const { data, error } = valid.length
+    ? await req.supabase.from("tenants").select("id, microgrids!inner(communities!inner(org_id))").in("id", valid)
+    : { data: [], error: null };
+  if (error) throw new Error("community.grant-tenant-access: could not read the tenants");
+  const orgOf = new Map<string, string>();
+  for (const row of (data ?? []) as unknown as TenantOrgRow[]) {
+    const org = one(one(row.microgrids)?.communities)?.org_id;
+    if (org) orgOf.set(row.id, org);
+  }
+  const on = new Map(
+    await Promise.all(
+      [...new Set(orgOf.values())].map(
+        async (org) => [org, await isPluginEnabledForOrg(req.supabase, org, TENANT_APP_PLUGIN_NAME)] as const,
+      ),
+    ),
+  );
+  const out: Record<string, true | string> = {};
+  for (const id of ids) {
+    const org = orgOf.get(id);
+    out[id] = org === undefined ? NOT_FOUND.message : on.get(org) ? true : TENANT_APP_OFF.message;
+  }
+  return out;
+}
+
 /**
  * community.grant-tenant-access's step, before the person types the
  * address: who the notice goes to and what it says. Refused while the tenant

@@ -12,8 +12,9 @@ import type { User } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Ceremony } from "@/lib/gui/contract";
 import { createFmt } from "@/lib/gui/fmt";
-import { hostContext } from "@/lib/gui/host/server/access";
+import { hostContext, surfaceRequest } from "@/lib/gui/host/server/access";
 import { prepareAction } from "@/lib/gui/host/server/prepare";
+import { COMMUNITY_MANAGEMENT_SURFACE } from "@/lib/community-management/surface";
 import { TENANT_APP_PLUGIN_NAME, TENANT_APP_PLUGIN_VERSION } from "@/lib/plugins/bundled";
 import { resetMgmRuntimeForTests } from "@/lib/runtime/root";
 import {
@@ -230,15 +231,31 @@ describe.skipIf(shouldSkip())("community management's prepared actions (live dat
 
   it("refuses to give access while the tenant app is off, and names the unit once it is on", async () => {
     await setTenantApp(false);
+    // available() answers first, with prepare's own copy, so the action
+    // shows disabled with the reason before anyone opens it.
     expect(await prepare("community.grant-tenant-access", { id: PLAIN })).toMatchObject({
       ok: false,
       status: 409,
+      code: "gui_action_unavailable",
       message: "The tenant app is not on for this organization yet. You can give access once it is on.",
     });
     await setTenantApp(true);
     const out = await prepare("community.grant-tenant-access", { id: PLAIN });
+    expect(out).toMatchObject({ ok: true });
     expect(out).toMatchObject({ ok: true, confirm: "confirm", tone: "neutral" });
     if (out.ok) expect(out.ceremony.facts.map((f) => [f.label, f.value.text])).toEqual([["Unit", "Nakato, A1"]]);
+  });
+
+  it("says through available() which units wait on the tenant app, and finds no unit of another organization", async () => {
+    const available = COMMUNITY_MANAGEMENT_SURFACE.actions?.find((a) => a.id === "community.grant-tenant-access")?.available;
+    if (!available) throw new Error("[actions.db] grant-tenant-access declares no available()");
+    const ask = async () => available(await surfaceRequest(ctx(), ORG, {}, new URLSearchParams()), [PLAIN, BILLED, OTHERS]);
+    const OFF = "The tenant app is not on for this organization yet. You can give access once it is on.";
+    const NOT_FOUND = "This tenant could not be found.";
+    await setTenantApp(false);
+    expect(await ask()).toEqual({ [PLAIN]: OFF, [BILLED]: OFF, [OTHERS]: NOT_FOUND });
+    await setTenantApp(true);
+    expect(await ask()).toEqual({ [PLAIN]: true, [BILLED]: true, [OTHERS]: NOT_FOUND });
   });
 
   it("names the address and the unit when removing an access the tenant's list holds", async () => {
