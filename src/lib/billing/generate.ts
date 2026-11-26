@@ -9,7 +9,8 @@ import "server-only";
  *
  *   1. Billing review's preview (src/lib/cordis/billing-review.ts, for POST
  *      /api/billing-review/preview) — mode='preview', the one unguarded
- *      run, which writes nothing.
+ *      run. It saves no bills, but may re-pin an empty draft's tariff
+ *      (step 2), which is why its route gates itself.
  *      `tenantIds`: undefined → all metered/un-metered tenants on the
  *      period's microgrid; `[]` → explicit no-op; `[uuid, …]` → only those.
  *      `manualReadings`: per-tenant `{ startKwh, endKwh, reason? }`
@@ -21,7 +22,8 @@ import "server-only";
  *      that guard only; it does not add a tenant to the processed set.
  *
  *      Returns the in-memory calc + previousTotalAmount/previousPaymentStatus
- *      from the prior line item; writes nothing.
+ *      from the prior line item; saves no bill or audit row (the tariff
+ *      re-pin of step 2 aside).
  *
  *   Every write is guarded (mode='write' with none of the three below is
  *   refused before anything is read, #247). Two callers rewrite one existing
