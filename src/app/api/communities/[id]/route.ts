@@ -65,7 +65,7 @@ export async function PATCH(
     );
   }
 
-  const parsed = await parseJsonBody(request, UpdateCommunityBody, UPDATE_COMMUNITY_REFUSALS);
+  const parsed = await parseJsonBody(request, UpdateCommunityBody, { refusals: UPDATE_COMMUNITY_REFUSALS });
   if (!parsed.ok) return parsed.response;
   const body = parsed.data;
 

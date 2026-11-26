@@ -7,6 +7,8 @@ import {
   setOrganizationPluginEnabled,
   listOrganizationPluginAudit,
 } from "@/lib/plugins/state";
+import { SET_PLUGIN_REFUSALS, SetPluginBody } from "@/lib/organization-directory/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -91,7 +93,10 @@ export async function GET(
  *
  * Dependency breaks are rejected before any write; disabling preserves all
  * domain rows. Every change is recorded in `mgm_plugin_audit_log` by the
- * atomic database function.
+ * atomic database function; asking for the state a plugin is already in
+ * writes nothing. Described as `org.set-plugin`: the body is SetPluginBody
+ * (src/lib/organization-directory/schemas.ts), refused with this route's
+ * own answers (SET_PLUGIN_REFUSALS).
  */
 export async function PATCH(
   request: NextRequest,
@@ -104,38 +109,16 @@ export async function PATCH(
       { status: 400 }
     );
   }
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return NextResponse.json(
-      { error: "Invalid JSON body", code: "plugin_invalid_body" },
-      { status: 400 }
-    );
-  }
-  if (typeof body.plugin !== "string" || !body.plugin.trim()) {
-    return NextResponse.json(
-      { error: "plugin is required.", code: "unknown_plugin", field: "plugin" },
-      { status: 400 }
-    );
-  }
-  if (typeof body.enabled !== "boolean") {
-    return NextResponse.json(
-      {
-        error: "enabled must be a boolean.",
-        code: "plugin_invalid",
-        field: "enabled",
-      },
-      { status: 400 }
-    );
-  }
+  const parsed = await parseJsonBody(request, SetPluginBody, { refusals: SET_PLUGIN_REFUSALS });
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
 
   const supabase = await createClient();
   try {
     const status = await setOrganizationPluginEnabled(
       supabase,
       id,
-      body.plugin.trim(),
+      body.plugin,
       body.enabled
     );
     revalidatePath("/settings/plugins", "page");

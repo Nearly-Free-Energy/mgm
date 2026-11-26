@@ -124,8 +124,9 @@ const F = {
   lineItem: "7e4a0000-0000-4000-8007-000000000001",
   merchant: "7e4a0000-0000-4000-8008-000000000001",
   attempt: "7e4a0000-0000-4000-8009-000000000001",
-  operation: "7e4a0000-0000-4000-800a-000000000001",
+  operation: "7e4a0000-0000-4000-800b-000000000001",
   unknown: "7e4a0000-0000-4000-80ff-000000000001",
+  client: "7e4a0000-0000-4000-800a-000000000001",
 };
 /** The fixture's own keys in the staff tables that have no organization column. */
 const SIGN_IN_HASH = "7e4a".repeat(16);
@@ -285,6 +286,8 @@ async function removeFixture(): Promise<void> {
   for (const [table, run] of [
     ["payment_merchant_versions", () => svc.from("payment_merchant_versions").delete().in("org_id", ORG_IDS)],
     ["auth_sign_in_requests", () => svc.from("auth_sign_in_requests").delete().eq("email_hash", SIGN_IN_HASH)],
+    // Its approval records go with it.
+    ["mgm_clients", () => svc.from("mgm_clients").delete().eq("client_id", F.client)],
   ] as const) {
     const { error } = await run();
     if (error) throw new Error(`[cleanup] ${table}: ${error.message}`);
@@ -458,6 +461,9 @@ beforeAll(async () => {
     createTestUser({ email: EMAIL.noRole, role: null }),
     createTestUser({ email: EMAIL.grantee, role: null }),
   ]);
+  // A client and the tenant's own approval of it: neither is theirs to read.
+  await insert(svc, "mgm_clients", [{ client_id: F.client, kind: "operator", label: "Tenant access client" }]);
+  await insert(svc, "mgm_client_approvals", [{ user_id: tenantOnly.userId, client_id: F.client }]);
 }, 90_000);
 
 afterAll(async () => {
@@ -556,6 +562,8 @@ desc("a tenant reads nothing staff-only", () => {
     grid_tariffs: `microgrid_id = '${F.microgrid}'`,
     invoice_counters: `community_id = '${F.community}'`,
     meter_readings: `device_id = '${F.deviceA}'`,
+    mgm_client_approvals: `client_id = '${F.client}'`,
+    mgm_clients: `client_id = '${F.client}'`,
     mgm_plugin_audit_log: `org_id = '${F.org}'`,
     mgm_plugins: `org_id = '${F.org}'`,
     microgrid_recent_activity: `microgrid_id = '${F.microgrid}'`,

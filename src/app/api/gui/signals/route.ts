@@ -1,8 +1,6 @@
 import type { NextRequest } from "next/server";
-import { getCurrentUserAccess } from "@/lib/auth/access";
-import { hostFailure, hostOutcome, routeHostContext } from "@/lib/gui/host/server/http";
+import { hostOutcome, openHostRequest } from "@/lib/gui/host/server/http";
 import { collectSignals } from "@/lib/gui/host/server/signals";
-import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -12,8 +10,7 @@ export const dynamic = "force-dynamic";
  * before any watcher runs.
  */
 export async function GET(request: NextRequest) {
-  const supabase = await createClient();
-  const host = routeHostContext(await getCurrentUserAccess(supabase), request.headers);
-  if (!host.ok) return hostFailure(host.status, host.code, host.message);
+  const host = await openHostRequest(request.headers);
+  if (!host.ok) return host.response;
   return hostOutcome(await collectSignals(host.ctx, { requested: request.nextUrl.searchParams.get("org") }));
 }

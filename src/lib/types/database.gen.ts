@@ -584,6 +584,64 @@ export type Database = {
           },
         ]
       }
+      mgm_client_approvals: {
+        Row: {
+          authorization_id: string | null
+          client_id: string
+          created_at: string
+          id: string
+          used_at: string | null
+          user_id: string
+        }
+        ComputedFields: never
+        Insert: {
+          authorization_id?: string | null
+          client_id: string
+          created_at?: string
+          id?: string
+          used_at?: string | null
+          user_id: string
+        }
+        Update: {
+          authorization_id?: string | null
+          client_id?: string
+          created_at?: string
+          id?: string
+          used_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mgm_client_approvals_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "mgm_clients"
+            referencedColumns: ["client_id"]
+          },
+        ]
+      }
+      mgm_clients: {
+        Row: {
+          client_id: string
+          created_at: string
+          kind: string
+          label: string
+        }
+        ComputedFields: never
+        Insert: {
+          client_id: string
+          created_at?: string
+          kind: string
+          label: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          kind?: string
+          label?: string
+        }
+        Relationships: []
+      }
       mgm_plugin_audit_log: {
         Row: {
           action: string
@@ -1871,6 +1929,24 @@ export type Database = {
           p_user_id: string
         }
         Returns: undefined
+      }
+      fn_client_approval_record: {
+        Args: { _authorization_id: string; _user_id: string }
+        Returns: {
+          client_id: string
+          kind: string
+          label: string
+          outcome: string
+        }[]
+      }
+      fn_client_authorization_read: {
+        Args: { _authorization_id: string; _user_id: string }
+        Returns: {
+          client_id: string
+          kind: string
+          label: string
+          outcome: string
+        }[]
       }
       fn_close_billing_period: {
         Args: { _acknowledged: string[]; _digest: string; _period_id: string }

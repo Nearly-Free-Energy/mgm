@@ -144,7 +144,7 @@ async function schemaAnswer(schema: z.ZodType, refusals: BodyRefusals, body: unk
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  const parsed = await parseJsonBody(request, schema, refusals);
+  const parsed = await parseJsonBody(request, schema, { refusals });
   if (parsed.ok) return { answer: "accepted", data: parsed.data };
   return { answer: { status: parsed.response.status, body: await parsed.response.json() } };
 }
@@ -399,7 +399,7 @@ describe("each described route's schema keeps the route's own answers", () => {
       const parsed = await parseJsonBody(
         new Request("http://localhost/api/x", { method: "POST", body: "{not json" }),
         route.schema,
-        route.refusals
+        { refusals: route.refusals }
       );
       if (parsed.ok) throw new Error(route.name);
       expect([parsed.response.status, await parsed.response.json()], route.name).toEqual([400, { error: "Invalid JSON body" }]);

@@ -100,6 +100,9 @@ export type MicrogridRecentActivityRow =
 /** Runtime tuple of all valid microgrid_ems_type enum values (Postgres enum order). */
 export const MICROGRID_EMS_TYPE_VALUES = Constants.public.Enums.microgrid_ems_type;
 
+/** Runtime tuple of all valid device_type enum values (Postgres enum order). */
+export const DEVICE_TYPE_VALUES = Constants.public.Enums.device_type;
+
 /** Operation failure codes (Postgres enum order). Only ever added (investigation-evidence.md § 6). */
 export const OPERATION_FAILURE_CODE_VALUES = Constants.public.Enums.operation_failure_code;
 
