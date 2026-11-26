@@ -189,8 +189,11 @@ read a stored credential, or to send data to another origin.
      per microgrid however many are offline, and so is a microgrid whose
      gateways' status could not be read because the read failed, timed out
      or gave no answer within the budget (`metering.edge-status`, mgm#287).
-     When more than 50 are found, offline gateways are kept ahead of
-     statuses that could not be read.
+     So is a microgrid with one or more meters on an online gateway that
+     have sent no reading for half an hour, one signal per microgrid with a
+     count, and one whose meters' history could not be read. When more than
+     50 are found, offline gateways are kept first, then quiet meters, then
+     statuses and meters that could not be read.
    - A watcher reads through the person's own client or a capability's
      reads, filters by the organization itself and throws when a read
      fails. It reads the database, since every load of the signals runs
@@ -210,9 +213,11 @@ read a stored credential, or to send data to another origin.
      2 s timeout within a 3 s budget, every microgrid of the organization
      examined up to 500 (unchecked past that), those never read or read
      longest ago first, and a read under way at the deadline kept for the
-     next load; it reports offline gateways only, since a quiet meter needs
-     per-component reads. No scheduled writer replaces it: on Vercel Hobby
-     crons run about daily.
+     next load. Beside each microgrid's status read it makes a second
+     cached read, of its meters' power history (one request per edge), which
+     shares the same cache rules and slots; a meter read with no answer by
+     the deadline is left for the next load rather than reported. No
+     scheduled writer replaces it: on Vercel Hobby crons run about daily.
    - A watcher aggregates (one signal per period or site, not per bill),
      writes fixed copy with values formatted on the server, and names no
      tenant, because an assistant may read signals later (#133's data

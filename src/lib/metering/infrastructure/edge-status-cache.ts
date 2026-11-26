@@ -1,21 +1,24 @@
 /**
- * The edge-status read's cache, timeout, shared in-flight reads and
- * process-wide bound on reads at once (../edge-status.ts). The
- * `metering.edge-status` watcher runs on every load of the signals, which
- * each open interface polls every five minutes and on focus, for every staff
- * member of the organization, so the backend must be asked about a
- * microgrid far less often than that.
+ * The edge-status reads' caches, timeout, shared in-flight reads and
+ * process-wide bound on reads at once (../edge-status.ts): one cache for
+ * each microgrid's gateway status, one for its meters' recent history
+ * (./meter-activity.ts), under the same rules and drawing on one pool of
+ * slots. The `metering.edge-status` watcher runs on every load of the
+ * signals, which each open interface polls every five minutes and on focus,
+ * for every staff member of the organization, so the backend must be asked
+ * about a microgrid far less often than that.
  *
  * Per process, like the tenant app's usage cache (../../tenant-app/usage-throttle.ts):
  * each instance starts empty and keeps its own entries, which costs a
  * backend read per instance, not correctness. Entries are keyed by
- * microgrid id and remember which edges they asked about, so a microgrid
- * whose edges changed is read again. Every caller has already read the
+ * microgrid id and remember which edges (or meters) they asked about, so a
+ * microgrid whose edges or meters changed is read again. Every caller has already read the
  * microgrid through its own row-level security in the same request (the
  * watcher's read, filtered to its organization) and composed the metering
  * capability, so an entry is only ever served to someone who may see that
- * microgrid; what is kept is two counts and a time, never a credential, a
- * client or anything the backend said.
+ * microgrid; what is kept is counts, a time, and which of the edge and
+ * component ids the caller passed in were online or quiet, never a
+ * credential, a client or anything the backend said.
  *
  * A read that has started runs to its own timeout and its answer is kept,
  * even when the caller that started it stopped waiting at its deadline: the
@@ -52,34 +55,42 @@ export const EDGE_STATUS_FAILURE_MS = 60_000;
  */
 export const EDGE_STATUS_READ_TIMEOUT_MS = 2_000;
 /**
- * Backend reads under way at once in one process, across every caller and
- * organization, reads that outlived their caller's deadline included, so
- * polls that overlap never pile reads up. Four: most microgrids share one
- * OpenEMS backend, which four small status requests at a time do not
- * strain, and even if every read takes its full 2 s timeout, four slots
- * still allow about 600 reads per five-minute cache period, a reread of
- * every microgrid of the largest organization the watcher reads (500,
- * EDGE_STATUS_MICROGRID_BOUND in ../surface/edge-status-signals.ts) with
- * room to spare; answers in tenths of a second allow far more.
+ * Backend reads under way at once in one process, status and meter reads
+ * together, across every caller and organization, reads that outlived
+ * their caller's deadline included, so polls that overlap never pile reads
+ * up. Four: most microgrids share one OpenEMS backend, which four small
+ * requests at a time do not strain. Even if every read took its full 2 s
+ * timeout, four slots allow about 600 reads per five-minute cache period,
+ * both reads of 300 microgrids; the largest organization the watcher reads
+ * (500, EDGE_STATUS_MICROGRID_BOUND in ../surface/edge-status-signals.ts)
+ * would then take two periods to go round, the stalest first, and answers
+ * in tenths of a second allow far more.
  */
 export const EDGE_STATUS_CONCURRENCY = 4;
 /** Entries kept at most; the oldest read goes first. */
 export const EDGE_STATUS_CACHE_MAX = 1_000;
 
-/** What a read found: each edge asked about, online or not, as the backend answered. */
+/** What a status read found: each edge asked about, online or not, as the backend answered. */
 export type EdgeStatusRead = readonly { edgeId: string; online: boolean }[];
-export type EdgeStatusAnswer =
-  | { state: "read"; total: number; offline: number; readAt: number }
-  | { state: "failed"; readAt: number }
-  | { state: "late" };
+/**
+ * A status answer: counts of the edges asked about, and which of them were
+ * online, kept so the meter answer can be counted over online edges only
+ * (./openems-edge-status.ts). The ids are MGM's own `edges.openems_edge_id`
+ * values the caller passed in, never one the backend named.
+ */
+export type EdgeStatusAnswer = Answer<{ total: number; offline: number; online: readonly string[] }>;
 
-type Settled = Exclude<EdgeStatusAnswer, { state: "late" }>;
-type Entry = { fingerprint: string; answer: Settled };
+/** A meter as MGM stores it: its edge's OpenEMS id and its component id. */
+export type MeterRef = { edgeId: string; componentId: string };
+/**
+ * What a meter read found (./meter-activity.ts): the meters asked about
+ * with no recent reading, and the edges whose meters could not be read.
+ */
+export type MeterActivityRead = { quiet: readonly MeterRef[]; failedEdges: readonly string[] };
+export type MeterActivityAnswer = Answer<MeterActivityRead>;
 
-/** By microgrid id, oldest read first: a new read of a microgrid moves it to the end. */
-const cache = new Map<string, Entry>();
-/** By microgrid id and fingerprint: the read under way, which concurrent callers share. */
-const inFlight = new Map<string, Promise<Settled>>();
+type Settled<A> = ({ state: "read"; readAt: number } & A) | { state: "failed"; readAt: number };
+type Answer<A> = Settled<A> | { state: "late" };
 
 // ── The process-wide bound ──────────────────────────────────────────────────
 
@@ -136,6 +147,11 @@ export function fingerprintOf(edgeIds: readonly string[]): string {
   return JSON.stringify([...new Set(edgeIds.filter((id) => id !== ""))].sort());
 }
 
+/** The meters asked about, as one string: unique and sorted, whatever their order. */
+export function meterFingerprintOf(meters: readonly MeterRef[]): string {
+  return JSON.stringify([...new Set(meters.map((m) => JSON.stringify([m.edgeId, m.componentId])))].sort());
+}
+
 /** Counts of the edges asked about, an edge the answer leaves out counting as offline. */
 export function summarize(edgeIds: readonly string[], statuses: EdgeStatusRead): { total: number; offline: number } {
   const asked = [...new Set(edgeIds.filter((id) => id !== ""))];
@@ -143,32 +159,13 @@ export function summarize(edgeIds: readonly string[], statuses: EdgeStatusRead):
   return { total: asked.length, offline: asked.filter((id) => !online.has(id)).length };
 }
 
-const keepFor = (answer: Settled) => (answer.state === "read" ? EDGE_STATUS_FRESH_MS : EDGE_STATUS_FAILURE_MS);
-
-function freshEntry(microgridId: string, fingerprint: string, nowMs: number): Settled | null {
-  const entry = cache.get(microgridId);
-  return entry && entry.fingerprint === fingerprint && nowMs - entry.answer.readAt < keepFor(entry.answer) ? entry.answer : null;
+/** The edges asked about that the answer says are online, each once, in the order asked. */
+export function onlineOf(edgeIds: readonly string[], statuses: EdgeStatusRead): string[] {
+  const online = new Set(statuses.filter((s) => s.online === true).map((s) => s.edgeId));
+  return [...new Set(edgeIds.filter((id) => id !== "" && online.has(id)))];
 }
 
-/**
- * When the microgrid's kept answer for these edges was read, fresh or not,
- * or null when none is kept for them. The reader reads microgrids with none
- * first, then the stalest, so successive loads rotate through them all.
- */
-export function lastReadAt(microgridId: string, edgeIds: readonly string[]): number | null {
-  const entry = cache.get(microgridId);
-  return entry && entry.fingerprint === fingerprintOf(edgeIds) ? entry.answer.readAt : null;
-}
-
-function store(microgridId: string, entry: Entry) {
-  cache.delete(microgridId);
-  cache.set(microgridId, entry);
-  while (cache.size > EDGE_STATUS_CACHE_MAX) {
-    const oldest = cache.keys().next().value;
-    if (oldest === undefined) break;
-    cache.delete(oldest);
-  }
-}
+const keepFor = (answer: Settled<object>) => (answer.state === "read" ? EDGE_STATUS_FRESH_MS : EDGE_STATUS_FAILURE_MS);
 
 /** Resolves to "late" at `deadlineMs`, at once when it has passed. */
 function lateAt(deadlineMs: number, now: () => number): { promise: Promise<"late">; cancel(): void } {
@@ -185,11 +182,7 @@ function lateAt(deadlineMs: number, now: () => number): { promise: Promise<"late
  * `read` ignores the signal (a token or decrypt step before the request).
  * Whatever `read` throws is a failure; what it threw is not kept or passed on.
  */
-async function readOnce(
-  edgeIds: readonly string[],
-  read: (signal: AbortSignal) => Promise<EdgeStatusRead>,
-  now: () => number,
-): Promise<Settled> {
+async function readOnce<A extends object>(read: (signal: AbortSignal) => Promise<A>, now: () => number): Promise<Settled<A>> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<"timeout">((resolve) => {
@@ -201,7 +194,7 @@ async function readOnce(
   try {
     const result = await Promise.race([read(controller.signal), timedOut]);
     if (result === "timeout") return { state: "failed", readAt: now() };
-    return { state: "read", ...summarize(edgeIds, result), readAt: now() };
+    return { ...result, state: "read", readAt: now() };
   } catch {
     return { state: "failed", readAt: now() };
   } finally {
@@ -209,75 +202,152 @@ async function readOnce(
   }
 }
 
-/** Starts a read holding a slot: kept in flight until it settles, then stored, and the slot released. */
-function start(
-  microgridId: string,
-  fingerprint: string,
-  key: string,
-  edgeIds: readonly string[],
-  read: (signal: AbortSignal) => Promise<EdgeStatusRead>,
-  now: () => number,
-  release: () => void,
-): Promise<Settled> {
-  const pending = readOnce(edgeIds, read, now).then((answer) => {
-    store(microgridId, { fingerprint, answer });
-    return answer;
-  });
-  inFlight.set(key, pending);
-  void pending.finally(() => {
-    if (inFlight.get(key) === pending) inFlight.delete(key);
-    release();
-  });
-  return pending;
+/**
+ * One kind of read's answers, by microgrid id, oldest read first (a new read
+ * of a microgrid moves it to the end), each remembering what it asked about
+ * as a fingerprint; and the reads under way, which concurrent callers share.
+ * Every kind draws on the one pool of slots above.
+ */
+function createReadCache<A extends object>() {
+  type Entry = { fingerprint: string; answer: Settled<A> };
+  const cache = new Map<string, Entry>();
+  const inFlight = new Map<string, Promise<Settled<A>>>();
+
+  function freshEntry(microgridId: string, fingerprint: string, nowMs: number): Settled<A> | null {
+    const entry = cache.get(microgridId);
+    return entry && entry.fingerprint === fingerprint && nowMs - entry.answer.readAt < keepFor(entry.answer) ? entry.answer : null;
+  }
+
+  function store(microgridId: string, entry: Entry) {
+    cache.delete(microgridId);
+    cache.set(microgridId, entry);
+    while (cache.size > EDGE_STATUS_CACHE_MAX) {
+      const oldest = cache.keys().next().value;
+      if (oldest === undefined) break;
+      cache.delete(oldest);
+    }
+  }
+
+  /** Starts a read holding a slot: kept in flight until it settles, then stored, and the slot released. */
+  function start(microgridId: string, fingerprint: string, key: string, read: (signal: AbortSignal) => Promise<A>, now: () => number, release: () => void) {
+    const pending = readOnce(read, now).then((answer) => {
+      store(microgridId, { fingerprint, answer });
+      return answer;
+    });
+    inFlight.set(key, pending);
+    void pending.finally(() => {
+      if (inFlight.get(key) === pending) inFlight.delete(key);
+      release();
+    });
+    return pending;
+  }
+
+  return {
+    /** When the kept answer for this fingerprint was read, fresh or not, or null when none is kept. */
+    lastReadAt(microgridId: string, fingerprint: string): number | null {
+      const entry = cache.get(microgridId);
+      return entry && entry.fingerprint === fingerprint ? entry.answer.readAt : null;
+    },
+
+    /**
+     * From the cache while the entry is fresh for this fingerprint; else from
+     * the read already under way for it, if any; else from a new read, once
+     * one of the process's EDGE_STATUS_CONCURRENCY slots is free. Past
+     * `deadlineMs` the answer is "late": a read still waiting for a slot is
+     * dropped, and one under way goes on and keeps its answer for the next
+     * caller.
+     */
+    async get(
+      microgridId: string,
+      fingerprint: string,
+      read: (signal: AbortSignal) => Promise<A>,
+      o: { deadlineMs: number; now?: () => number },
+    ): Promise<Answer<A>> {
+      const now = o.now ?? Date.now;
+      const fresh = freshEntry(microgridId, fingerprint, now());
+      if (fresh) return fresh;
+
+      const key = `${microgridId} ${fingerprint}`;
+      let pending = inFlight.get(key);
+      if (!pending) {
+        const slot = acquire(o.deadlineMs, now);
+        const release = slot instanceof Promise ? await slot : slot;
+        if (!release) return { state: "late" };
+        // After a wait, another caller may have read it, or started to, meanwhile.
+        const meanwhile = slot instanceof Promise ? freshEntry(microgridId, fingerprint, now()) : null;
+        if (meanwhile) {
+          release();
+          return meanwhile;
+        }
+        pending = inFlight.get(key);
+        if (pending) release();
+        else pending = start(microgridId, fingerprint, key, read, now, release);
+      }
+      const late = lateAt(o.deadlineMs, now);
+      try {
+        return await Promise.race([pending, late.promise]).then((r) => (r === "late" ? { state: "late" as const } : r));
+      } finally {
+        late.cancel();
+      }
+    },
+
+    clear() {
+      cache.clear();
+      inFlight.clear();
+    },
+  };
 }
 
+const statusCache = createReadCache<{ total: number; offline: number; online: readonly string[] }>();
+const meterCache = createReadCache<MeterActivityRead>();
+
 /**
- * A microgrid's edge status, from the cache while its entry is fresh for
- * these edges; else from the read already under way for them, if any;
- * else from a new read, once one of the process's EDGE_STATUS_CONCURRENCY
- * slots is free. Past `deadlineMs` the answer is "late": a read still
- * waiting for a slot is dropped, and one under way goes on and keeps its
- * answer for the next caller.
+ * When the microgrid's kept status answer for these edges was read, fresh or
+ * not, or null when none is kept for them. The reader reads microgrids with
+ * none first, then the stalest, so successive loads rotate through them all.
  */
-export async function cachedEdgeStatus(
+export function lastReadAt(microgridId: string, edgeIds: readonly string[]): number | null {
+  return statusCache.lastReadAt(microgridId, fingerprintOf(edgeIds));
+}
+
+/** A microgrid's edge status, through the cache (createReadCache's `get`). */
+export function cachedEdgeStatus(
   microgridId: string,
   edgeIds: readonly string[],
   read: (signal: AbortSignal) => Promise<EdgeStatusRead>,
   o: { deadlineMs: number; now?: () => number },
 ): Promise<EdgeStatusAnswer> {
-  const now = o.now ?? Date.now;
-  const fingerprint = fingerprintOf(edgeIds);
-  const fresh = freshEntry(microgridId, fingerprint, now());
-  if (fresh) return fresh;
-
-  const key = `${microgridId} ${fingerprint}`;
-  let pending = inFlight.get(key);
-  if (!pending) {
-    const slot = acquire(o.deadlineMs, now);
-    const release = slot instanceof Promise ? await slot : slot;
-    if (!release) return { state: "late" };
-    // After a wait, another caller may have read it, or started to, meanwhile.
-    const meanwhile = slot instanceof Promise ? freshEntry(microgridId, fingerprint, now()) : null;
-    if (meanwhile) {
-      release();
-      return meanwhile;
-    }
-    pending = inFlight.get(key);
-    if (pending) release();
-    else pending = start(microgridId, fingerprint, key, edgeIds, read, now, release);
-  }
-  const late = lateAt(o.deadlineMs, now);
-  try {
-    return await Promise.race([pending, late.promise]).then((r) => (r === "late" ? { state: "late" as const } : r));
-  } finally {
-    late.cancel();
-  }
+  return statusCache.get(
+    microgridId,
+    fingerprintOf(edgeIds),
+    async (signal) => {
+      const statuses = await read(signal);
+      return { ...summarize(edgeIds, statuses), online: onlineOf(edgeIds, statuses) };
+    },
+    o,
+  );
 }
 
-/** Empties the cache, forgets reads under way and frees every slot; for tests only. */
+/**
+ * Which of a microgrid's meters have no recent reading, through the cache,
+ * keyed by the meters asked about, so a meter added or removed reads again.
+ * Asked about every meter of the microgrid, online edge or not, so it runs
+ * beside the status read rather than after it; the reader counts only the
+ * meters of edges the status answer says are online.
+ */
+export function cachedMeterActivity(
+  microgridId: string,
+  meters: readonly MeterRef[],
+  read: (signal: AbortSignal) => Promise<MeterActivityRead>,
+  o: { deadlineMs: number; now?: () => number },
+): Promise<MeterActivityAnswer> {
+  return meterCache.get(microgridId, meterFingerprintOf(meters), read, o);
+}
+
+/** Empties the caches, forgets reads under way and frees every slot; for tests only. */
 export function _resetEdgeStatusCacheForTests(): void {
-  cache.clear();
-  inFlight.clear();
+  statusCache.clear();
+  meterCache.clear();
   generation++;
   active = 0;
   waiters.splice(0);
