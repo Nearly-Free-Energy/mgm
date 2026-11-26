@@ -271,7 +271,8 @@ type ActionBase = {
    * Declared, never inferred: gui-surface.test.ts allows it only on an
    * action whose `METHOD /api/route` is a PaymentExemption in UNGATED_WRITES
    * (src/lib/runtime/__tests__/route-rules.ts), so the host never offers a
-   * write the route would refuse. If that exemption is removed, remove this.
+   * write the route would refuse, and only an action its WHILE_OFF_ACTIONS
+   * list pins to that route. If that exemption is removed, remove this.
    */
   whilePluginOff?: "enabled";
   /**

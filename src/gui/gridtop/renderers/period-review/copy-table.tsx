@@ -20,6 +20,19 @@
  * succeeded, moves to the next figure; A goes to the cursor row's
  * disclosure; Escape leaves the box, after which Tab goes to the cursor
  * row's link. Entering the box, each move and each copy is announced.
+ *
+ * For screen readers the box is a read-only grid (decided on #287, from
+ * #212): role="grid" names it as a grid, its rows are rows, the tenant is
+ * each row's header and every other cell a gridcell, and the table under it
+ * is presentation only. Focus stays on the box and the polite announcements
+ * say where the cursor is. That has not been tried with NVDA or JAWS, and
+ * NVDA may stay in browse mode on a focused read-only grid with no focused
+ * cell, keeping the arrow keys and C for itself, as it did with the region
+ * this replaced. If it does, the fallback is an id on each copy cell and
+ * aria-activedescendant on the box pointing at the cursor's gridcell, with
+ * the move announcements dropped, since the active cell is then read out.
+ * Below 600 px a list of cards (./cards.tsx) takes the grid's place; their
+ * figures are buttons, so no grid keys are needed there.
  */
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { ActionRef, Column, LiveState, ModelOf, RowOf } from "@/lib/gui/contract";
@@ -191,9 +204,10 @@ export function CopyTable(props: {
   return (
     <div
       ref={region}
-      role="region"
+      role="grid"
       tabIndex={0}
-      aria-label={`Bills, ${model.title}`}
+      aria-label={`Bills, ${model.title}, ${n} ${n === 1 ? "tenant" : "tenants"}`}
+      aria-readonly="true"
       aria-describedby={keysId}
       onKeyDown={onKeyDown}
       onFocus={(event) => {
@@ -210,32 +224,30 @@ export function CopyTable(props: {
       }}
       className="gt:relative gt:overflow-x-auto gt:rounded-md gt:border gt:border-border gt:bg-card gt:focus-visible:outline-2 gt:focus-visible:outline-ring"
     >
-      <table className="gt:w-full gt:border-collapse gt:text-dense gt:tabular-nums">
-        <caption className="gt:sr-only">
-          Bills, {n} {n === 1 ? "tenant" : "tenants"}
-        </caption>
-        <thead>
-          <tr>
+      {/* Presentation only: the grid above owns the rows, which carry their roles themselves. */}
+      <table role="presentation" className="gt:w-full gt:border-collapse gt:text-dense gt:tabular-nums">
+        <thead role="rowgroup">
+          <tr role="row">
             {columns.map((col) => (
-              <th key={col.key} scope="col" className={header(col)}>
+              <th key={col.key} role="columnheader" scope="col" className={header(col)}>
                 {col.label}
               </th>
             ))}
             {controls && (
-              <th scope="col" className={HEADER}>
+              <th role="columnheader" scope="col" className={HEADER}>
                 <span className="gt:sr-only">Actions</span>
               </th>
             )}
           </tr>
         </thead>
-        <tbody>
+        <tbody role="rowgroup">
           {rows.map((row, r) => (
-            <tr key={row.id} data-row={r} className="gt:border-b gt:border-border gt:last:border-b-0">
+            <tr key={row.id} role="row" data-row={r} className="gt:border-b gt:border-border gt:last:border-b-0">
               {columns.map((col) => {
                 const value = row.cells[col.key];
                 if (col.key === tenantKey) {
                   return (
-                    <th key={col.key} scope="row" className="gt:px-2 gt:py-1 gt:text-left gt:align-top gt:font-medium">
+                    <th key={col.key} role="rowheader" scope="row" className="gt:px-2 gt:py-1 gt:text-left gt:align-top gt:font-medium">
                       <ValueText value={value} live={live} kit={kit} />
                     </th>
                   );
@@ -244,7 +256,7 @@ export function CopyTable(props: {
                 const p = c === undefined ? null : { r, c };
                 if (!p || figure(p) === null) {
                   return (
-                    <td key={col.key} className={cls("gt:px-2 gt:py-1 gt:align-top", NUMERIC.has(col.type) && "gt:text-right")}>
+                    <td key={col.key} role="gridcell" className={cls("gt:px-2 gt:py-1 gt:align-top", NUMERIC.has(col.type) && "gt:text-right")}>
                       <ValueText value={value} live={live} kit={kit} />
                     </td>
                   );
@@ -254,6 +266,7 @@ export function CopyTable(props: {
                 return (
                   <td
                     key={col.key}
+                    role="gridcell"
                     data-copy=""
                     data-r={r}
                     data-c={p.c}
@@ -286,7 +299,7 @@ export function CopyTable(props: {
                 );
               })}
               {controls && (
-                <td className="gt:px-2 gt:py-1 gt:align-top">
+                <td role="gridcell" className="gt:px-2 gt:py-1 gt:align-top">
                   <RowControls row={row} tenant={tenantOf(row, tenantKey)} kit={kit} tabIndex={r === home ? undefined : -1} />
                 </td>
               )}

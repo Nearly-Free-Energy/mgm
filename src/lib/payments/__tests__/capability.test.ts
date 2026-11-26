@@ -294,6 +294,19 @@ describe("PaymentsCapability reconcile", () => {
     return { cap: new PaymentsCapability(repo, scope(), providers(), () => true, (p) => p), reconcileAttempt };
   };
 
+  it("names the first missing field of a completed adjustment, in the form's order", async () => {
+    const { cap, reconcileAttempt } = setup();
+    for (const [body, field] of [
+      [{ ...RECORD, externalAmount: undefined }, "externalAmount"],
+      [{ ...RECORD, externalAmount: undefined, externalReference: "" }, "externalAmount"],
+      [{ ...RECORD, externalReference: "  " }, "externalReference"],
+      [{ ...RECORD, notes: "" }, "notes"],
+    ] as const) {
+      expect(await cap.reconcile(ATTEMPT, body)).toMatchObject({ ok: false, status: 400, code: "payments_invalid_action", field });
+    }
+    expect(reconcileAttempt).not.toHaveBeenCalled();
+  });
+
   it("refuses a completed adjustment without the tenant's name typed, before writing", async () => {
     const { cap, reconcileAttempt } = setup();
     for (const body of [RECORD, named(""), named("   ")]) {

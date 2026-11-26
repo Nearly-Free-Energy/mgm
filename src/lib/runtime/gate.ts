@@ -78,7 +78,7 @@ const DISABLED_MESSAGES: Partial<Record<MgmPluginName, string>> = {
   billing:
     "Billing is disabled for this organization. Enable it in Settings → Plugins; tariffs, periods, bills, and payment history are preserved.",
   payments:
-    "Payments are disabled for this organization. Enable them in Settings → Plugins; history and reconciliation are preserved.",
+    "Payments are disabled for this organization. Enable them in Settings → Plugins; history is preserved, and verification and reconciliation stay available.",
   pesapal:
     "The Pesapal provider is disabled for this organization. Enable it in Settings → Plugins; history is preserved.",
   // Read by tenants as well as staff (composeTenantApp), so it names who

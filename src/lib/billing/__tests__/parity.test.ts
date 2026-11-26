@@ -390,7 +390,12 @@ describe("parity with the contributed actions and views", () => {
       confirm: by.confirm,
       target: by.target,
     });
-    if (by.form) expect(def.input, `${id}'s input is ${by.form}`).toBe(SCHEMAS[by.plugin][by.form]);
+    if (by.form) {
+      // The route's schema, or one option of it when several actions send to the route (gui-surface.test.ts check 2).
+      const form = SCHEMAS[by.plugin][by.form];
+      const inputs = form instanceof z.ZodDiscriminatedUnion ? [...form.options] : [form];
+      expect(inputs, `${id}'s input is ${by.form}, or one of its options`).toContain(def.input);
+    }
   });
 
   it("does not count an action as contributed while no interface can submit it", () => {

@@ -10,9 +10,12 @@ import { z } from "zod";
 import { fieldsOf } from "@/lib/gui/kit/action-form";
 import type { Json } from "@/lib/gui/contract";
 import {
-  RECONCILE_ATTEMPT_BODY_VERSION,
+  ACCEPT_RECEIPTS_BODY_VERSION,
+  AcceptReceiptsBody,
+  RECORD_ADJUSTMENT_BODY_VERSION,
   REFRESH_ATTEMPT_BODY_VERSION,
   ReconcileAttemptBody,
+  RecordAdjustmentBody,
   RefreshAttemptBody,
 } from "../schemas";
 
@@ -58,32 +61,80 @@ describe("RefreshAttemptBody", () => {
   });
 });
 
-describe("ReconcileAttemptBody", () => {
-  const RECORD = { action: "record_external", externalAmount: -2500, externalReference: "MTN-1", notes: "Refunded by phone" };
+const CONFIRMATION_JSON = {
+  type: "object",
+  properties: {
+    acknowledged: { type: "array", maxItems: 20, items: { type: "string", maxLength: 64 } },
+    typed: { type: "string" },
+  },
+  required: ["acknowledged"],
+  additionalProperties: false,
+};
 
-  it(`is version ${RECONCILE_ATTEMPT_BODY_VERSION}`, () => {
-    expect(RECONCILE_ATTEMPT_BODY_VERSION).toBe(1);
-    expect(json(ReconcileAttemptBody)).toEqual({
+describe("AcceptReceiptsBody", () => {
+  it(`is version ${ACCEPT_RECEIPTS_BODY_VERSION}: its resolution fixed, with no amount`, () => {
+    expect(ACCEPT_RECEIPTS_BODY_VERSION).toBe(2);
+    expect(json(AcceptReceiptsBody)).toEqual({
       $schema: "https://json-schema.org/draft/2020-12/schema",
       type: "object",
       properties: {
-        action: { type: "string", enum: ["accept_exact", "record_external"], title: "Resolution" },
-        externalAmount: { type: "number", title: "External amount (negative for a refund)" },
+        action: { type: "string", const: "accept_exact", title: "Resolution" },
         externalReference: { type: "string", maxLength: 200, title: "External reference" },
         notes: { type: "string", maxLength: 500, title: "Notes" },
-        confirmation: {
-          type: "object",
-          properties: {
-            acknowledged: { type: "array", maxItems: 20, items: { type: "string", maxLength: 64 } },
-            typed: { type: "string" },
-          },
-          required: ["acknowledged"],
-          additionalProperties: false,
-        },
+        confirmation: CONFIRMATION_JSON,
       },
       required: ["action"],
       additionalProperties: false,
     });
+  });
+
+  it("is drawn by the kit as the reference and the notes, its resolution sent but not shown", () => {
+    expect(fieldsOf(personInput(AcceptReceiptsBody))?.map((f) => [f.key, f.kind, f.kind === "rows" ? undefined : f.required])).toEqual([
+      ["action", "fixed", true],
+      ["externalReference", "text", false],
+      ["notes", "text", false],
+    ]);
+  });
+});
+
+describe("RecordAdjustmentBody", () => {
+  it(`is version ${RECORD_ADJUSTMENT_BODY_VERSION}: its resolution fixed, the amount in major units, and every field required`, () => {
+    expect(RECORD_ADJUSTMENT_BODY_VERSION).toBe(2);
+    expect(json(RecordAdjustmentBody)).toEqual({
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      properties: {
+        action: { type: "string", const: "record_external", title: "Resolution" },
+        externalAmount: {
+          type: "number",
+          title: "External amount (negative for a refund)",
+          description: "In the currency's major units, as the bill's total: 2500 for UGX 2,500, 12.5 for USD 12.50.",
+        },
+        externalReference: { type: "string", minLength: 1, maxLength: 200, title: "External reference" },
+        notes: { type: "string", minLength: 1, maxLength: 500, title: "Notes" },
+        confirmation: CONFIRMATION_JSON,
+      },
+      required: ["action", "externalAmount", "externalReference", "notes"],
+      additionalProperties: false,
+    });
+  });
+
+  it("is drawn by the kit as the amount, the reference and the notes, its resolution sent but not shown", () => {
+    expect(fieldsOf(personInput(RecordAdjustmentBody))?.map((f) => [f.key, f.kind, f.kind === "rows" ? undefined : f.required])).toEqual([
+      ["action", "fixed", true],
+      ["externalAmount", "number", true],
+      ["externalReference", "text", true],
+      ["notes", "text", true],
+    ]);
+  });
+});
+
+describe("ReconcileAttemptBody, which the route parses", () => {
+  const RECORD = { action: "record_external", externalAmount: -2500, externalReference: "MTN-1", notes: "Refunded by phone" };
+
+  it("is either action's input, told apart by its resolution", () => {
+    expect(ReconcileAttemptBody).toBeInstanceOf(z.ZodDiscriminatedUnion);
+    expect(ReconcileAttemptBody.options).toEqual([AcceptReceiptsBody, RecordAdjustmentBody]);
   });
 
   it("accepts each action, a negative amount, and trims the texts", () => {
@@ -97,6 +148,13 @@ describe("ReconcileAttemptBody", () => {
   it.each([
     ["no action", { externalAmount: 1 }, "action", "action must be 'accept_exact' or 'record_external'."],
     ["an unknown action", { action: "refund" }, "action", "action must be 'accept_exact' or 'record_external'."],
+    // A missing amount, reference or notes names its own field.
+    ["a completed adjustment with no amount", { ...RECORD, externalAmount: undefined }, "externalAmount", "externalAmount must be a number."],
+    ["a completed adjustment with no reference", { ...RECORD, externalReference: undefined }, "externalReference", "externalReference must be a string."],
+    ["a completed adjustment with a blank reference", { ...RECORD, externalReference: "  " }, "externalReference", "externalReference is required."],
+    ["a completed adjustment with blank notes", { ...RECORD, notes: " " }, "notes", "notes are required."],
+    // Accepting takes no amount: not even a field for one.
+    ["an amount on an acceptance", { action: "accept_exact", externalAmount: 0 }, undefined, "Unknown field: externalAmount"],
     ["a string amount", { ...RECORD, externalAmount: "2500" }, "externalAmount", "externalAmount must be a number."],
     ["a NaN amount", { ...RECORD, externalAmount: Number.NaN }, "externalAmount", "externalAmount must be a number."],
     ["an infinite amount", { ...RECORD, externalAmount: Number.POSITIVE_INFINITY }, "externalAmount", "externalAmount must be a number."],
@@ -121,20 +179,12 @@ describe("ReconcileAttemptBody", () => {
     }
   });
 
-  it("is an object of fields, so the host can clean a prefill against it field by field", () => {
+  it("has options that are objects of fields, so the host can clean a prefill against each field by field", () => {
     // cleanPrefill (src/lib/gui/host/server/merge.ts) takes only an object input, and checks a prefill against its fields.
-    expect(ReconcileAttemptBody).toBeInstanceOf(z.ZodObject);
-    expect(() => z.object(ReconcileAttemptBody.shape).omit({ confirmation: true }).partial().parse({ action: "record_external" })).not.toThrow();
-  });
-
-  it("is drawn by the kit as a form: the resolution, the amount, the reference and the notes", () => {
-    const fields = fieldsOf(personInput(ReconcileAttemptBody));
-    expect(fields?.map((f) => [f.key, f.kind])).toEqual([
-      ["action", "choice"],
-      ["externalAmount", "number"],
-      ["externalReference", "text"],
-      ["notes", "text"],
-    ]);
+    for (const option of [AcceptReceiptsBody, RecordAdjustmentBody]) {
+      expect(option).toBeInstanceOf(z.ZodObject);
+      expect(() => z.object(option.shape).omit({ confirmation: true }).partial().parse({ notes: "n" })).not.toThrow();
+    }
   });
 });
 

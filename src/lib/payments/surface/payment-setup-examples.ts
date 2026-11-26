@@ -27,7 +27,7 @@ const fmt = createFmt({ locale: "en-GB" });
  * gate's copy changes, so may this.
  */
 const PAYMENTS_DISABLED =
-  "Payments are disabled for this organization. Enable them in Settings → Plugins; history and reconciliation are preserved.";
+  "Payments are disabled for this organization. Enable them in Settings → Plugins; history is preserved, and verification and reconciliation stay available.";
 
 const CASES: readonly { readiness: SetupReadiness; superAdmin: boolean; gated?: true }[] = [
   // The first names the section where the send queue lists it.

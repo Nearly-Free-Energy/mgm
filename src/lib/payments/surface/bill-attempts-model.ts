@@ -244,16 +244,17 @@ function receiptsText(fmt: Fmt, receipts: readonly BillReceipt[]): Value {
  * The actions an attempt offers. Refresh status only on an attempt with a
  * tracking id, which refreshPaymentStatus needs (it refuses the others with
  * the unknown-outcome copy, which the row's note already says). Both
- * reconciliations on an attempt that needs reconciliation, each prefilled
- * with its resolution; their available() says when one does not apply.
+ * reconciliations on an attempt that needs reconciliation; each action's
+ * own input fixes its resolution (../schemas.ts), so neither needs a
+ * prefill, and their available() says when one does not apply.
  */
 export function attemptActions(a: BillAttempt): ActionLink[] {
   const params = { id: a.id };
   const out: ActionLink[] = [];
   if (a.hasTracking) out.push({ action: REFRESH_ATTEMPT_ACTION.id, params });
   if (a.status === "needs_reconciliation") {
-    out.push({ action: RECORD_ADJUSTMENT_ACTION.id, params, prefill: { action: "record_external" } });
-    out.push({ action: ACCEPT_RECEIPTS_ACTION.id, params, prefill: { action: "accept_exact" } });
+    out.push({ action: RECORD_ADJUSTMENT_ACTION.id, params });
+    out.push({ action: ACCEPT_RECEIPTS_ACTION.id, params });
   }
   return out;
 }

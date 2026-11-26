@@ -1347,14 +1347,52 @@ describe("ActionHost when what was confirmed changed", () => {
     ["another method", (p: PreparedAction) => ({ ...p, method: "PUT" })],
     ["other bound fields", (p: PreparedAction) => ({ ...p, bound: { microgrid_id: "00000000-0000-4000-8000-0000000000ff" } })],
     ["a weaker level", (p: PreparedAction) => ({ ...p, confirm: "typed" })],
-  ])("swaps nothing in when the second prepare returns %s", async (_, change) => {
-    const { writes } = mount([{ body: closing("UGX 100", "d1") }, { body: change(closing("UGX 120", "d2")) }], { status: 409, body: CHANGED });
+  ])("swaps nothing in when the second prepare returns %s, and refreshes the view", async (_, change) => {
+    const { runtime, writes } = mount([{ body: closing("UGX 100", "d1") }, { body: change(closing("UGX 120", "d2")) }], { status: 409, body: CHANGED });
     const done = act(ref());
     await confirmAll();
     await expect(done).resolves.toMatchObject({ ok: false, status: 409, code: "acme_changed", message: CHANGED.error });
     await waitFor(() => expect(screen.queryByRole("button", { name: "Rename site" })).toBeNull());
     expect(screen.queryByText("UGX 120")).toBeNull();
+    expect(runtime.refresh).toHaveBeenCalledOnce();
     expect(writes()).toHaveLength(1);
+  });
+
+  it("takes the same bound fields in another key order as the same action", async () => {
+    const two = { microgrid_id: MG, edge_id: "00000000-0000-4000-8000-0000000000e1" };
+    const { writes } = mount(
+      [{ body: closing("UGX 100", "d1", { bound: two }) }, { body: closing("UGX 120", "d2", { bound: { edge_id: two.edge_id, microgrid_id: MG } }) }],
+      { status: 409, body: CHANGED },
+    );
+    void act(ref());
+    await confirmAll();
+    expect(await screen.findByText("UGX 120")).toBeTruthy();
+    expect(writes()).toHaveLength(1);
+  });
+
+  it("ends with the write's 409, never a step left busy, when the second prepare's answer cannot be read", async () => {
+    // A "prepared" answer with no spec: reading it throws inside prepareAgain.
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { runtime, writes } = mount([{ body: closing("UGX 100", "d1") }, { body: { type: "prepared" } }], { status: 409, body: CHANGED });
+    const done = act(ref());
+    await confirmAll();
+    await expect(done).resolves.toMatchObject({ ok: false, status: 409, code: "acme_changed", message: CHANGED.error });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Rename site" })).toBeNull());
+    expect(runtime.refresh).toHaveBeenCalledOnce();
+    expect(logged).toHaveBeenCalledWith("[gui] prepare again failed", expect.any(TypeError));
+    logged.mockRestore();
+    expect(writes()).toHaveLength(1);
+  });
+
+  it("keeps Confirm disabled while it prepares again", async () => {
+    const hold = gate();
+    const { prepares } = mount([{ body: closing("UGX 100", "d1") }, { body: closing("UGX 120", "d2"), wait: hold.wait }], { status: 409, body: CHANGED });
+    void act(ref());
+    await confirmAll();
+    await waitFor(() => expect(prepares()).toHaveLength(2));
+    expect(((await confirmButton()) as HTMLButtonElement).disabled).toBe(true);
+    hold.open();
+    expect(await screen.findByText("UGX 120")).toBeTruthy();
   });
 
   it("resolves cancelled when the person cancels while it prepares again, and ignores the late answer", async () => {

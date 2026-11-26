@@ -294,14 +294,14 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a period's payments", () => {
       ["payments.record-adjustment", true, undefined],
       ["payments.accept-receipts", false, "The verified receipts do not come to exactly the current bill: record a completed adjustment instead."],
     ]);
-    expect(model.body.rows[1].actions[1]).toMatchObject({ prefill: { action: "record_external" } });
+    expect(model.body.rows[1].actions[1].prefill).toBeUndefined();
     expect(model.body.rows[1].actions[1].tone).toBeUndefined();
   });
 
   it("offers accepting receipts that come to the bill exactly", async () => {
     caller = manager;
     const model = await loaded(href({ bill: BILL_B }));
-    expect(model.body.rows[0].actions.find((a) => a.action === "payments.accept-receipts")).toMatchObject({ enabled: true, prefill: { action: "accept_exact" } });
+    expect(model.body.rows[0].actions.find((a) => a.action === "payments.accept-receipts")).toMatchObject({ enabled: true });
   });
 
   it("is listed as the period review's Payments tab", async () => {

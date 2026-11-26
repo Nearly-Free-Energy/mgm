@@ -22,8 +22,11 @@ import "server-only";
  * their routes accept them then by design: each is a PaymentExemption in
  * src/lib/runtime/__tests__/route-rules.ts, and docs/payments-rollout.md
  * keeps history and verification available while Payments is off.
- * gui-surface.test.ts allows the fields only while that holds; if a route's
- * exemption goes, drop its actions' field (parity.ts, payments-while-off).
+ * gui-surface.test.ts allows the fields only while that holds, and only on
+ * the three actions its WHILE_OFF_ACTIONS list pins, so another payments
+ * action (a payment link, say) is never offered while Payments is off; if a
+ * route's exemption goes, drop its actions' field and their entries
+ * (parity.ts, payments-while-off).
  *
  * `payments.payment-setup` is a new page too (…/[periodId]/payment-setup),
  * served the same way. It replaces the legacy period page's banner shown
@@ -50,9 +53,11 @@ import "server-only";
 import type { Contribution } from "@/lib/gui/surface";
 import { PAYMENTS_PLUGIN_NAME } from "@/lib/plugins/bundled";
 import {
-  RECONCILE_ATTEMPT_BODY_VERSION,
+  ACCEPT_RECEIPTS_BODY_VERSION,
+  AcceptReceiptsBody,
+  RECORD_ADJUSTMENT_BODY_VERSION,
   REFRESH_ATTEMPT_BODY_VERSION,
-  ReconcileAttemptBody,
+  RecordAdjustmentBody,
   RefreshAttemptBody,
 } from "./schemas";
 import {
@@ -151,8 +156,8 @@ export const PAYMENTS_SURFACE: Contribution = {
   ],
   // All three human-only (no assistant proposes a payment write) and
   // `targeted: false`: offered only where this view's loader links them, on
-  // the attempts it shows, each reconciliation prefilled with its
-  // resolution. No other view shows payment attempts; if one does, revisit.
+  // the attempts it shows; each reconciliation's input fixes its
+  // resolution (../schemas.ts). No other view shows payment attempts; if one does, revisit.
   // Who may act is the routes' and the capability's to decide: any staff
   // member with access to the organization (./surface/bill-attempts.ts).
   // All three stay enabled while Payments is off (whilePluginOff), since
@@ -188,8 +193,8 @@ export const PAYMENTS_SURFACE: Contribution = {
     {
       ...RECORD_ADJUSTMENT_ACTION,
       target: "paymentAttempt",
-      input: ReconcileAttemptBody,
-      inputVersion: RECONCILE_ATTEMPT_BODY_VERSION,
+      input: RecordAdjustmentBody,
+      inputVersion: RECORD_ADJUSTMENT_BODY_VERSION,
       method: "POST",
       path: "/api/payments/attempts/[id]/reconcile",
       bind: { path: { id: "paymentAttempt" } },
@@ -203,13 +208,13 @@ export const PAYMENTS_SURFACE: Contribution = {
       whilePluginOff: "enabled",
     },
     // Accepts verified receipts that come to the bill exactly, and marks it
-    // paid. Its form shows the optional amount, reference and notes too; the
-    // capability refuses an amount.
+    // paid. Its form shows only the optional reference and notes; its input
+    // has no amount field (./schemas.ts).
     {
       ...ACCEPT_RECEIPTS_ACTION,
       target: "paymentAttempt",
-      input: ReconcileAttemptBody,
-      inputVersion: RECONCILE_ATTEMPT_BODY_VERSION,
+      input: AcceptReceiptsBody,
+      inputVersion: ACCEPT_RECEIPTS_BODY_VERSION,
       method: "POST",
       path: "/api/payments/attempts/[id]/reconcile",
       bind: { path: { id: "paymentAttempt" } },

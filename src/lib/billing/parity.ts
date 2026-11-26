@@ -89,7 +89,8 @@ export type ParityAction = {
   confirm: Confirm;
   /**
    * The schema in the plugin's schemas module (src/lib/<plugin>/schemas.ts)
-   * the route parses its body with, or null when the route has no JSON body
+   * the route parses its body with (the action's input, or a discriminated
+   * union with it as one option), or null when the route has no JSON body
    * today; a route must parse a schema before its action can be contributed
    * (gui-surface.test.ts check 2).
    */
@@ -522,7 +523,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     legacy: "src/components/payments/payment-history.tsx",
     replacedBy: { kind: "view", view: "payments.bill-attempts" },
     pr: WHILE_OFF,
-    note: "Decided by the maintainer: keep the actions enabled. While Payments is off the period review still lists the Payments tab (attach.whilePluginOff: \"listed\"), which loads with the gate's notice, and Refresh status and both reconciliations stay enabled and preparable (whilePluginOff: \"enabled\" on payments.refresh-attempt, payments.record-adjustment and payments.accept-receipts), as the legacy dialog offers them, because their routes accept them then by design (their PaymentExemption entries in src/lib/runtime/__tests__/route-rules.ts; docs/payments-rollout.md keeps history and verification available). gui-surface.test.ts allows the action field only on a PaymentExemption route, and parity.test.ts keeps this row replaced only while the four declarations stand. Differences from the dialog: its own line that receipts remain available is replaced by the gate's notice, and Refresh status is offered only on attempts with a tracking id, as when Payments is on (refresh-attempt).",
+    note: "Decided by the maintainer: keep the actions enabled. While Payments is off the period review still lists the Payments tab (attach.whilePluginOff: \"listed\"), which loads with the gate's notice, and Refresh status and both reconciliations stay enabled and preparable (whilePluginOff: \"enabled\" on payments.refresh-attempt, payments.record-adjustment and payments.accept-receipts), as the legacy dialog offers them, because their routes accept them then by design (their PaymentExemption entries in src/lib/runtime/__tests__/route-rules.ts; docs/payments-rollout.md keeps history and verification available). gui-surface.test.ts allows the action field only on a PaymentExemption route, and only on an action WHILE_OFF_ACTIONS pins to that route, and parity.test.ts keeps this row replaced only while the four declarations stand. Differences from the dialog: its own line that receipts remain available is replaced by the gate's notice, and Refresh status is offered only on attempts with a tracking id, as when Payments is on (refresh-attempt).",
   },
 
   {
@@ -563,7 +564,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "payments.bill-attempts",
     },
     pr: ATTEMPTS,
-    note: "Typed: it records an amount from outside MGM, possibly negative, and marks the bill paid. The person types the tenant's name, which the capability checks (428 without it or with another), so the legacy dialog asks for it too; prepare names the amount that settles the bill. The kit form shows the Resolution choice with its raw values, prefilled record_external. The route now refuses a reference over 200 characters or notes over 500 (ReconcileAttemptBody), where it used to cut notes to 500 and save them; the legacy dialog caps both inputs at those limits.",
+    note: "Typed: it records an amount from outside MGM, possibly negative, and marks the bill paid. The person types the tenant's name, which the capability checks (428 without it or with another), so the legacy dialog asks for it too; prepare names the amount that settles the bill. Its own input (RecordAdjustmentBody, one option of ReconcileAttemptBody) fixes the resolution, which the kit form sends without showing, and asks for the amount in major units, the reference and the notes. The route now refuses a reference over 200 characters or notes over 500 (ReconcileAttemptBody), where it used to cut notes to 500 and save them; the legacy dialog caps both inputs at those limits.",
   },
   {
     id: "accept-receipts",
@@ -583,7 +584,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "payments.bill-attempts",
     },
     pr: ATTEMPTS,
-    note: "Offered on every attempt that needs reconciliation, unavailable with the reason when the received total is not exactly the bill, a checkout's outcome is unknown or receipts are in several currencies (available() mirrors fn_payment_reconcile). The kit form also shows the optional amount, reference and notes, prefilled accept_exact; the capability refuses an amount. The same reference and notes limits apply as to record-adjustment.",
+    note: "Offered on every attempt that needs reconciliation, unavailable with the reason when the received total is not exactly the bill, a checkout's outcome is unknown or receipts are in several currencies (available() mirrors fn_payment_reconcile). Its own input (AcceptReceiptsBody, one option of ReconcileAttemptBody) fixes the resolution, which the kit form sends without showing, and has no amount field; the form shows only the optional reference and notes. The same reference and notes limits apply as to record-adjustment.",
   },
 
   {

@@ -139,7 +139,10 @@ read a stored credential, or to send data to another origin.
      shows its own notice first (the gate's, else the one on generated
      figures), then the loader's, in one notice, and a loader's `danger`
      tone outranks the host's warning (`shownNotice` in
-     `host/server/view.ts`). Its views of cost `vendor` are refused.
+     `host/server/view.ts`). The same holds whether the plugin is on or
+     off, and on a tenant view, where the host asks no gate, so its own
+     notice can only be the one on generated figures. Its views of cost
+     `vendor` are refused.
    - Its sections are still listed where they are attached, so their place
      shows the gate's notice. Its tabs and tiles are left out, unless the
      attachment declares `whilePluginOff: "listed"`.
@@ -151,10 +154,16 @@ read a stored credential, or to send data to another origin.
    - Only an action whose `METHOD /api/route` is a `PaymentExemption` in
      `UNGATED_WRITES` (`src/lib/runtime/__tests__/route-rules.ts`) may
      declare `whilePluginOff`, so the host never offers a write the route
-     would refuse; only a Payments or Pesapal view may declare
+     would refuse, and only one of the actions decided for it, which
+     `WHILE_OFF_ACTIONS` in `gui-surface.test.ts` pins to their routes
+     (verification and reconciliation: #226, narrowed by #287), so a route
+     that runs while off is not by itself a reason to offer an action then;
+     only a Payments or Pesapal view may declare
      `attach.whilePluginOff`, and only while every Payments capability
      method a surface module may call runs while the plugin is off.
-     `gui-surface.test.ts` checks both. The registration check refuses
+     `gui-surface.test.ts` checks both, and holds an action declaring
+     `whilePluginOff` to that same condition, since its `available()` and
+     `prepare` run while the plugin is off too. The registration check refuses
      `attach.whilePluginOff` on a section or a `vendor` view.
    - Its watchers are not run, and are listed as neither checked nor
      unchecked, unless the watcher declares `whilePluginOff: "checked"`;
@@ -294,7 +303,10 @@ read a stored credential, or to send data to another origin.
      the new step as a new round, ticks and typing cleared, with the
      route's message as its note, and never sends on its own. A refusal of
      the new prepare ends the action with that refusal and refreshes the
-     view; any other answer ends it with the route's 409. Any other failed
+     view; any other answer (another action, route, method or bound
+     fields, or a weaker level), and a new prepare that throws, ends it
+     with the route's 409 and refreshes the view too, since the write was
+     refused because something changed. Any other failed
      write shows the same step again with the route's message. The host
      prepares again through `prepareAction` rather than using a step the
      route's body may carry, so the step is always one the host checked,

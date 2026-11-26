@@ -290,6 +290,57 @@ describe("ActionForm", () => {
     expect(cancel).toHaveBeenCalledOnce();
   });
 
+  it("sends a field with one allowed value without showing it, whatever the initial value says", () => {
+    const input: Json = {
+      type: "object",
+      properties: {
+        action: { type: "string", const: "accept_exact", title: "Resolution" },
+        notes: { type: "string", title: "Notes" },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    };
+    expect(fieldsOf(input)?.map((f) => [f.key, f.kind])).toEqual([
+      ["action", "fixed"],
+      ["notes", "text"],
+    ]);
+    const { submit } = mount(input, { initial: { action: "record_external", notes: "Paid in cash" } });
+    expect(screen.queryByLabelText(/Resolution/)).toBeNull();
+    expect(screen.queryByText(/accept_exact|record_external/)).toBeNull();
+    expect(screen.getAllByRole("textbox")).toHaveLength(1);
+    save();
+    expect(submit).toHaveBeenCalledWith({ action: "accept_exact", notes: "Paid in cash" });
+    // A number or yes/no is fixed the same way; one that may also be null, or an object, is not drawn at all.
+    expect(fieldsOf({ type: "object", properties: { v: { const: 2 } } })?.[0]).toMatchObject({ kind: "fixed", value: 2 });
+    expect(fieldsOf({ type: "object", properties: { v: { anyOf: [{ const: "x" }, { type: "null" }] } } })).toBeNull();
+    expect(fieldsOf({ type: "object", properties: { v: { const: { a: 1 } } } })).toBeNull();
+  });
+
+  it("shows the route's error at a fixed field, which has no control of its own to carry it", () => {
+    const flat: Json = {
+      type: "object",
+      properties: { action: { type: "string", const: "accept_exact" }, notes: { type: "string", title: "Notes" } },
+      required: ["action"],
+    };
+    mount(flat, { error: { message: "This resolution is not offered.", field: "action" } });
+    expect(screen.getByRole("alert").textContent).toBe("This resolution is not offered.");
+    cleanup();
+
+    const rows: Json = {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          minItems: 1,
+          items: { type: "object", properties: { kind: { type: "string", const: "meter" }, label: { type: "string" } }, required: ["kind"] },
+        },
+      },
+      required: ["items"],
+    };
+    mount(rows, { error: { message: "This kind is not offered.", field: "items.0.kind" } });
+    expect(screen.getByRole("alert").textContent).toBe("This kind is not offered.");
+  });
+
   it("returns null from fieldsOf for every shape it cannot render", () => {
     expect(fieldsOf({ type: "object", properties: { a: { type: "string" } }, patternProperties: {} })).toBeNull();
     expect(fieldsOf({ type: "object", properties: { a: { anyOf: [{ type: "string" }, { type: "number" }] } } })).toBeNull();

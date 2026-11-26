@@ -147,7 +147,7 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
         status: 409,
         code: "payments_disabled",
         message:
-          "Payments are disabled for this organization. Enable them in Settings → Plugins; history and reconciliation are preserved.",
+          "Payments are disabled for this organization. Enable them in Settings → Plugins; history is preserved, and verification and reconciliation stay available.",
       };
     }
     if (!pesapalOn) {
@@ -810,8 +810,10 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
         message: RECONCILE_COPY.notNeeded,
       };
     }
-    // The route parses ReconcileAttemptBody first (./schemas.ts); these
-    // checks hold for any caller.
+    // These checks are for callers other than the reconcile route, which
+    // parses ReconcileAttemptBody first (./schemas.ts): that refuses every
+    // body they would refuse, and the route passes on only { error, reason }
+    // of a refusal, not its field.
     const rec = (input ?? {}) as Record<string, unknown>;
     const action = rec.action;
     if (action !== "accept_exact" && action !== "record_external") {
@@ -835,14 +837,19 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
         field: "externalAmount",
       };
     }
-    if (action === "record_external" && (!externalReference || !notes || typeof rec.externalAmount !== "number" || !Number.isFinite(rec.externalAmount))) {
-      return {
-        ok: false as const,
-        status: 400 as const,
-        code: "payments_invalid_action",
-        message: RECONCILE_COPY.adjustmentFields,
-        field: "externalReference",
-      };
+    if (action === "record_external") {
+      // The first missing field, in the order RecordAdjustmentBody lists them.
+      const amountOk = typeof rec.externalAmount === "number" && Number.isFinite(rec.externalAmount);
+      const missing = !amountOk ? "externalAmount" : !externalReference ? "externalReference" : !notes ? "notes" : null;
+      if (missing) {
+        return {
+          ok: false as const,
+          status: 400 as const,
+          code: "payments_invalid_action",
+          message: RECONCILE_COPY.adjustmentFields,
+          field: missing,
+        };
+      }
     }
     if (action === "record_external") {
       // A completed adjustment records an amount from outside MGM, so the

@@ -531,7 +531,15 @@ export const EMPTY_BODY_ROUTES: ReadonlySet<string> = new Set([
   "POST /api/users/[id]/resend-invite",
 ]);
 
-/** The body of the actions sent to one route: the same for all of them, since the route parses one schema. */
+/**
+ * The body of the actions sent to one route. The route parses one schema,
+ * and each action's input is that schema or one option of its
+ * discriminated union (gui-surface.test.ts, check 2), as the two payments
+ * reconciliations are. So actions with the same input give that input, and
+ * actions with different inputs give `anyOf` the distinct inputs, in
+ * catalog order. If check 2 comes to allow an input that is not one of the
+ * route's options, revisit this.
+ */
 function routeBody(actions: readonly RegisteredAction[]): JsonObject {
   const bodies = actions.map(({ def }) => {
     const { $schema: _dialect, ...body } = describeBody(def) as JsonObject;
@@ -541,11 +549,8 @@ function routeBody(actions: readonly RegisteredAction[]): JsonObject {
     }
     return body;
   });
-  const first = JSON.stringify(bodies[0]);
-  if (bodies.some((b) => JSON.stringify(b) !== first)) {
-    throw new Error(`OpenAPI: actions ${actions.map((a) => a.def.id).join(", ")} share a route but not an input`);
-  }
-  return bodies[0];
+  const distinct = [...new Map(bodies.map((body) => [JSON.stringify(body), body])).values()];
+  return distinct.length === 1 ? distinct[0] : { anyOf: distinct };
 }
 
 /** The path parameters of a route, each of the kind its actions bind it to. */

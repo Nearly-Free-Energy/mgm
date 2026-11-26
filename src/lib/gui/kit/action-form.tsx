@@ -4,7 +4,8 @@
  * The kit's form for a prepared action's input, which the action host uses
  * whenever the GUI brings no form of its own. It renders the JSON Schema in
  * ActionSpec.input: flat fields (text, secret, date, number, whole number,
- * yes/no, a choice) and arrays of flat objects as rows. Any other shape, or
+ * yes/no, a choice, and a field with one allowed value, which it sends and
+ * does not show) and arrays of flat objects as rows. Any other shape, or
  * an array that starts with more rows than its maxItems (at most 100), gets a
  * notice and Cancel only, never a partial form.
  *
@@ -18,7 +19,7 @@ import { DialogFooter } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import type { FormProps, Json } from "../contract";
 
-type Kind = "text" | "secret" | "date" | "number" | "integer" | "boolean" | "choice";
+type Kind = "text" | "secret" | "date" | "number" | "integer" | "boolean" | "choice" | "fixed";
 interface Flat {
   kind: Kind;
   key: string;
@@ -31,6 +32,8 @@ interface Flat {
   max?: number;
   maxLength?: number;
   fallback?: Json;
+  /** A fixed field's one value, which the form sends without showing it. */
+  value?: string | number | boolean;
 }
 interface Rows {
   kind: "rows";
@@ -84,6 +87,15 @@ function flatOf(key: string, node: Json, required: boolean): Flat | null {
     nullable = true;
   }
   const base = { key, ...named(key, at), required, nullable, fallback: at.default };
+  // A field that admits one value (JSON Schema `const`, what z.literal
+  // writes) is not the person's to choose: the form sends it and shows
+  // nothing, as an action's own schema says what it always sends, such as
+  // a reconciliation's resolution. One that may also be null is not drawn.
+  if (Object.hasOwn(at, "const")) {
+    const value = at.const;
+    const plain = typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+    return plain && !nullable ? { ...base, kind: "fixed", value } : null;
+  }
   if (Array.isArray(at.enum)) {
     const choices = at.enum.filter((c): c is string | number => typeof c === "string" || typeof c === "number");
     return choices.length > 0 && choices.length === at.enum.length ? { ...base, kind: "choice", choices } : null;
@@ -184,6 +196,7 @@ function startOf(fields: Field[], initial: Json | null): Values {
 
 /** One field's value, or its error; `{}` leaves an optional empty field out. */
 function valueOf(field: Flat, raw: Raw): { value?: Json; error?: string } {
+  if (field.kind === "fixed") return { value: field.value };
   if (field.kind === "boolean") return { value: raw === true };
   const typed = typeof raw === "string" ? raw : "";
   if ((field.kind === "secret" ? typed : typed.trim()) === "") {
@@ -310,10 +323,12 @@ export function ActionForm({ spec, initial, busy, error, submit, cancel, footer,
   const set = (key: string, raw: Raw | Row[]) => setValues((prev) => ({ ...prev, [key]: raw }));
   // The route's error shows at its field: a field's key, or a row's cell ("bands.0.rate").
   const serverField = error?.field;
-  const placed = fields.some((f) => serverField === f.key || serverField?.startsWith(`${f.key}.`));
+  // A fixed field shows nothing, so an error at it is not placed: the alert below shows it.
+  const placed = fields.some((f) => f.kind !== "fixed" && (serverField === f.key || serverField?.startsWith(`${f.key}.`)));
   const errorAt = (path: string) => errors[path] ?? (serverField === path ? error!.message : undefined);
 
   const control = (field: Flat, raw: Raw, path: string, onChange: (raw: Raw) => void) => {
+    if (field.kind === "fixed") return null;
     const inputId = `${id}-${path}`;
     const problem = errorAt(path);
     const described = [field.hint && `${inputId}-hint`, problem && `${inputId}-error`].filter(Boolean).join(" ") || undefined;
@@ -384,7 +399,7 @@ export function ActionForm({ spec, initial, busy, error, submit, cancel, footer,
 
   const rows = (field: Rows) => {
     const list = values[field.key] as Row[];
-    const inCell = list.some((_, i) => field.fields.some((c) => serverField === `${field.key}.${i}.${c.key}`));
+    const inCell = list.some((_, i) => field.fields.some((c) => c.kind !== "fixed" && serverField === `${field.key}.${i}.${c.key}`));
     const problem = errors[field.key] ?? (!inCell && (serverField === field.key || serverField?.startsWith(`${field.key}.`)) ? error!.message : undefined);
     const addId = `${id}-${field.key}-add`;
     const removeId = (row: Row) => `${id}-${field.key}-remove-${row.id}`;

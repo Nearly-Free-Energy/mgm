@@ -49,8 +49,10 @@
  * the same action at no weaker level it shows the new step as a new flow and
  * round, ticks and typing cleared, with the route's message as its note. It
  * never sends on its own: the person confirms the new step as any other. A
- * refused second prepare ends the action with that refusal and refreshes the
- * view; any other answer shows the same step again with the route's message.
+ * refused second prepare ends the action with that refusal, and a different
+ * action or a weaker level ends it with the route's 409, as does a second
+ * prepare that throws, which is logged; each refreshes the view. Any other
+ * failed write shows the same step again with the route's message.
  */
 import {
   createContext,
@@ -250,13 +252,16 @@ const needsStep = (level: Confirm, activated: boolean) => level !== "none" || !a
 /** The confirmation levels, weakest first. */
 const LEVEL_ORDER: readonly Confirm[] = ["none", "confirm", "typed", "ceremony"];
 
+/** A record's entries in key order, so two records with the same entries compare equal whatever order they were built in. */
+const sortedEntries = (record: Record<string, string>) => JSON.stringify(Object.entries(record).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+
 /** Whether `next` prepares the same write as `prev`, at no weaker level: only then is it shown in its place. */
 function sameAction(prev: PreparedAction, next: PreparedAction): boolean {
   return (
     next.spec.id === prev.spec.id &&
     next.method === prev.method &&
     next.path === prev.path &&
-    JSON.stringify(next.bound) === JSON.stringify(prev.bound) &&
+    sortedEntries(next.bound) === sortedEntries(prev.bound) &&
     LEVEL_ORDER.indexOf(next.confirm) >= LEVEL_ORDER.indexOf(prev.confirm)
   );
 }
@@ -370,27 +375,42 @@ export function ActionHost({
    */
   const prepareAgain = useCallback(
     async (current: Flow, values: Json | null, result: Failure) => {
-      const again = withoutKeys(values, current.writeOnly);
-      const next = await prepare(runtime, current.ref, isObject(again) ? again : undefined);
-      // Cancelled or unmounted meanwhile: the late answer changes nothing.
-      if (flow.current !== current) return;
-      if (!mounted.current) return finish(current, result);
-      if (next.type !== "prepared") {
-        finish(current, next);
-        // What the view shows behind the step may have changed too, such as a period that became blocked.
-        if (next.status === 401) window.location.assign("/login");
-        else runtime.refresh();
-        return;
+      // It runs unawaited, so a throw would leave the step busy for good:
+      // any throw is logged and ends the action with the write's answer instead.
+      try {
+        const again = withoutKeys(values, current.writeOnly);
+        const next = await prepare(runtime, current.ref, isObject(again) ? again : undefined);
+        // Cancelled or unmounted meanwhile (unmounting finishes the flow): the late answer changes nothing.
+        if (flow.current !== current) return;
+        if (next.type !== "prepared") {
+          finish(current, next);
+          // What the view shows behind the step may have changed too, such as a period that became blocked.
+          if (next.status === 401) window.location.assign("/login");
+          else runtime.refresh();
+          return;
+        }
+        // A different write, or a weaker level, is never swapped in. The
+        // write was refused because something changed, so the view is
+        // fetched again either way.
+        if (!sameAction(current.prepared, next)) {
+          finish(current, result);
+          runtime.refresh();
+          return;
+        }
+        const fresh = flowOf(current.ref, next, forms, current.resolve);
+        fresh.state.shown = true;
+        flow.current = fresh;
+        show(
+          { flow: fresh, step: fresh.hasForm ? "form" : "confirm", busy: false, error: { message: result.message }, values: again },
+          true,
+        );
+      } catch (error) {
+        console.error("[gui] prepare again failed", error);
+        if (flow.current === current) {
+          finish(current, result);
+          runtime.refresh();
+        }
       }
-      // A different write, or a weaker level, is never swapped in.
-      if (!sameAction(current.prepared, next)) return finish(current, result);
-      const fresh = flowOf(current.ref, next, forms, current.resolve);
-      fresh.state.shown = true;
-      flow.current = fresh;
-      show(
-        { flow: fresh, step: fresh.hasForm ? "form" : "confirm", busy: false, error: { message: result.message }, values: again },
-        true,
-      );
     },
     [runtime, finish, show, forms],
   );
