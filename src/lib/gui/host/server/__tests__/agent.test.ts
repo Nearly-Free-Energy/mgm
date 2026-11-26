@@ -71,6 +71,17 @@ const create: RegisteredAction = {
 
 const unmarked = view("metering", { id: "metering.today", path: "/billing" });
 const marked = view("metering", { id: "metering.marked", path: "/organizations", agent: "read" } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
+// Marked, and about the installation: contribution-schema.ts lets it carry
+// the mark. It names a microgrid in its path, so a host that went past the
+// agent check would resolve that segment, a read, before finding no
+// organization to ask the assistant gate for.
+const installationView = view("billing", {
+  id: "billing.installed",
+  path: "/microgrids/[id]/setup/tenants",
+  params: { id: "microgrid" },
+  scope: "installation",
+  agent: "read",
+} as unknown as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
 const tenantView = view("tenant-app", { id: "tenant.home", path: "/settings/profile", scope: "tenant" } as unknown as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
 
 let clientsMade: number;
@@ -88,7 +99,7 @@ beforeEach(() => {
   available.mockClear();
   takeSnapshot.mockClear();
   snapshot = {
-    views: [unmarked, marked, tenantView],
+    views: [unmarked, marked, installationView, tenantView],
     actions: new Map([[create.def.id, create]]),
     nav: [],
     signals: [],
@@ -135,6 +146,7 @@ describe("an agent client's views", () => {
   it.each([
     ["an unmarked view", "/billing?org=" + ORG_A, unmarked],
     ["a tenant view", "/settings/profile", tenantView],
+    ["a marked installation view", `/microgrids/${MG}/setup/tenants`, installationView],
   ] as const)("answers %s as a page that does not exist, before any read", async (_label, href, registered) => {
     const out = await dispatchView(agentContext(), href);
     expect(out).toMatchObject({ ok: false, status: 404, code: "gui_not_found" });

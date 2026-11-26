@@ -58,6 +58,7 @@ import {
   USAGE_REFUSALS,
 } from "../period-review";
 import { PERIOD_REVIEW_LOADED_EXAMPLES } from "../period-review-examples";
+import { BROWSER } from "@/lib/runtime/caller";
 
 const MG = "e7100000-0000-4000-8002-0000000000a1";
 const PERIOD = "e7100000-0000-4000-8003-0000000000b1";
@@ -77,6 +78,7 @@ function contextWith(client: SupabaseClient, roles: UserRoleRecord[] = [managerO
     newClient: async () => client,
     makeFmt: (locale) => createFmt({ locale }),
     now: new Date("2026-11-18T08:00:00Z"),
+    caller: BROWSER,
   });
   if (!made.ok) throw new Error("fixture context refused");
   return made.ctx;

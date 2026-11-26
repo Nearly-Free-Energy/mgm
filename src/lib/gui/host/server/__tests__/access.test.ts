@@ -2,8 +2,9 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
 import { hostContext, installationRequest, surfaceRequest, tenantRequest, type HostContext } from "../access";
 import { ORG_A, ORG_B, contextFor, fakeFmt, managerOf, superAdmin, tenantOf } from "./host-fakes";
+import { BROWSER } from "@/lib/runtime/caller";
 
-const deps = { newClient: vi.fn(), makeFmt: () => fakeFmt };
+const deps = { newClient: vi.fn(), makeFmt: () => fakeFmt, caller: BROWSER };
 
 describe("hostContext", () => {
   it("refuses a request with no user with 401", () => {
