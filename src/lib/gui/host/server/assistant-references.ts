@@ -12,7 +12,8 @@ import "server-only";
  *
  * - an entity reference (`entity`, each of `related`, and `ref` on a Value
  *   with `t: "ref"`) of a kind in ASSISTANT_REFUSED_KINDS (tenant, device,
- *   rate schedule, billing period, line item, payment attempt), or of a
+ *   rate schedule, billing period, line item, payment attempt, community
+ *   management's tenant access), or of a
  *   plugin's own kind whose alias names no plugin in the catalog or a plugin
  *   ASSISTANT_READING refuses (./contribution-schema.ts). Devices are refused
  *   because an EntityRef's label is a device's name, which decision 6 keeps
@@ -39,7 +40,8 @@ import "server-only";
  * The positions are found by property name, as parse.ts finds hrefs, and
  * assistant-references.test.ts walks the model and signal schemas
  * (./model-schema.ts) and fails if an EntityRef or href sits under another
- * name, or an EntityRef under `ref` on anything but the `t: "ref"` Value.
+ * name, an EntityRef under `ref` on anything but the `t: "ref"` Value, or
+ * one under `related` anywhere but an element of the array it holds.
  * If a model shape gains one there, ASSISTANT_REFUSED_KINDS or
  * ASSISTANT_READING changes, or a view whose segments are all allowed
  * declares a `query` parameter naming a tenant, device, billing or payment
@@ -66,7 +68,9 @@ const CORE: ReadonlySet<string> = new Set(CORE_ENTITY_KINDS);
 
 /** Whether an assistant may never be given a reference of entity kind `kind`. */
 export function refusedKind(kind: string): boolean {
-  if (CORE.has(kind)) return ASSISTANT_REFUSED_KINDS.has(kind);
+  // The list holds a plugin kind too, so it is asked before the plugin's reading.
+  if (ASSISTANT_REFUSED_KINDS.has(kind)) return true;
+  if (CORE.has(kind)) return false;
   const dot = kind.indexOf(".");
   if (dot <= 0) return true;
   const plugin = getPluginByAlias(kind.slice(0, dot));

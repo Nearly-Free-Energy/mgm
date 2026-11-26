@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { TENANT_ACCESS_KIND } from "@/lib/community-management/surface";
 import type { MgmPluginName } from "@/lib/plugins/bundled";
 import type { ViewDef } from "../../../surface";
 import { findRefusedReference, hrefRefusal, refusedKind } from "../assistant-references";
@@ -93,11 +94,12 @@ describe("the positions the rule reads", () => {
     const seen = new Set<string>();
     const ids = new Map<z.ZodType, number>();
     // `prop` is the nearest property holding this schema; `direct` is false once an array or record intervenes;
-    // `onRefValue` is whether that property is `ref` on the `t: "ref"` Value.
-    const visit = (s: z.ZodType, prop: string, direct: boolean, onRefValue: boolean, at: string): void => {
+    // `onRefValue` is whether that property is `ref` on the `t: "ref"` Value; `inRelated` is whether this is
+    // an element of an array (or tuple) held directly by `related`, the only elements of `related` the rule reads.
+    const visit = (s: z.ZodType, prop: string, direct: boolean, onRefValue: boolean, inRelated: boolean, at: string): void => {
       if (s === entityRefSchema) {
         found.refs++;
-        const fits = prop === "related" ? !direct : direct && (prop === "entity" || (prop === "ref" && onRefValue));
+        const fits = prop === "related" ? inRelated : direct && (prop === "entity" || (prop === "ref" && onRefValue));
         if (!fits) problems.push(`${at}: an EntityRef the rule would not read`);
       }
       if (s === hrefSchema || s === outHrefSchema) {
@@ -107,7 +109,7 @@ describe("the positions the rule reads", () => {
       }
       // A schema is visited once per position the rule could read it in, not once in all.
       if (!ids.has(s)) ids.set(s, ids.size);
-      const state = `${ids.get(s)}:${prop}:${direct}:${onRefValue}`;
+      const state = `${ids.get(s)}:${prop}:${direct}:${onRefValue}:${inRelated}`;
       if (seen.has(state)) return;
       seen.add(state);
       const d = defOf(s);
@@ -119,28 +121,29 @@ describe("the positions the rule reads", () => {
           const refValue = isRefValue(d.shape!);
           for (const [key, child] of Object.entries(d.shape!)) {
             if (DATA_KEYS.has(key)) continue;
-            visit(child, key, true, key === "ref" && refValue, `${at}.${key}`);
+            visit(child, key, true, key === "ref" && refValue, false, `${at}.${key}`);
           }
           return;
         }
         case "optional":
         case "nullable":
-          return visit(d.innerType!, prop, direct, onRefValue, at);
+          return visit(d.innerType!, prop, direct, onRefValue, inRelated, at);
         case "lazy":
-          return visit(d.getter!(), prop, direct, onRefValue, at);
+          return visit(d.getter!(), prop, direct, onRefValue, inRelated, at);
         case "union":
-          return d.options!.forEach((o) => visit(o, prop, direct, onRefValue, at));
+          return d.options!.forEach((o) => visit(o, prop, direct, onRefValue, inRelated, at));
+        // The rule reads the direct elements of an array value under `related`; a tuple's value is an array too.
         case "array":
-          return visit(d.element!, prop, false, false, `${at}[]`);
+          return visit(d.element!, prop, false, false, direct && prop === "related", `${at}[]`);
         case "tuple":
-          return [...d.items!, ...(d.rest ? [d.rest] : [])].forEach((i) => visit(i, prop, false, false, `${at}[]`));
+          return [...d.items!, ...(d.rest ? [d.rest] : [])].forEach((i) => visit(i, prop, false, false, direct && prop === "related", `${at}[]`));
         case "record":
-          return visit(d.valueType!, prop, false, false, `${at}.*`);
+          return visit(d.valueType!, prop, false, false, false, `${at}.*`);
         default:
           if (!LEAVES.has(d.type)) problems.push(`${at}: a ${d.type} the audit does not know`);
       }
     };
-    visit(schema, "", true, false, "(value)");
+    visit(schema, "", true, false, false, "(value)");
     return { problems, found };
   }
 
@@ -169,6 +172,29 @@ describe("the positions the rule reads", () => {
     expect(refused({ type: "entity", ref: ref("tenant") })).toBeNull();
   });
 
+  it("reports an EntityRef under `related` anywhere but an element of the array `related` holds", () => {
+    const at = (schema: z.ZodType) => audit(schema).problems;
+    expect(at(z.strictObject({ related: z.array(entityRefSchema).optional() }))).toEqual([]);
+    expect(at(z.strictObject({ related: entityRefSchema }))).toEqual(["(value).related: an EntityRef the rule would not read"]);
+    expect(at(z.strictObject({ related: z.array(z.array(entityRefSchema)) }))).toEqual(["(value).related[][]: an EntityRef the rule would not read"]);
+    expect(at(z.strictObject({ related: z.record(z.string(), entityRefSchema) }))).toEqual(["(value).related.*: an EntityRef the rule would not read"]);
+    // And the rule agrees: it reads the first, and lets the others through.
+    expect(refused({ related: [ref("tenant")] })).toEqual({ path: "related.0", kind: "tenant" });
+    expect(refused({ related: [[ref("tenant")]] })).toBeNull();
+    expect(refused({ related: { a: ref("tenant") } })).toBeNull();
+  });
+
+  it("visits a schema shared between positions once in each, so a read position does not hide one it does not read", () => {
+    const at = (schema: z.ZodType) => audit(schema).problems;
+    const shared = entityRefSchema.optional();
+    expect(at(z.strictObject({ entity: shared, owner: shared }))).toEqual(["(value).owner: an EntityRef the rule would not read"]);
+    expect(
+      at(z.strictObject({ value: z.strictObject({ t: z.literal("ref"), ref: shared }), embed: z.strictObject({ type: z.literal("entity"), ref: shared }) })),
+    ).toEqual(["(value).embed.ref: an EntityRef the rule would not read"]);
+    const list = z.array(entityRefSchema);
+    expect(at(z.strictObject({ related: list, owners: list }))).toEqual(["(value).owners[]: an EntityRef the rule would not read"]);
+  });
+
   it("finds LinkRef's share and download only on a LinkRef", () => {
     expect(Object.keys(linkRefSchema.shape)).toEqual(expect.arrayContaining(["share", "download"]));
   });
@@ -184,6 +210,7 @@ describe("findRefusedReference", () => {
     ["the entity", (m: M) => (m.entity = ref("tenant")), "entity", "tenant"],
     ["a related entity", (m: M) => (m.body.rows[0].related = [ref("community"), ref("device")]), "body.rows.0.related.1", "device"],
     ["a row's entity", (m: M) => (m.body.rows[0].entity = ref("lineItem")), "body.rows.0.entity", "lineItem"],
+    ["a tenant's access", (m: M) => (m.entity = ref(TENANT_ACCESS_KIND)), "entity", "community.tenant-access"],
     ["a ref value", (m: M) => (m.body.rows[0].cells.a = value("billingPeriod")), "body.rows.0.cells.a.ref", "billingPeriod"],
     ["a ref value in a total", (m: M) => (m.body.totals = { a: value("paymentAttempt") }), "body.totals.a.ref", "paymentAttempt"],
     ["a trail href", (m: M) => (m.trail[0].href = `/microgrids/${MG}/setup/tenants/${ID}`), "trail.0.href", "tenant"],
@@ -281,5 +308,10 @@ describe("refusedKind", () => {
   it("refuses the boundary's core kinds and allows the places", () => {
     expect(["tenant", "device", "rateSchedule", "billingPeriod", "lineItem", "paymentAttempt"].filter(refusedKind)).toHaveLength(6);
     expect(["organization", "community", "microgrid", "edge"].filter(refusedKind)).toEqual([]);
+  });
+
+  it("refuses community management's tenant access, and not its other kinds", () => {
+    expect(refusedKind(TENANT_ACCESS_KIND)).toBe(true);
+    expect(refusedKind("community.other")).toBe(false);
   });
 });

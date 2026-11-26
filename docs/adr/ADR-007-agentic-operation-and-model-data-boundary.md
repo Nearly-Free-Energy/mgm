@@ -434,7 +434,9 @@ says so.
   `ref` value) and hrefs (`href`, `link` and `next`). It refuses a
   reference of the kinds the contribution check refuses in a path
   (`ASSISTANT_REFUSED_KINDS`: tenant, device, rate schedule, billing
-  period, line item and payment attempt) or of a plugin kind whose plugin
+  period, line item and payment attempt, and community management's
+  `community.tenant-access`, a tenant's access to its unit, whose label is
+  the person's address) or of a plugin kind whose plugin
   is unknown or refused; an href that leaves the origin, names no view or
   catalog page, has a segment of a refused kind, carries a search
   parameter its view does not declare or a fragment, or is any API route

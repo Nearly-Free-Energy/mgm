@@ -528,6 +528,14 @@ describe("assistant reading", () => {
       },
     );
 
+    // Metering does not declare the kind, so the param is refused for that too;
+    // the mark's refusal is the one asked about.
+    it("refuses the mark on a listed view whose path names a tenant's access", () => {
+      const kind = "community.tenant-access";
+      const error = refusal((c) => Object.assign(c.views[0], { params: { id: kind } }) && marked(c), CATALOG, METERING_SURFACE, SITE_DAY);
+      expect(error.issues).toContainEqual(issue(["views", 0, "agent"], `a view whose path names a ${kind} cannot be read by an assistant`));
+    });
+
     // A listed view of a plugin whose views may be listed, so the navigation
     // it is reached from is the only thing that refuses the mark. nav[2] is
     // metering's configure legacy entry, pointed here at site-day's own path.

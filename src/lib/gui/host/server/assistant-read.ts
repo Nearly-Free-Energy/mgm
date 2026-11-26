@@ -46,10 +46,12 @@ import "server-only";
  * loaded only in that organization (dispatchView's `within`, checked before
  * the view's plugin gate is asked or its loader runs), its attached views
  * only in the view's, and signals only for that organization. A view whose
- * path names another organization, or `org` naming one the person cannot
- * see, is refused as gui_not_found (404), as a page in an organization the
- * person cannot reach is, before anything is loaded; an `org` that is not
- * an organization id, as gui_bad_request (400). So a person who sees two
+ * path names another organization than `org`, which includes any `org` the
+ * person cannot see, is refused as gui_not_found (404), as a page in an
+ * organization the person cannot reach is, after its path is resolved and
+ * before its plugin gate is asked or its loader runs; signals for an `org`
+ * the person cannot see, as gui_not_found before any watcher runs; an `org`
+ * that is not an organization id, as gui_bad_request (400). So a person who sees two
  * organizations cannot read one through a call gated for the other. If
  * dispatchView comes to check `within` after a gate or a load, or a read is
  * added here that does not take `org`, revisit.
@@ -476,7 +478,9 @@ async function readSignals(ctx: HostContext, org: string): Promise<AssistantOutc
  * What an assistant may read for `ctx`'s person in `request.org`, the
  * organization whose assistant gate the caller asked: a view, by its page
  * href, or the organization's signals. A view in another organization, or
- * an `org` the person cannot see, is a 404 before anything is loaded.
+ * an `org` the person cannot see, is a 404: a view's after its path is
+ * resolved and before its plugin gate is asked or its loader runs, signals
+ * before any watcher runs.
  */
 export async function readForAssistant(ctx: HostContext, request: { type: "view"; href: string; org: string }): Promise<AssistantOutcome<AssistantView>>;
 export async function readForAssistant(ctx: HostContext, request: { type: "signals"; org: string }): Promise<AssistantOutcome<AssistantSignals>>;
