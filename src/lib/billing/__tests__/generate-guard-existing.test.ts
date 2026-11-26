@@ -128,6 +128,8 @@ function harness(
     priorItems?: { id: string; device_id: string; end_kwh: number; billing_period_id: string }[];
     /** As a gateway's request-line limit: a read whose `.in()` lists hold more ids in all fails. */
     maxInIds?: number;
+    /** The period's pinned rate schedule as read; null for a period not pinned yet, which the run pins. */
+    rateScheduleId?: string | null;
   } = {},
 ) {
   const period = { status: o.status ?? "draft" };
@@ -151,7 +153,7 @@ function harness(
           end_date: "2026-04-30",
           timezone: "Africa/Kampala",
           status: o.status ?? "draft",
-          rate_schedule_id: SCHEDULE_ID,
+          rate_schedule_id: o.rateScheduleId === undefined ? SCHEDULE_ID : o.rateScheduleId,
         },
         error: null,
       },
@@ -216,13 +218,14 @@ function harness(
       Promise.resolve(listRead(table, after, ins)).then(onFulfilled, onRejected);
     return b;
   }
-  const supabase = { from: (table: string) => builder(table), rpc } as unknown as SupabaseClient;
+  const from = vi.fn((table: string) => builder(table));
+  const supabase = { from, rpc } as unknown as SupabaseClient;
   const getReadings = vi.fn(async ({ devices }: { devices: Array<{ id: string }> }) => {
     if (o.closeDuringRead) period.status = "closed";
     return devices.map((d) => ({ deviceId: d.id, usageKwh: d.id === device(10) ? null : 42, startDate: "2026-04-01", endDate: "2026-04-30" }));
   });
   const meteringProvider = { getReadings } as unknown as MeteringProvider;
-  return { supabase, rpc, getReadings, meteringProvider, listReads, inLists };
+  return { supabase, from, rpc, getReadings, meteringProvider, listReads, inLists };
 }
 
 const writes = (rpc: ReturnType<typeof vi.fn>) =>
@@ -289,11 +292,15 @@ describe("runGenerationFor with guardExistingBills", () => {
   });
 
   it("refuses a closed period before pinning the tariff, reading meters or writing", async () => {
-    const h = harness({ status: "closed" });
+    // Not pinned, so the run would pin it if it went on: only the closed
+    // check before the pin refuses it here.
+    const h = harness({ status: "closed", rateScheduleId: null });
     const out = await run(h);
     expect(out).toEqual({ kind: "fatal", status: 409, body: { error: GENERATE_FROM_METERS_COPY.closed, code: "billing_period_closed" } });
     expect(h.rpc).not.toHaveBeenCalled();
     expect(h.getReadings).not.toHaveBeenCalled();
+    // The period only: no tenant, bill or rate schedule read.
+    expect(h.from.mock.calls.map(([table]) => table)).toEqual(["billing_periods"]);
   });
 
   it("stops when the period's bills cannot be read, before reading meters or writing", async () => {

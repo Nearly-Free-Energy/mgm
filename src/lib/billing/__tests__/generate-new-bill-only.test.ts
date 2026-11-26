@@ -103,6 +103,8 @@ function harness(
     closeDuringBillsRead?: boolean;
     /** The second read of the period's status fails. */
     statusReadError?: boolean;
+    /** The period's pinned rate schedule as read; null for a period not pinned yet, which the run pins. */
+    rateScheduleId?: string | null;
   } = {},
 ) {
   const period = { status: o.status ?? "draft" };
@@ -125,7 +127,7 @@ function harness(
           end_date: "2026-04-30",
           timezone: "Africa/Kampala",
           status: o.status ?? "draft",
-          rate_schedule_id: SCHEDULE_ID,
+          rate_schedule_id: o.rateScheduleId === undefined ? SCHEDULE_ID : o.rateScheduleId,
         },
         error: null,
       },
@@ -256,10 +258,15 @@ describe("runGenerationFor with newBillOnly", () => {
   });
 
   it("refuses a closed period before pinning the tariff or writing", async () => {
-    const h = harness({ status: "closed" });
+    // Not pinned, so the run would pin it if it went on: only the closed
+    // check before the pin refuses it here. (A pinned closed period skips the
+    // pin anyway, and the status read before the insert refuses it the same way.)
+    const h = harness({ status: "closed", rateScheduleId: null });
     const out = await run(h, 1);
     expect(out).toEqual({ kind: "fatal", status: 409, body: { error: BILL_FROM_READINGS_COPY.closed, code: "billing_period_closed" } });
     expect(h.rpc).not.toHaveBeenCalled();
+    // The period only: no tenant, bill or rate schedule read.
+    expect(h.from.mock.calls.map(([table]) => table)).toEqual(["billing_periods"]);
   });
 
   it("stops when the period's bills cannot be read, before writing", async () => {
