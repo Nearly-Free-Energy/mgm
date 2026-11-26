@@ -215,7 +215,11 @@ describe("MGM bundled plugins", () => {
       core: false,
       defaultEnabled: false,
       displayName: "Investigations",
+      // The description is where an operator reads that nothing uses the
+      // plugin yet; rewrite this with it when investigations ship.
+      description: expect.stringContaining("Nothing uses this plugin yet"),
       dependencies: [COMMUNITY_MANAGEMENT_PLUGIN_NAME],
+      provides: ["investigations"],
       routes: [],
       pages: [],
       tables: [],
