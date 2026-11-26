@@ -54,7 +54,10 @@ const UUID_RE =
  * Components whose id does not fit OPENEMS_ID_PATTERN (`@/lib/openems/ids`)
  * exactly as OpenEMS sent it are left out of `devices` and listed in
  * `skipped`: POST /api/devices and the database would refuse to store them,
- * and a trimmed copy would name a component OpenEMS does not have.
+ * and a trimmed copy would name a component OpenEMS does not have. Each
+ * skipped entry carries the type Discover suggests for it, as a listed
+ * device does, so a surface that offers one type can name only the skipped
+ * components of that type.
  *
  * Error handling split:
  *   - getEdgesStatus: not wrapped in catch — errors surface as 503
@@ -270,19 +273,21 @@ export async function GET(
     );
     if (!matchedNature) continue;
 
-    if (parseOpenEmsId(componentId) !== componentId) {
-      skipped.push({
-        componentId: componentId.slice(0, 100),
-        reason: "invalid_component_id",
-      });
-      continue;
-    }
-
     const suggestedDeviceType = classifyDeviceType(
       component.factoryId,
       matchedNature,
       component.alias
     );
+
+    if (parseOpenEmsId(componentId) !== componentId) {
+      skipped.push({
+        componentId: componentId.slice(0, 100),
+        reason: "invalid_component_id",
+        suggestedDeviceType,
+      });
+      continue;
+    }
+
     const openemsChannelAddress = channelAddressFor(componentId, suggestedDeviceType);
 
     discovered.push({

@@ -10,7 +10,8 @@
  *   (e) null-channel rows: observability note shown; rows are selectable and included in save (#122)
  *   (f) checkbox selection state — tick/untick updates pending count and save payload
  *   (g) mixed billable + non-billable + already-added renders all in one list
- *   (h) components the route skipped are named in a note, not offered as rows
+ *   (h) components the route skipped are named in a note, not offered as rows,
+ *       whatever type each would have been
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -627,7 +628,13 @@ describe("DiscoverDevices", () => {
         ok: true,
         json: async () => ({
           ...mockDiscoverResponse([makeDevice("meter0")]),
-          skipped: [{ componentId: "meter 1", reason: "invalid_component_id" }],
+          skipped: [
+            {
+              componentId: "meter 1",
+              reason: "invalid_component_id",
+              suggestedDeviceType: "consumption_meter",
+            },
+          ],
         }),
       } as Response);
 
@@ -639,6 +646,40 @@ describe("DiscoverDevices", () => {
         expect(screen.getByText("meter 1")).toBeDefined();
         expect(screen.getByRole("button", { name: /add 1 device/i })).toBeDefined();
       });
+    });
+
+    it("names skipped components of every type, since it lists every type", async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ...mockDiscoverResponse([makeDevice("meter0")]),
+          skipped: [
+            {
+              componentId: "meter 1",
+              reason: "invalid_component_id",
+              suggestedDeviceType: "consumption_meter",
+            },
+            {
+              componentId: "ess 0",
+              reason: "invalid_component_id",
+              suggestedDeviceType: "battery",
+            },
+            {
+              componentId: "inverter/0",
+              reason: "invalid_component_id",
+              suggestedDeviceType: "inverter",
+            },
+          ],
+        }),
+      } as Response);
+
+      render(<DiscoverDevices {...defaultProps} />);
+      fireEvent.click(screen.getByRole("button", { name: /discover devices/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Not listed: 3 components/)).toBeDefined();
+      });
+      expect(screen.getByText("meter 1, ess 0, inverter/0")).toBeDefined();
     });
 
     it("shows no note when the response has no skipped list", async () => {
