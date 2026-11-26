@@ -286,6 +286,18 @@ describe("DELETE /api/communities/[id] with the GUI host's typed confirmation", 
     expect(mockRpcImpl).not.toHaveBeenCalled();
   });
 
+  it("deletes a community whose name is longer than 200 characters, typed in full", async () => {
+    const name = `Kisakye ${"East ".repeat(60)}`.trim();
+    configureEntityLookup({ data: { id: VALID_UUID, name, org_id: "org-1" }, error: null });
+    mockRpcImpl.mockResolvedValueOnce({ data: 1, error: null });
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const { DELETE } = await import("../[id]/route");
+    const res = await DELETE(confirmed(name), { params: Promise.resolve({ id: VALID_UUID }) });
+    expect(name.length).toBeGreaterThan(200);
+    expect(res.status).toBe(204);
+    infoSpy.mockRestore();
+  });
+
   it("answers 428 and deletes nothing without a confirmation, whether the body is empty or {}", async () => {
     const { DELETE } = await import("../[id]/route");
     const bare = new NextRequest(`http://localhost/api/communities/${VALID_UUID}`, { method: "DELETE" });

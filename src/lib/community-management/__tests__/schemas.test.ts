@@ -419,13 +419,15 @@ describe("the delete bodies", () => {
     ["DeleteCommunityBody", DeleteCommunityBody],
     ["DeleteMicrogridBody", DeleteMicrogridBody],
     ["DeleteTenantBody", DeleteTenantBody],
-  ] as const)("%s parses no confirmation, for the route to refuse, or one with the typed name", (_name, schema) => {
+  ] as const)("%s parses no confirmation, for the route to refuse, or one with the typed name, however long", (_name, schema) => {
     expect(schema.parse({})).toEqual({});
     expect(schema.parse({ confirmation: { acknowledged: [], typed: "Kisakye" } })).toEqual({
       confirmation: { acknowledged: [], typed: "Kisakye" },
     });
+    // A name has no length limit, so neither has what is typed for it.
+    const long = "x".repeat(5_000);
+    expect(schema.parse({ confirmation: { acknowledged: [], typed: long } })).toEqual({ confirmation: { acknowledged: [], typed: long } });
     expect(schema.safeParse({ confirmation: { typed: "Kisakye" } }).success).toBe(false);
-    expect(schema.safeParse({ confirmation: { acknowledged: [], typed: "x".repeat(201) } }).success).toBe(false);
     expect(schema.safeParse({ name: "Kisakye" }).success).toBe(false);
   });
 
@@ -461,7 +463,7 @@ const confirmationShape = (typed: boolean) => ({
   type: "object",
   properties: {
     acknowledged: { type: "array", maxItems: 20, items: { type: "string", maxLength: 64 } },
-    ...(typed ? { typed: { type: "string", maxLength: 200 } } : {}),
+    ...(typed ? { typed: { type: "string" } } : {}),
   },
   required: ["acknowledged"],
   additionalProperties: false,

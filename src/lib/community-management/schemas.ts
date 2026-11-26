@@ -478,14 +478,16 @@ const acknowledged = (message: string) =>
  * name the person typed. Optional in the schema, as billing's
  * DeletePeriodBody is, so that a request without one is answered by the
  * route, with 428 `*_delete_confirmation_required` and the name to type,
- * rather than a 400: the route requires it.
+ * rather than a 400: the route requires it. `typed` has no length limit,
+ * because the names it must match have none (communities.name,
+ * microgrids.name and tenants.display_name are unbounded TEXT, and the
+ * create and edit bodies set no maximum); a limit here would leave a record
+ * with a longer name impossible to delete. If those names gain a limit,
+ * match it here.
  */
 const typedConfirmation = (message: string) =>
   z
-    .strictObject(
-      { acknowledged: acknowledged(message), typed: z.string({ error: message }).max(200, { error: message }).optional() },
-      { error: message }
-    )
+    .strictObject({ acknowledged: acknowledged(message), typed: z.string({ error: message }).optional() }, { error: message })
     .optional();
 
 /**
