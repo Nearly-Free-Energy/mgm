@@ -59,6 +59,48 @@ function daysBetween(from: string, to: string): number {
 }
 
 /**
+ * Whether a device carries the identifiers a provider reads it by: an edge
+ * id and a component id. getManagedDevices (infrastructure/
+ * supabase-repository.ts) maps a NULL component id, and an edge without an
+ * OpenEMS id, to "", which this reads as missing; if getManagedDevices
+ * stops mapping NULL to "", revisit.
+ */
+function isReadable(device: ManagedDevice): boolean {
+  return Boolean(device.edgeOpenemsId && device.componentId);
+}
+
+/**
+ * The house meters among `devices`: the consumption meters in
+ * `houseMeterIds`. The site sources are other types, so no device is read
+ * both as a site source and as a house. A linked device of another type (a
+ * site's grid meter standing in as a "shared" meter for un-metered houses,
+ * say) is not a house meter.
+ */
+function linkedHouseMeters(devices: ManagedDevice[], houseMeterIds: readonly string[]): ManagedDevice[] {
+  const houses = new Set(houseMeterIds);
+  return devices.filter((d) => houses.has(d.id) && d.deviceType === "consumption_meter");
+}
+
+/** A linked tenant meter that cannot be read, by MGM device id. */
+export type UnreadableHouseMeter = { id: string; reason: "tenant_meter_unreadable" };
+
+/**
+ * The linked tenant meters that cannot be read, because they have no edge
+ * or component id, in device-id order: the meters pickSiteSources counts as
+ * `houseMetersUnreadable` and leaves out of `houseMeters`.
+ */
+export function unreadableHouseMeters(
+  devices: ManagedDevice[],
+  houseMeterIds: readonly string[]
+): UnreadableHouseMeter[] {
+  return linkedHouseMeters(devices, houseMeterIds)
+    .filter((d) => !isReadable(d))
+    .map((d) => d.id)
+    .sort()
+    .map((id) => ({ id, reason: "tenant_meter_unreadable" as const }));
+}
+
+/**
  * The site devices the daily operations view reads, chosen by device type.
  * The first of each type wins, by name; a second battery or grid meter is
  * not added up.
@@ -70,10 +112,9 @@ function daysBetween(from: string, to: string): number {
  *
  * The house meters are the consumption meters in `houseMeterIds` (those
  * linked to a tenant on the day read), all of them, by name: what the
- * houses used is their sum. A linked device of another type (a site's grid
- * meter standing in as a "shared" meter for un-metered houses, say) is not
- * a house meter. Linked meters without
- * an edge or component id cannot be read; they are counted, not dropped.
+ * houses used is their sum (linkedHouseMeters). Linked meters without an
+ * edge or component id cannot be read; they are counted, not dropped, and
+ * unreadableHouseMeters lists them.
  */
 export function pickSiteSources(
   devices: ManagedDevice[],
@@ -82,8 +123,7 @@ export function pickSiteSources(
   const sorted = [...devices].sort(
     (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
   );
-  const readable = (d: ManagedDevice) => Boolean(d.edgeOpenemsId && d.componentId);
-  const usable = sorted.filter(readable);
+  const usable = sorted.filter(isReadable);
   const config = (device: ManagedDevice) => ({
     id: device.id,
     edgeOpenemsId: device.edgeOpenemsId,
@@ -93,17 +133,13 @@ export function pickSiteSources(
     const device = usable.find((d) => d.deviceType === type);
     return device ? config(device) : null;
   };
-  // Only consumption meters: the site sources are other types, so no device
-  // is read both as a site source and as a house.
-  const houses = new Set(houseMeterIds);
-  const linked = sorted.filter((d) => houses.has(d.id) && d.deviceType === "consumption_meter");
   return {
     battery: first("battery"),
     gridMeter: first("grid_meter"),
     load: first("inverter"),
     pv: first("pv_meter"),
-    houseMeters: linked.filter(readable).map(config),
-    houseMetersUnreadable: linked.filter((d) => !readable(d)).length,
+    houseMeters: linkedHouseMeters(sorted, houseMeterIds).filter(isReadable).map(config),
+    houseMetersUnreadable: unreadableHouseMeters(devices, houseMeterIds).length,
   };
 }
 

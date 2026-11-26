@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MeteringCapability, pickSiteSources } from "../capability";
+import { MeteringCapability, pickSiteSources, unreadableHouseMeters } from "../capability";
 import { MeteringRegistry } from "../registry";
 import { MeteringError } from "../errors";
 import type {
@@ -1067,6 +1067,51 @@ describe("pickSiteSources", () => {
       device({ id: BATTERY_ID, name: "Battery", deviceType: "battery", componentId: "ess0" }),
     ]);
     expect(Object.keys(sources.battery ?? {}).sort()).toEqual(["componentId", "edgeOpenemsId", "id"]);
+  });
+});
+
+describe("unreadableHouseMeters", () => {
+  it("lists each linked consumption meter without an edge or component id, by device id", () => {
+    const devices = [
+      device({ id: "m-1", name: "Meter 01", componentId: "meter1" }),
+      device({ id: "m-no-edge", name: "Meter 02", edgeOpenemsId: "" }),
+      device({ id: "m-no-comp", name: "Meter 03", componentId: "" }),
+      device({ id: "m-unlinked", name: "Meter 04", componentId: "" }),
+    ];
+    const ids = ["m-1", "m-no-edge", "m-no-comp", "not-a-device"];
+    expect(unreadableHouseMeters(devices, ids)).toEqual([
+      { id: "m-no-comp", reason: "tenant_meter_unreadable" },
+      { id: "m-no-edge", reason: "tenant_meter_unreadable" },
+    ]);
+    // The meters pickSiteSources counts and leaves out.
+    const sources = pickSiteSources(devices, ids);
+    expect(sources.houseMetersUnreadable).toBe(2);
+    expect(sources.houseMeters.map((m) => m.id)).toEqual(["m-1"]);
+  });
+
+  it("lists a meter whose stored component id is NULL, which the repository reads as an empty string", () => {
+    // getManagedDevices maps openems_component_id NULL to "" (supabase-repository.ts).
+    const devices = [device({ id: "m-null", name: "Meter 01", componentId: "" })];
+    expect(unreadableHouseMeters(devices, ["m-null"])).toEqual([
+      { id: "m-null", reason: "tenant_meter_unreadable" },
+    ]);
+  });
+
+  it("neither lists nor reads a linked device that is not a consumption meter", () => {
+    const devices = [
+      device({ id: "grid-no-comp", name: "Grid", deviceType: "grid_meter", componentId: "" }),
+      device({ id: "inv-1", name: "Inverter", deviceType: "inverter", componentId: "inv0" }),
+    ];
+    const ids = ["grid-no-comp", "inv-1"];
+    expect(unreadableHouseMeters(devices, ids)).toEqual([]);
+    const sources = pickSiteSources(devices, ids);
+    expect(sources.houseMeters).toEqual([]);
+    expect(sources.houseMetersUnreadable).toBe(0);
+  });
+
+  it("lists nothing without linked meters", () => {
+    expect(unreadableHouseMeters(SITE_DEVICES, [])).toEqual([]);
+    expect(unreadableHouseMeters([], ["m-1"])).toEqual([]);
   });
 });
 
