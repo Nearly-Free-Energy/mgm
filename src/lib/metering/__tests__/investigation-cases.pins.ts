@@ -10,7 +10,8 @@
  * §1 and §2; if either changes, change both. Variants 0b to 14 and the
  * pending cases' microgrids and dates are A2-4's pins, which §1 and §2 do
  * not hold yet (both say "pending"); when A2-4 writes them there, revisit
- * this comment. A2-3 fills each case's `evidence`, and A2-12 its `result`.
+ * this comment. A case's expected evidence (A2-3) is `CASE_EVIDENCE` in
+ * investigation-cases.evidence.ts; A2-12 fills its `result`.
  */
 import type { SiteScenario } from "../fixture/site-samples";
 import type { SiteSourceAvailability } from "../site-operations";
@@ -79,8 +80,6 @@ export type InvestigationCase = {
    * the base its overlay (A2-4) applies to.
    */
   scenario: SiteScenario;
-  /** A2-3 fills it. */
-  evidence?: unknown;
   /** A2-12 fills it. */
   result?: unknown;
 } & (
