@@ -13,7 +13,8 @@
  * A client signs in through Supabase Auth's OAuth server as `mgm login`
  * will: authorize, the person's approval with their browser session, the
  * approval record MGM's consent page writes (written here with the service
- * role, as #271's sign-in test is not on main yet), and the code exchanged
+ * role; src/app/api/auth/oauth/approvals/__tests__/sign-in.db.test.ts signs
+ * in through the page's own route), and the code exchanged
  * with its PKCE verifier. Its token then goes through the real middleware
  * and, with the headers middleware passes on, to a real route handler, whose
  * createClient (@/lib/supabase/server) builds the client from the request
@@ -27,8 +28,10 @@
  * fails; a request with both a session cookie and the token is refused; an
  * agent client's token is refused that route and, let on to the view route,
  * builds a client the route reads as that agent client and is refused by
- * the route's own agent check; a browser
- * session's token is refused as a bearer;
+ * the route's own agent check (404 for a view not marked for an
+ * assistant); the same token at the catalog route reads the person's
+ * organizations as `mgm_agent` and reaches the assistant's gate (409
+ * `assistant_disabled`); a browser session's token is refused as a bearer;
  * a live token with a mark set by hand, as on a route middleware skipped, is
  * refused by the route's createClient.
  *
@@ -335,12 +338,39 @@ describe.skipIf(skip)("a client's bearer token at MGM's routes (#272)", { timeou
     // gui_not_found and no loader runs. The 409 assistant_disabled a marked
     // view meets at the assistant gate is shown with a mark stood in
     // (src/app/api/gui/__tests__/agent-client.test.ts); once a view is
-    // marked, this case can ask for it here too.
+    // marked, this case can ask for it here too, with the grants for the
+    // rows its path names (a community's, a microgrid's or an edge's).
     const { GET } = await import("@/app/api/gui/view/route");
     const res2 = await GET(new NextRequest(viewUrl, { headers: headers! }));
     expect(res2.status).toBe(404);
     expect(await res2.json()).toMatchObject({ ok: false, code: "gui_not_found" });
     expect(res2.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("lets an agent client's token read the person's organizations at the catalog route, which the assistant's gate then refuses", async () => {
+    const agentToken = (await signIn(staff, agentClientId)).access;
+    // Middleware answers 404 for the catalog until it is released (RFC #259
+    // § 7), before it looks at the token, so the route is called directly
+    // with the headers middleware passes on to an accepted agent request:
+    // the token and its mark (GET /api/gui/view above shows both).
+    const headers = new Headers({ authorization: `Bearer ${agentToken}`, "x-mgm-credential": credentialMark(agentToken)! });
+    forwarded = headers;
+    const url = `${APP}/api/gui/catalog`;
+    const { GET } = await import("@/app/api/gui/catalog/route");
+    // Without entity=, the catalog picks the organization with
+    // visibleOrganizations, which reads organizations (id, name) on the
+    // agent's client as mgm_agent (20261126160000), and only then asks the
+    // assistant's gate. Without that grant the read fails and the answer is
+    // 503 gui_unavailable.
+    const res = await GET(new NextRequest(url, { headers }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ok: false, code: "assistant_disabled" });
+    expect(res.headers.get("set-cookie")).toBeNull();
+
+    // Asked for this organization by id, the same: it is one the person reaches.
+    const named = await GET(new NextRequest(`${url}?org=${F.org}`, { headers }));
+    expect(named.status).toBe(409);
+    expect(await named.json()).toMatchObject({ code: "assistant_disabled" });
   });
 
   it("refuses a live token whose mark the client set by hand, as on a route middleware skipped", async () => {

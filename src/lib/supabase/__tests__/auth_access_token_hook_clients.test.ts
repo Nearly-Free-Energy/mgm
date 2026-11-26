@@ -252,8 +252,8 @@ async function unlist(clientId: string) {
 /**
  * A token Supabase Auth issued with the role mgm_agent: Supabase Auth itself
  * answers GET /user with it, and PostgREST runs it as mgm_agent, which reads
- * the caller's own role rows and is refused a write and a table it is not
- * granted (agent_role.test.ts has the rest).
+ * the caller's own role rows and organizations and is refused a write and a
+ * table or column it is not granted (agent_role.test.ts has the rest).
  */
 async function expectAgentToken(token: string, userId: string) {
   const user = await auth("GET", "/user", { token });
@@ -263,7 +263,11 @@ async function expectAgentToken(token: string, userId: string) {
   const own = await db.from("user_roles").select("user_id");
   expect(own.error).toBeNull();
   expect(own.data).toEqual([]); // the fixture users hold no role rows
-  expect((await db.from("organizations").select("id")).error?.code).toBe("42501");
+  const orgs = await db.from("organizations").select("id, name");
+  expect(orgs.error).toBeNull();
+  expect(orgs.data).toEqual([]); // and so reach no organization
+  expect((await db.from("organizations").select("address_city")).error?.code).toBe("42501");
+  expect((await db.from("communities").select("id")).error?.code).toBe("42501");
   const write = await db.from("user_roles").insert({ user_id: userId, role: "super_admin", scope_type: "org" });
   expect(write.error?.code).toBe("42501");
 }

@@ -155,6 +155,14 @@ def script_array(name):
     return [word for line in match.group(1).splitlines() for word in line.split("#", 1)[0].split()]
 
 
+def script_string(name):
+    """The value of a `readonly NAME='...'` string in the export script."""
+    match = re.search(rf"^readonly {name}='([^']*)'", SCRIPT.read_text(), re.M)
+    if not match:
+        raise AssertionError(f"cannot find {name} in {SCRIPT}")
+    return match.group(1)
+
+
 def code_blocks(text):
     """Yields (language, body) for each fenced block, indentation removed."""
     body = None
@@ -436,8 +444,13 @@ SELECT jsonb_build_object(
   'policies', (SELECT coalesce(jsonb_agg(schemaname || '.' || tablename || ' ' || policyname
                                          ORDER BY schemaname, tablename, policyname), '[]')
                FROM pg_policies WHERE schemaname IN ('auth', 'storage')),
-  'authenticator_may_be_mgm_agent', (SELECT pg_has_role('authenticator', oid, 'SET')
-                                       FROM pg_roles WHERE rolname = 'mgm_agent')
+  'managed_role_grants', (SELECT coalesce(jsonb_agg(jsonb_build_array(pg_get_userbyid(m.roleid), pg_get_userbyid(m.member),
+                                                                      m.inherit_option, m.set_option)
+                                                    ORDER BY pg_get_userbyid(m.roleid), pg_get_userbyid(m.member)), '[]')
+                          FROM pg_auth_members m
+                          WHERE pg_get_userbyid(m.member) ~ '^({reserved})$'
+                            AND (m.inherit_option OR m.set_option)
+                            AND pg_get_userbyid(m.grantor) <> 'supabase_admin')
 )
 """
 
@@ -756,11 +769,22 @@ class ExportRestoreEndToEndTests(unittest.TestCase):
         )
 
     def test_objects_on_supabase_managed_tables_match_the_source(self):
-        source = psql_json(self.source, MANAGED_OBJECTS)
-        # The grant roles.sql leaves out (20261126160000), so it is checked
-        # to be there, not only to match.
-        self.assertIs(source["authenticator_may_be_mgm_agent"], True)
-        self.assertEqual(psql_json(self.target, MANAGED_OBJECTS), source)
+        # Grants of a role to a role Supabase manages (RESERVED_ROLES in the
+        # export script) are compared too, the ones that let the member use
+        # the role (SET or INHERIT): roles.sql comments every one out, and
+        # restore-managed-schema-objects.sql puts MGM's back by name. A
+        # migration that grants another role to one of them fails here until
+        # that script restores it as well. Supabase's own grants are left out
+        # by their grantor, supabase_admin, since which ones a project has
+        # depends on the services it runs (the restore target runs no
+        # Realtime); migrations run as postgres. If migrations ever run as
+        # supabase_admin, revisit.
+        query = MANAGED_OBJECTS.format(reserved=script_string("RESERVED_ROLES"))
+        source = psql_json(self.source, query)
+        # MGM's one such grant (20261126160000), checked to be there, not
+        # only to match.
+        self.assertIn(["mgm_agent", "authenticator", False, True], source["managed_role_grants"])
+        self.assertEqual(psql_json(self.target, query), source)
 
     def test_migration_history_matches_the_source(self):
         query = "SELECT coalesce(json_agg(version ORDER BY version), '[]') FROM supabase_migrations.schema_migrations"

@@ -12,16 +12,26 @@
 --     to it. It is never made a member of authenticated or of any other
 --     role, so it holds only what is granted to mgm_agent itself (or to
 --     PUBLIC). It is also NOINHERIT, so a membership granted to it by
---     mistake later would give it no privilege and no policy written for
---     that role unless it switched to it, which nothing does. PostgREST's
+--     mistake later, unless the grant says WITH INHERIT TRUE, would give it
+--     no privilege and no policy written for that role unless it switched to
+--     it, which nothing does. Since Postgres 16 the attribute only sets the
+--     default for a grant that names no INHERIT option; what keeps the role
+--     a member of nothing is the check below and the guard test. PostgREST's
 --     switch uses authenticator's membership, not this attribute.
 --   * reads no table and no column unless a migration grants it. This one
 --     grants only what every agent call needs (ADR-008 decision 7): the
---     caller's own role rows, which the GUI host and the composers read with
---     the caller's client, and the plugin gate.
---   * holds no write privilege on any table, so an invoker function it can
---     run through PUBLIC (Postgres's default for every new function) cannot
---     write, and reads only what the role's grants allow.
+--     caller's own role rows, which the GUI host and the composers read
+--     with the caller's client, the ids and names of the organizations
+--     they reach, which the GUI host reads with it before it asks the
+--     assistant's gate, and the plugin gate. The rows a marked view's path
+--     names (communities, microgrids, edges) come with the first marked view
+--     whose path names one.
+--   * holds no write privilege of its own, and none in public through
+--     PUBLIC. Through PUBLIC it may write only what extensions and Postgres
+--     give every role (PUBLIC_WRITES in agent_role.test.ts), so an invoker
+--     function it runs cannot write MGM's tables, and reads only what the
+--     role's grants allow. If a function in public it may run writes one of
+--     those, revisit.
 --   * may run a definer function only when that function's EXECUTE is not
 --     revoked from PUBLIC or is granted to mgm_agent. CLAUDE.md requires
 --     every definer function to revoke EXECUTE from PUBLIC, and
@@ -84,17 +94,19 @@ GRANT mgm_agent TO authenticator;
 -- they apply to mgm_agent. The two that apply to a read are "Users can view
 -- their own roles" and "Super admins can manage all user_roles" (00002),
 -- which calls is_super_admin() directly as the caller. The third, "Org
--- managers can delete user_roles in their orgs" (00013), is FOR DELETE; it
--- would also need EXECUTE on user_can_access_org, and the role is never
--- given DELETE. Under the first two alone a super admin's assistant would
--- read every role row, so this RESTRICTIVE policy limits the role to the
--- caller's own. user_id is then only ever the caller's, no other column
--- names a person, and no loader puts a row into a model, so the table is
--- granted whole (ADR-008 decision 8); agent_role.test.ts pins its columns.
--- If user_roles gains a column that names another person, or holds anything
--- else outside ADR-007 decision 6, grant it by column instead. The policy is
--- FOR ALL so it bounds any privilege the role is ever given here, not only
--- SELECT; the role is given none but SELECT.
+-- managers can delete user_roles in their orgs" (00013), is FOR DELETE, and
+-- the role is never given DELETE (it may run user_can_access_org, which that
+-- policy calls, for the organizations read below). Under the first two
+-- alone a super admin's assistant would read every role row, so this
+-- RESTRICTIVE policy limits the role to the caller's own. user_id is then
+-- only ever the caller's, no other column names a person, and no loader
+-- puts a row into a model, so the table is granted whole (ADR-008 decision
+-- 8); agent_role.test.ts pins its columns. If user_roles gains a column
+-- that names another person, or holds anything else outside ADR-007
+-- decision 6, grant it by column instead. The policy is FOR ALL so it
+-- bounds any privilege the role is ever given here, not only SELECT; the
+-- role is given none but SELECT. It also bounds any policy added later that
+-- names no role.
 GRANT SELECT ON public.user_roles TO mgm_agent;
 
 CREATE POLICY "Agent tokens read only the caller's own role rows"
@@ -108,6 +120,34 @@ CREATE POLICY "Agent tokens read only the caller's own role rows"
 -- The super-admin policy above calls it as the caller, so a read of
 -- user_roles as mgm_agent fails without it. It answers only for the caller.
 GRANT EXECUTE ON FUNCTION public.is_super_admin() TO mgm_agent;
+
+-- ── The caller's organizations ─────────────────────────────────────────────
+--
+-- The GUI host reads the organizations the caller reaches, by id and name,
+-- with the caller's client, before it asks the assistant's gate: the
+-- catalog and every organization view choose one (visibleOrganizations in
+-- src/lib/gui/host/server/organization.ts), and a view whose path names an
+-- organization reads its row the same way. Ids and names of the caller's
+-- organizations are inside ADR-007 decision 6; the address columns are not,
+-- so the table is granted by column. Its one existing policy, "Authorized
+-- users can access organizations" (00002), names no role and calls
+-- user_can_access_org(id) as the caller, so the role reads exactly the
+-- organizations the person reaches. user_can_access_org answers only for
+-- the caller. A policy added later that names no role would apply to the
+-- role too, so this RESTRICTIVE policy holds it to the same organizations
+-- whatever such a policy allows, as the one on user_roles does; it is FOR
+-- ALL for the same reason. If the host reads another column of
+-- organizations, revisit.
+GRANT SELECT (id, name) ON public.organizations TO mgm_agent;
+GRANT EXECUTE ON FUNCTION public.user_can_access_org(UUID) TO mgm_agent;
+
+CREATE POLICY "Agent tokens read only the caller's organizations"
+  ON public.organizations
+  AS RESTRICTIVE
+  FOR ALL
+  TO mgm_agent
+  USING (user_can_access_org(id))
+  WITH CHECK (user_can_access_org(id));
 
 -- ── The plugin gate ────────────────────────────────────────────────────────
 --
