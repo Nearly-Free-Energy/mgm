@@ -53,6 +53,8 @@ export interface Case {
   body: (caller: TestUser) => unknown;
   /** The status the first send answers; it must also change the snapshot, beyond the columns in `ignore`. */
   first: number;
+  /** Fields the first send's JSON answer must hold, for a case whose first answer says more than its status. */
+  firstAnswer?: Readonly<Record<string, unknown>>;
   /** The status the second, identical send answers; it must leave the snapshot as the first left it. */
   second: number;
   /**

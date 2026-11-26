@@ -11,10 +11,11 @@
  * second send adds a second record), so they have no case here.
  *
  * Giving access sends its notice through sendNotice, which finds no sender
- * here (no MGM_SMTP_URL and no organization sender) and answers
- * email_sent: false; the test refuses any request that leaves the local
- * Supabase. If a sender comes to be configured in the test environment,
- * revisit.
+ * here: the fixture saves no organization sender, and ../repeat.db.test.ts
+ * blanks MGM_SMTP_URL and MGM_MAIL_FROM whatever the environment sets. So
+ * the first grant answers email_sent: false, which its case checks, and no
+ * mail is sent. If that test stops blanking them, or this fixture saves a
+ * sender, revisit.
  */
 import { TENANT_APP_PLUGIN_NAME, TENANT_APP_PLUGIN_VERSION } from "@/lib/plugins/bundled";
 import { cleanupTestData, createTestUser, serviceClient } from "@/lib/supabase/__tests__/rls.helpers";
@@ -146,7 +147,14 @@ export const COMMUNITY_MANAGEMENT_CASES: CaseModule = {
     // The address is on the unit's list now: 409 already_has_access, and no
     // second notice.
     "community.grant-tenant-access": [
-      { as: "manager", params: { id: GRANTING }, body: () => ({ email: EMAILS.grantee }), first: 201, second: 409 },
+      {
+        as: "manager",
+        params: { id: GRANTING },
+        body: () => ({ email: EMAILS.grantee }),
+        first: 201,
+        firstAnswer: { email: EMAILS.grantee, email_sent: false },
+        second: 409,
+      },
     ],
     // The access is gone: 404 access_not_found.
     "community.revoke-tenant-access": [
