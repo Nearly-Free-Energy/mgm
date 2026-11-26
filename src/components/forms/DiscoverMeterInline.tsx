@@ -476,8 +476,9 @@ export function DiscoverMeterInline({
               Found {discovered.length}{" "}
               {discovered.length === 1 ? "device" : "devices"} on this edge, but{" "}
               {discovered.length === 1 ? "it is not" : "none are"} classified as
-              a consumption meter, so {discovered.length === 1 ? "it" : "none"}{" "}
-              can bill a tenant.
+              a consumption meter, so{" "}
+              {discovered.length === 1 ? "it cannot" : "none can"} bill a
+              tenant.
             </p>
             <UnofferedDevices devices={discovered} />
           </div>

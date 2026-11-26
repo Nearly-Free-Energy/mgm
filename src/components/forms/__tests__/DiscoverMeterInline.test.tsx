@@ -21,6 +21,9 @@
  *   (d) and still names the unsaved devices of other types found beside
  *       them, with the hint to change a device's type
  *
+ * Devices found, none classified as a consumption meter: the message says
+ * that none can bill a tenant, and in the singular that it cannot.
+ *
  * The rest of this component is covered through the wizard in
  * TenantWizard.test.tsx § (k).
  */
@@ -165,6 +168,35 @@ describe("DiscoverMeterInline — skipped components", () => {
     expect(screen.getByText(/No new consumption meters on this edge/i)).toBeDefined();
     expect(screen.queryByText(/Not listed:/)).toBeNull();
     expect(screen.getByText(/Make sure the edge is online/i)).toBeDefined();
+  });
+});
+
+describe("DiscoverMeterInline — devices not classified as consumption meters", () => {
+  beforeEach(() => {
+    fetchMock = vi.spyOn(globalThis, "fetch");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function other(componentId: string): DiscoveredDevice {
+    return { ...meter(componentId), openemsChannelAddress: null, suggestedDeviceType: "other" };
+  }
+
+  it("says the one device found cannot bill a tenant", async () => {
+    respond({ edgeId: "edge1", online: true, devices: [other("meter10")] });
+    await discover();
+
+    expect(screen.getByText(/so it cannot bill a tenant\./)).toBeDefined();
+    expect(screen.queryByText(/so it can bill/)).toBeNull();
+  });
+
+  it("says none of the devices found can bill a tenant", async () => {
+    respond({ edgeId: "edge1", online: true, devices: [other("meter10"), other("meter11")] });
+    await discover();
+
+    expect(screen.getByText(/so none can bill a tenant\./)).toBeDefined();
   });
 });
 
