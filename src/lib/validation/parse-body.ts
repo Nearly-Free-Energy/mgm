@@ -45,9 +45,10 @@ export interface ParseBodyOptions {
    * send nothing, such as a page's bare DELETE.
    *
    * A body of nothing but whitespace is no body, the rule DELETE
-   * /api/billing-periods/[periodId] and the DELETE routes of a community, a
-   * microgrid and a tenant apply inline: if one of these rules changes,
-   * change the others with it, so a route reads an empty body one way.
+   * /api/billing-periods/[periodId], the DELETE routes of a community, a
+   * microgrid and a tenant, and DELETE /api/tenants/[id]/access/[accessId]
+   * apply inline: if one of these rules changes, change the others with it,
+   * so a route reads an empty body one way.
    *
    * The GUI host sends a JSON object with every write (invoke in
    * src/lib/gui/host/client/invoke.ts), so a route can tell the host's
