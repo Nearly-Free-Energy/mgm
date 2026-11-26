@@ -104,8 +104,9 @@ const HOST_PAGES = "src/app/";
 
 /**
  * The files that may import readForAssistant (rule 13). Empty until A3's
- * harness adapter, which asks the assistant plugin's gate first (ADR-007
- * decision 5); a file added here takes on that precondition, stated in
+ * harness adapter, which asks the assistant plugin's gate first, for the
+ * organization it passes as the read's `org` (ADR-007 decision 5); a file
+ * added here takes on that precondition, stated in
  * src/lib/gui/host/server/assistant-read.ts.
  */
 const ASSISTANT_READERS: readonly string[] = [];

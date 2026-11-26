@@ -29,7 +29,12 @@ vi.mock("@/lib/runtime/gate", () => ({
   resolveTargetOrganization: (...args: unknown[]) => resolveTargetOrganization(...args),
 }));
 let snapshot: SurfaceSnapshot;
-vi.mock("../snapshot", () => ({ surfaceSnapshot: async () => snapshot }));
+const surfaceSnapshot = vi.hoisted(() => vi.fn());
+vi.mock("../snapshot", () => ({ surfaceSnapshot: () => surfaceSnapshot() }));
+vi.mock("../organization", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../organization")>();
+  return { ...actual, selectOrganization: vi.fn(actual.selectOrganization) };
+});
 /** The code-owned list, as each case sets it. */
 const reads: AssistantRead[] = vi.hoisted(() => []);
 vi.mock("@/lib/gui/assistant-reads", () => ({ ASSISTANT_READS: reads }));
@@ -37,8 +42,9 @@ const composeMetering = vi.fn();
 vi.mock("@/lib/metering/compose", () => ({ composeMetering: (...args: unknown[]) => composeMetering(...args) }));
 
 import { METERING_SURFACE } from "@/lib/metering/surface";
-import { ASSISTANT_READ_MAX_CHARS, WITHHELD_NOTE, readForAssistant } from "../assistant-read";
+import { ASSISTANT_READ_MAX_CHARS, WITHHELD_NOTE, readForAssistant, type AssistantReadRequest } from "../assistant-read";
 import { actionRefSchema, viewModelSchema } from "../model-schema";
+import * as organization from "../organization";
 import { DATA_KEYS } from "../parse";
 import { WITHHELD_EMBED, dispatchView } from "../view";
 import { ORG_A, ORG_B, managerOf, superAdmin, tableClient, tenantOf } from "./host-fakes";
@@ -122,7 +128,7 @@ function ctx(): HostContext {
   return made.ctx;
 }
 const list = (...entries: AssistantRead[]) => reads.splice(0, reads.length, ...entries);
-const read = (href: string, org?: string) => readForAssistant(ctx(), { type: "view", href, ...(org ? { org } : {}) });
+const read = (href: string, org: string = ORG_A) => readForAssistant(ctx(), { type: "view", href, org });
 const logged = () => inspect([vi.mocked(console.error).mock.calls, vi.mocked(console.warn).mock.calls], { depth: 10 });
 
 function generatedDay(date: string) {
@@ -147,6 +153,8 @@ function stripped(page: Awaited<ReturnType<typeof dispatchView>>) {
 }
 
 beforeEach(() => {
+  surfaceSnapshot.mockReset().mockImplementation(async () => snapshot);
+  vi.mocked(organization.selectOrganization).mockClear();
   roles = [managerOf(ORG_A)];
   gates = new Map();
   events = [];
@@ -161,7 +169,11 @@ beforeEach(() => {
   list({ kind: "view", id: "metering.site-day" });
   resolveTargetOrganization.mockReset().mockResolvedValue(ORG_A);
   checkGate.mockReset().mockImplementation(async (_s: unknown, r: { plugin: string; target: { id: string } }) => gates.get(r.plugin) ?? { ok: true, organizationId: r.target.id });
-  dispose = vi.fn(async () => void events.push("dispose"));
+  // Past a macrotask, so a dispose that is only started, not awaited, records after the answer.
+  dispose = vi.fn(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    events.push("dispose");
+  });
   getSiteDay = vi.fn(async (q: { date: string }) => ({ ok: true, data: { ...generatedDay(q.date), synthetic: true } }));
   composeMetering.mockReset().mockImplementation(async () => ({ ok: true, data: { metering: { getSiteDay }, dispose } }));
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -233,6 +245,39 @@ describe("readForAssistant, for a view", () => {
       composeMetering.mockClear();
       expect(await read(DAY, ORG_A)).toMatchObject({ ok: false, status: 404, code: "gui_not_found" });
       expect(composeMetering).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["no org", undefined, { ok: false, status: 400, code: "gui_bad_request" }],
+      ["an org that is not an id", "beta", { ok: false, status: 400, code: "gui_bad_request" }],
+      ["a different org", ORG_A, { ok: false, status: 404, code: "gui_not_found" }],
+    ])("refuses a super admin's read of another organization's view with %s, before any gate or load", async (_name, org, expected) => {
+      roles = [superAdmin()];
+      resolveTargetOrganization.mockResolvedValue(ORG_B);
+      const request = { type: "view", href: DAY, ...(org === undefined ? {} : { org }) } as AssistantReadRequest;
+      expect(await readForAssistant(ctx(), request)).toMatchObject(expected);
+      expect(checkGate).not.toHaveBeenCalled();
+      expect(loadOf(siteDay)).not.toHaveBeenCalled();
+      expect(composeMetering).not.toHaveBeenCalled();
+    });
+
+    it("reads an organization's view whose path names none only in the org asked for", async () => {
+      roles = [superAdmin()];
+      const home = view("community-management", { id: "community-management.home", path: "/microgrids", params: {}, entity: undefined, agent: "read" } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
+      snapshot = snapshotOf([home]);
+      list({ kind: "view", id: "community-management.home" });
+      expect(await read("/microgrids", ORG_B)).toMatchObject({ ok: true, value: { org: ORG_B } });
+      expect(loadOf(home)).toHaveBeenCalledWith(expect.objectContaining({ organizationId: ORG_B }));
+      expect(await read(`/microgrids?org=${ORG_A}`, ORG_B)).toMatchObject({ ok: true, value: { org: ORG_B } });
+    });
+
+    it("refuses an org the person cannot see, for a view whose path names none, before any gate or load", async () => {
+      const home = view("community-management", { id: "community-management.home", path: "/microgrids", params: {}, entity: undefined, agent: "read" } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
+      snapshot = snapshotOf([home]);
+      list({ kind: "view", id: "community-management.home" });
+      expect(await read("/microgrids", ORG_B)).toMatchObject({ ok: false, status: 404, code: "gui_not_found" });
+      expect(checkGate).not.toHaveBeenCalled();
+      expect(loadOf(home)).not.toHaveBeenCalled();
     });
   });
 
@@ -576,7 +621,7 @@ describe("readForAssistant, for signals", () => {
   const base = { severity: "warn", title: "Kiwumu", href: `/microgrids/${MG}/setup/openems-backend`, at: AT };
   const watcher = (plugin: MgmPluginName, id: string, load: () => Promise<unknown>, o: { agent?: "read"; budgetMs?: number } = { agent: "read" }): RegisteredSignal =>
     ({ plugin, id, load, ...o }) as unknown as RegisteredSignal;
-  const signals = () => readForAssistant(ctx(), { type: "signals" });
+  const signals = (org: string = ORG_A) => readForAssistant(ctx(), { type: "signals", org });
 
   it("runs only the marked and listed watchers, counts over them alone and removes proposals' actions", async () => {
     const unlisted = vi.fn(async () => Array.from({ length: 30 }, (_, i) => ({ ...base, id: `u${i}`, kind: "alarm", severity: "critical" })));
@@ -647,8 +692,23 @@ describe("readForAssistant, for signals", () => {
     const load = vi.fn(async () => []);
     snapshot = snapshotOf([], { signals: [watcher("metering", "metering.connection", load)] });
     list({ kind: "watcher", id: "metering.connection" });
-    expect(await readForAssistant(ctx(), { type: "signals", org: ORG_B })).toMatchObject({ ok: true, value: { org: ORG_B } });
+    expect(await signals(ORG_B)).toMatchObject({ ok: true, value: { org: ORG_B } });
     expect(load).toHaveBeenCalledWith(expect.objectContaining({ organizationId: ORG_B }));
+  });
+
+  it.each([
+    ["no org", [managerOf(ORG_A)], undefined, { ok: false, status: 400, code: "gui_bad_request" }],
+    ["a manager asking for an organization they cannot see", [managerOf(ORG_A)], ORG_B, { ok: false, status: 404, code: "gui_not_found" }],
+    ["a super admin asking for one that does not exist", [superAdmin()], "e7100000-0000-4000-8001-0000000000ff", { ok: false, status: 404, code: "gui_not_found" }],
+  ])("refuses %s, running no watcher", async (_name, given, org, expected) => {
+    roles = given;
+    const load = vi.fn(async () => []);
+    snapshot = snapshotOf([], { signals: [watcher("metering", "metering.connection", load)] });
+    list({ kind: "watcher", id: "metering.connection" });
+    const request = { type: "signals", ...(org === undefined ? {} : { org }) } as AssistantReadRequest;
+    expect(await readForAssistant(ctx(), request)).toMatchObject(expected);
+    expect(load).not.toHaveBeenCalled();
+    expect(checkGate).not.toHaveBeenCalled();
   });
 });
 
@@ -659,13 +719,17 @@ describe("readForAssistant's context", () => {
     snapshot = snapshotOf([siteDay], { signals: [{ plugin: "metering", id: "metering.connection", agent: "read", load } as unknown as RegisteredSignal] });
     list({ kind: "view", id: "metering.site-day" }, { kind: "watcher", id: "metering.connection" });
     expect(await read(DAY)).toMatchObject({ ok: false, status: 404, code: "gui_not_found" });
-    expect(await readForAssistant(ctx(), { type: "signals" })).toMatchObject({ ok: false, status: 403, code: "gui_no_access" });
+    expect(await readForAssistant(ctx(), { type: "signals", org: ORG_A })).toMatchObject({ ok: false, status: 403, code: "gui_no_access" });
+    // readForAssistant's own guard answers: without it, dispatchView and
+    // selectOrganization would give the same answers, after reading.
+    expect(surfaceSnapshot).not.toHaveBeenCalled();
+    expect(organization.selectOrganization).not.toHaveBeenCalled();
     expect(loadOf(siteDay)).not.toHaveBeenCalled();
     expect(load).not.toHaveBeenCalled();
   });
 
   it("refuses a context hostContext did not issue", async () => {
-    await expect(readForAssistant({ ...ctx() }, { type: "view", href: DAY })).rejects.toThrow(/did not issue/);
-    await expect(readForAssistant({ ...ctx() }, { type: "signals" })).rejects.toThrow(/did not issue/);
+    await expect(readForAssistant({ ...ctx() }, { type: "view", href: DAY, org: ORG_A })).rejects.toThrow(/did not issue/);
+    await expect(readForAssistant({ ...ctx() }, { type: "signals", org: ORG_A })).rejects.toThrow(/did not issue/);
   });
 });

@@ -557,13 +557,23 @@ Cordis service, and it opens no scope and never uses the service role.
   whose plugin is off is reported in `off`.
 - Every action, proposal and composer is removed. A model or signal that
   carries a reference `assistant-references.ts` refuses (tenant, device,
-  rate schedule, billing period, line item, payment attempt, a refused
-  plugin's kind or route, an outside link, a share or a download) is
-  refused whole, and an answer over 200 000 characters of JSON is refused.
-  The host's own refusals pass on with their codes, so an unavailable,
-  disabled or unsupported read is never shown as zero.
-- The caller asks the assistant plugin's gate with `access: "write"` first
-  (ADR-007 decision 5). Nothing calls `readForAssistant` yet: rule 13 of
+  rate schedule, billing period, line item, payment attempt, a kind of a
+  plugin whose reading is refused, any `/api` path, a page path with a
+  segment of a refused kind, an undeclared search parameter or a fragment,
+  an outside link, a share or a download) is refused whole, and an answer
+  over 200 000 characters of JSON is refused. The host's own refusals pass
+  on with their codes, so an unavailable, disabled or unsupported read is
+  never shown as zero.
+- Every request names its organization in `org`, which is required: a view
+  is loaded only there (`dispatchView`'s `within`, checked before the
+  view's plugin gate or loader), its attached views only in the view's,
+  and signals only for it. A view whose path names another organization,
+  or an `org` the person cannot see, is refused as `gui_not_found` (404)
+  before anything loads; an `org` that is not an organization id, as
+  `gui_bad_request` (400).
+- The caller asks the assistant plugin's gate with `access: "write"`, for
+  the organization it passes as `org`, first (ADR-007 decision 5). Nothing
+  calls `readForAssistant` yet: rule 13 of
   `gui-boundary.test.ts` lets only the files in its `ASSISTANT_READERS`
   import it, and keeps `dispatchView` and the signal collectors inside the
   host and its pages. The action catalog is not part of it.

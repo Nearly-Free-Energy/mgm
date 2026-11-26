@@ -37,14 +37,28 @@ import "server-only";
  * plugin is off is refused without a load, as on a page; a db view loads
  * with the gate's notice.
  *
- * Precondition: the caller has asked the assistant plugin's own gate for the
- * organization with `access: "write"` (ADR-007 decision 5) and holds a
- * HostContext, which hostContext issues only after a getUser()-backed access
- * read. Nothing calls this module yet: A3's harness adapter will, in the
- * operator's own session, and gui-boundary.test.ts lets only modules on its
- * allow-list import it. If a caller is added without that gate, or runs in
- * a session other than the person's, revisit. It opens no Cordis scope,
- * provides no service, has no route and never uses the service role.
+ * Every read is tied to the request's `org`, which is required: a view is
+ * loaded only in that organization (dispatchView's `within`, checked before
+ * the view's plugin gate is asked or its loader runs), its attached views
+ * only in the view's, and signals only for that organization. A view whose
+ * path names another organization, or `org` naming one the person cannot
+ * see, is refused as gui_not_found (404), as a page in an organization the
+ * person cannot reach is, before anything is loaded; an `org` that is not
+ * an organization id, as gui_bad_request (400). So a person who sees two
+ * organizations cannot read one through a call gated for the other. If
+ * dispatchView comes to check `within` after a gate or a load, or a read is
+ * added here that does not take `org`, revisit.
+ *
+ * Precondition: the caller has asked the assistant plugin's own gate, with
+ * `access: "write"`, for the organization it passes as `org` (ADR-007
+ * decision 5), and holds a HostContext, which hostContext issues only after
+ * a getUser()-backed access read. Nothing calls this module yet: A3's
+ * harness adapter will, in the operator's own session, and
+ * gui-boundary.test.ts lets only modules on its allow-list import it. If a
+ * caller is added without that gate, asks it for another organization than
+ * the `org` it passes, or runs in a session other than the person's,
+ * revisit. It opens no Cordis scope, provides no service, has no route and
+ * never uses the service role.
  *
  * Scope disposal: a view's loader composes and disposes in its own
  * `finally`, and dispatchView awaits the loader, so its scope is disposed
@@ -62,7 +76,7 @@ import { findRefusedReference } from "./assistant-references";
 import { pluginGate } from "./gate-state";
 import { isPageHref, parseHref } from "./hrefs";
 import { matchView } from "./match-view";
-import { selectOrganization } from "./organization";
+import { organizationHint, selectOrganization } from "./organization";
 import { DATA_KEYS, RECORD_KEYS } from "./parse";
 import { assistantSignals } from "./signals";
 import { surfaceSnapshot } from "./snapshot";
@@ -80,9 +94,11 @@ import {
 /** The longest answer, in characters of JSON, an assistant is given. */
 export const ASSISTANT_READ_MAX_CHARS = 200_000;
 
-export type AssistantReadRequest =
-  | { type: "view"; href: string; org?: string | null }
-  | { type: "signals"; org?: string | null };
+/**
+ * `org` is the organization whose assistant gate the caller asked (the
+ * module's precondition); every read is tied to it.
+ */
+export type AssistantReadRequest = { type: "view"; href: string; org: string } | { type: "signals"; org: string };
 
 export type AssistantOutcome<T> = { ok: true; value: T } | HostFailure;
 
@@ -136,6 +152,9 @@ const REFERENCE_REFUSED = fail(500, "assistant_reference_refused", "This view co
 const TOO_LARGE = fail(500, "assistant_output_too_large", "This answer is too large to give to an assistant.");
 const VIEW_FAILED = fail(500, "gui_view_failed", "This view could not be loaded.");
 const NOT_ATTACHED = fail(404, "gui_not_found", "This view is not available for this page.");
+const BAD_ORG = fail(400, "gui_bad_request", "The organization is not valid.");
+/** An `org` the person cannot see: the answer a view in another organization gets (dispatchView's `within`). */
+const NOT_ORG = fail(404, "gui_not_found", "This organization could not be found.");
 
 export const WITHHELD_NOTE = "Withheld: an assistant may not read this.";
 
@@ -219,13 +238,13 @@ async function readView(
   ctx: HostContext,
   snapshot: SurfaceSnapshot,
   href: string,
-  o: { within?: string; depth: 0 | 1; admit: Admit },
+  o: { within: string; depth: 0 | 1; admit: Admit },
 ): Promise<AssistantOutcome<AssistantView>> {
-  const out = await dispatchView(ctx, href, { depth: o.depth, admit: o.admit, ...(o.within === undefined ? {} : { within: o.within }) });
+  const out = await dispatchView(ctx, href, { depth: o.depth, admit: o.admit, within: o.within });
   if (!out.ok) return out;
   const loaded = out.value;
   const view = snapshot.views.find((v) => v.def.id === loaded.view);
-  if (!view || loaded.org === null) return VIEW_FAILED;
+  if (!view || loaded.org !== o.within) return VIEW_FAILED;
   const org = loaded.org;
 
   const withheld: AssistantWithheld[] = [];
@@ -293,14 +312,20 @@ function bounded<T>(value: T): AssistantOutcome<T> {
   return length > ASSISTANT_READ_MAX_CHARS ? TOO_LARGE : { ok: true, value };
 }
 
-async function readSignals(ctx: HostContext, requested: string | null | undefined): Promise<AssistantOutcome<AssistantSignals>> {
-  let org: string | null;
+/**
+ * `org`'s signals. selectOrganization falls back to the person's first
+ * organization when `org` is not one they can see, so anything but `org`
+ * itself is refused here, before a watcher runs.
+ */
+async function readSignals(ctx: HostContext, org: string): Promise<AssistantOutcome<AssistantSignals>> {
+  let selected: string | null;
   try {
-    org = (await selectOrganization(ctx, { requested })).organizationId;
+    selected = (await selectOrganization(ctx, { requested: org })).organizationId;
   } catch {
     return fail(503, "gui_unavailable", "Signals could not be checked right now.");
   }
-  if (org === null) return fail(403, "gui_no_access", "Your account has no organization yet.");
+  if (selected === null) return fail(403, "gui_no_access", "Your account has no organization yet.");
+  if (selected !== org) return NOT_ORG;
   const out = await assistantSignals(ctx, org, readableWatcher);
   if (!out.ok) return out;
   const { signals, off } = out.value;
@@ -326,13 +351,13 @@ async function readSignals(ctx: HostContext, requested: string | null | undefine
 }
 
 /**
- * What an assistant may read for `ctx`'s person: a view, by its page href,
- * or the organization's signals. `org` chooses among the organizations the
- * person can see, as `?org=` does; for a view it must also be the view's
- * own, or the answer is a 404.
+ * What an assistant may read for `ctx`'s person in `request.org`, the
+ * organization whose assistant gate the caller asked: a view, by its page
+ * href, or the organization's signals. A view in another organization, or
+ * an `org` the person cannot see, is a 404 before anything is loaded.
  */
-export async function readForAssistant(ctx: HostContext, request: { type: "view"; href: string; org?: string | null }): Promise<AssistantOutcome<AssistantView>>;
-export async function readForAssistant(ctx: HostContext, request: { type: "signals"; org?: string | null }): Promise<AssistantOutcome<AssistantSignals>>;
+export async function readForAssistant(ctx: HostContext, request: { type: "view"; href: string; org: string }): Promise<AssistantOutcome<AssistantView>>;
+export async function readForAssistant(ctx: HostContext, request: { type: "signals"; org: string }): Promise<AssistantOutcome<AssistantSignals>>;
 export async function readForAssistant(ctx: HostContext, request: AssistantReadRequest): Promise<AssistantOutcome<AssistantView | AssistantSignals>>;
 export async function readForAssistant(
   ctx: HostContext,
@@ -345,12 +370,15 @@ export async function readForAssistant(
   if (!rolesIncludeStaff(ctx.access.roles)) {
     return request.type === "view" ? NOT_FOUND : fail(403, "gui_no_access", "Your account has no organization yet.");
   }
+  // Lowercased, as the host reads `?org=`, so the checks below compare ids.
+  const org = organizationHint(request.org);
+  if (org === null) return BAD_ORG;
   if (request.type === "signals") {
     // Bounded, though no answer can reach the bound today: the host gives at
     // most MAX_TOP (20) signals of at most 4,000 characters each
     // (./signals.ts), about 80,000, so no test reaches it. If those caps grow
     // past ASSISTANT_READ_MAX_CHARS, test this refusal too.
-    const out = await readSignals(ctx, request.org);
+    const out = await readSignals(ctx, org);
     return out.ok ? bounded(out.value) : out;
   }
 
@@ -364,10 +392,6 @@ export async function readForAssistant(
   // Checked before dispatch, so an unlisted view's loader never runs;
   // dispatchView's admit refuses it again.
   if (!readable.has(match.view.def.id)) return NOT_LISTED;
-  const out = await readView(ctx, snapshot, request.href, {
-    depth: 0,
-    admit: (id) => readable.has(id),
-    ...(request.org == null ? {} : { within: request.org }),
-  });
+  const out = await readView(ctx, snapshot, request.href, { within: org, depth: 0, admit: (id) => readable.has(id) });
   return out.ok ? bounded(out.value) : out;
 }
