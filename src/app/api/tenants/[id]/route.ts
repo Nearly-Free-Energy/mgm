@@ -114,13 +114,19 @@ export async function PATCH(
  * this endpoint. Safeguard: tenants with billing history are refused
  * (409) because line items cascade off the tenant row.
  *
- * Confirmation: `community.delete-tenant` is a typed action, so the GUI host
- * sends DeleteTenantBody's `confirmation`, the name the person typed, and a
- * name that is not the tenant's answers 428 `tenant_delete_name_mismatch`
- * with nothing deleted. A request with no body, as the tenants page's
- * delete dialog sends (TenantTable), is not asked for one: requiring it
- * would change that page. If the page comes to send the confirmation,
- * require it. docs/cordis-runtime.md tells the action catalog's clients so.
+ * Confirmation: `community.delete-tenant` is a typed action. The body is
+ * DeleteTenantBody (src/lib/community-management/schemas.ts), and a DELETE
+ * often has none, so an empty one is read as `{}`. The route checks the
+ * confirmation on every request, as billing's period delete does, after the
+ * caller's access and the plugin gate (composeCommunityManagement):
+ *   - a tenant with no name to type: 409 `tenant_unnamed`, the copy the
+ *     delete prepare refuses it with. Rename it first.
+ *   - no `confirmation`: 428 `tenant_delete_confirmation_required`, naming
+ *     the tenant to type. Nothing is deleted.
+ *   - a name that is not the tenant's, or none typed: 428
+ *     `tenant_delete_name_mismatch`.
+ * The GUI host sends the name typed in its step, and the tenants page's
+ * delete dialog (TenantTable) the name it asked for.
  */
 export async function DELETE(
   request: NextRequest,
@@ -135,7 +141,7 @@ export async function DELETE(
     );
   }
 
-  // A DELETE often has no body; an empty one is read as no confirmation.
+  // A DELETE often has no body; an empty one is read as `{}`, which asks for the name.
   const empty = (await request.clone().text()).trim() === "";
   const parsed = empty
     ? ({ ok: true, data: DeleteTenantBody.parse({}) } as const)
@@ -177,27 +183,28 @@ export async function DELETE(
   if (!composed.ok) return mapError(composed);
 
   try {
+    // A typed confirmation needs a name to type: the delete prepare
+    // refuses a tenant without one with this copy too.
+    const name = tenant.display_name?.trim() || null;
+    if (name === null) {
+      return NextResponse.json(
+        { error: "Unnamed entity cannot be typed-to-confirm.", code: "tenant_unnamed" },
+        { status: 409 }
+      );
+    }
     const { confirmation } = parsed.data;
-    if (confirmation) {
-      // A typed confirmation needs a name to type: the delete prepare
-      // refuses a tenant without one with this copy too.
-      const name = tenant.display_name?.trim() ? tenant.display_name : null;
-      if (name === null) {
-        return NextResponse.json(
-          { error: "Unnamed entity cannot be typed-to-confirm.", code: "tenant_unnamed" },
-          { status: 409 }
-        );
-      }
-      if (!typedNameMatches(confirmation.typed, name)) {
-        return NextResponse.json(
-          {
-            error: `Type the tenant's name, ${name}, to delete it.`,
-            code: "tenant_delete_name_mismatch",
-            field: "confirmation",
-          },
-          { status: 428 }
-        );
-      }
+    const typeTheName = `Type the tenant's name, ${name}, to delete it.`;
+    if (!confirmation) {
+      return NextResponse.json(
+        { error: typeTheName, code: "tenant_delete_confirmation_required" },
+        { status: 428 }
+      );
+    }
+    if (!typedNameMatches(confirmation.typed, name)) {
+      return NextResponse.json(
+        { error: typeTheName, code: "tenant_delete_name_mismatch", field: "confirmation" },
+        { status: 428 }
+      );
     }
     const result =
       await composed.data.communityManagement.deleteTenant(id);

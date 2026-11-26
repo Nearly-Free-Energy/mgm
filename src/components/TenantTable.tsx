@@ -18,7 +18,12 @@
  *       Change/Link billing dev. → opens TenantEditDialog
  *       View detail →            → Link to detail page
  *       — separator —
- *       Delete tenant         → DELETE /api/tenants/[id] via the
+ *       Delete tenant         → a typed <ConfirmDialog> asking for the
+ *                                   tenant's name, then DELETE
+ *                                   /api/tenants/[id] with that name as
+ *                                   `{ confirmation: { acknowledged: [],
+ *                                   typed } }`, which the route requires
+ *                                   (428 without it), via the
  *                                   community-management capability
  *                                   (refuses tenants with billing history)
  *   - Click-to-edit chip column:
@@ -192,10 +197,18 @@ export function TenantTable({
     setDeleteDialogOpen(true);
   }
 
+  // The name the delete dialog asks for, and the route checks. The dialog
+  // enables Confirm only once the input, trimmed, is this name.
+  const nameToType = tenantToDelete?.display_name.trim() ?? "";
+
   async function handleDelete() {
     if (!tenantToDelete) return;
     const res = await fetch(`/api/tenants/${tenantToDelete.id}`, {
       method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        confirmation: { acknowledged: [], typed: nameToType },
+      }),
     });
     if (res.status === 204) {
       router.refresh();
@@ -216,14 +229,18 @@ export function TenantTable({
       <ConfirmDialog
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
-        title="Delete tenant?"
+        title={tenantToDelete ? `Delete tenant “${nameToType}”?` : "Delete tenant?"}
         description={
           tenantToDelete
-            ? `Are you sure you want to delete "${tenantToDelete.display_name}"?`
+            ? `This cannot be undone. Its meter links and app access go with it. Type “${nameToType}” to confirm.`
             : undefined
         }
-        confirmLabel="Delete"
+        confirmLabel="Delete tenant"
         tone="destructive"
+        requireTypedConfirmation={{
+          label: "Type tenant name to confirm",
+          expected: nameToType,
+        }}
         onConfirm={handleDelete}
       />
 

@@ -103,7 +103,7 @@ const ACTIONS: ActionDef[] = [
     repeat: "safe",
     ...SHARED,
   },
-  // A DELETE: typed, the community's name, which the route checks. The
+  // A DELETE: typed, the community's name, which the route requires. The
   // cascade takes its microgrids and everything under them, so destructive.
   {
     id: "community.delete-community",
@@ -213,9 +213,10 @@ const ACTIONS: ActionDef[] = [
     repeat: "safe",
     ...SHARED,
   },
-  // Typed, though the tenants page asks only to confirm: a DELETE is typed
-  // or ceremony, and the tenant's meter links and app access go with it.
-  // A tenant with billing history is refused (prepare and the route).
+  // Typed, as the tenants page's delete dialog is: a DELETE is typed or
+  // ceremony, and the tenant's meter links and app access go with it. The
+  // route requires the name (428 without it). A tenant with billing history
+  // is refused (prepare and the route).
   {
     id: "community.delete-tenant",
     title: "Delete tenant",

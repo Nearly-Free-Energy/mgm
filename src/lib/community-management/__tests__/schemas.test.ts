@@ -419,7 +419,7 @@ describe("the delete bodies", () => {
     ["DeleteCommunityBody", DeleteCommunityBody],
     ["DeleteMicrogridBody", DeleteMicrogridBody],
     ["DeleteTenantBody", DeleteTenantBody],
-  ] as const)("%s takes no confirmation, or one with the typed name", (_name, schema) => {
+  ] as const)("%s parses no confirmation, for the route to refuse, or one with the typed name", (_name, schema) => {
     expect(schema.parse({})).toEqual({});
     expect(schema.parse({ confirmation: { acknowledged: [], typed: "Kisakye" } })).toEqual({
       confirmation: { acknowledged: [], typed: "Kisakye" },

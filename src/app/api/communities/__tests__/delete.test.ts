@@ -1,7 +1,9 @@
 /**
  * DELETE /api/communities/[id] + GET delete-preview route tests (#89).
  *
- * Covers: 400 invalid UUID, 403 unauthorized, 404 not found, 204 happy.
+ * Covers: 400 invalid UUID, 403 unauthorized, 404 not found, 204 happy,
+ * and the typed name every delete must carry: 428 with no confirmation (no
+ * body, `{}`, or a confirmation with nothing typed) or the wrong name.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -90,9 +92,12 @@ function configureEntityLookup(
 
 const VALID_UUID = "550e8400-e29b-41d4-a716-446655440000";
 
-function makeDelete(id: string): NextRequest {
+/** A DELETE with the community's name typed, as its page and the GUI host send it. */
+function makeDelete(id: string, typed = "Kisakye"): NextRequest {
   return new NextRequest(`http://localhost/api/communities/${id}`, {
     method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ confirmation: { acknowledged: [], typed } }),
   });
 }
 
@@ -276,6 +281,20 @@ describe("DELETE /api/communities/[id] with the GUI host's typed confirmation", 
         error: "Type the community's name, Kisakye East, to delete it.",
         code: "community_delete_name_mismatch",
         field: "confirmation",
+      });
+    }
+    expect(mockRpcImpl).not.toHaveBeenCalled();
+  });
+
+  it("answers 428 and deletes nothing without a confirmation, whether the body is empty or {}", async () => {
+    const { DELETE } = await import("../[id]/route");
+    const bare = new NextRequest(`http://localhost/api/communities/${VALID_UUID}`, { method: "DELETE" });
+    for (const request of [bare, withBody(""), withBody("{}")]) {
+      const res = await DELETE(request, { params: Promise.resolve({ id: VALID_UUID }) });
+      expect(res.status).toBe(428);
+      expect(await res.json()).toEqual({
+        error: "Type the community's name, Kisakye East, to delete it.",
+        code: "community_delete_confirmation_required",
       });
     }
     expect(mockRpcImpl).not.toHaveBeenCalled();

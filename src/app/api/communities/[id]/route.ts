@@ -118,14 +118,16 @@ export async function PATCH(
  *
  * Idempotency: first-delete wins, repeats 404 (AC-ROUTE-7).
  *
- * Confirmation: `community.delete-community` is a typed action, so the GUI
- * host sends DeleteCommunityBody's `confirmation`, the name the person
- * typed, and a name that is not the community's answers 428
- * `community_delete_name_mismatch` with nothing deleted. A request with no
- * body, as the community page's delete dialog sends after its own typed
- * check (DeleteEntityButton), is not asked for one: requiring it would
- * change that page. If the page comes to send the confirmation, require it.
- * docs/cordis-runtime.md tells the action catalog's clients so.
+ * Confirmation: `community.delete-community` is a typed action. The body is
+ * DeleteCommunityBody (src/lib/community-management/schemas.ts), and a
+ * DELETE often has none, so an empty one is read as `{}`. The route checks
+ * the confirmation on every request, as billing's period delete does:
+ *   - no `confirmation`: 428 `community_delete_confirmation_required`,
+ *     naming the community to type. Nothing is deleted.
+ *   - a name that is not the community's, or none typed: 428
+ *     `community_delete_name_mismatch`.
+ * The GUI host sends the name typed in its step, and the community page's
+ * delete dialog (DeleteEntityButton) the name it asked for.
  *
  * Cascade chain: communities → microgrids → (edges/devices/tenants/
  * billing_periods/billing_line_items/rate_schedules/tenant_devices), and
@@ -152,7 +154,7 @@ export async function DELETE(
     );
   }
 
-  // A DELETE often has no body; an empty one is read as no confirmation.
+  // A DELETE often has no body; an empty one is read as `{}`, which asks for the name.
   const empty = (await request.clone().text()).trim() === "";
   const parsed = empty
     ? ({ ok: true, data: DeleteCommunityBody.parse({}) } as const)
@@ -194,13 +196,16 @@ export async function DELETE(
     );
   }
   const { confirmation } = parsed.data;
-  if (confirmation && !typedNameMatches(confirmation.typed, community.name)) {
+  const typeTheName = `Type the community's name, ${community.name.trim()}, to delete it.`;
+  if (!confirmation) {
     return NextResponse.json(
-      {
-        error: `Type the community's name, ${community.name}, to delete it.`,
-        code: "community_delete_name_mismatch",
-        field: "confirmation",
-      },
+      { error: typeTheName, code: "community_delete_confirmation_required" },
+      { status: 428 }
+    );
+  }
+  if (!typedNameMatches(confirmation.typed, community.name)) {
+    return NextResponse.json(
+      { error: typeTheName, code: "community_delete_name_mismatch", field: "confirmation" },
       { status: 428 }
     );
   }

@@ -475,8 +475,10 @@ const acknowledged = (message: string) =>
 
 /**
  * The host's Confirmation (src/lib/gui/contract.ts) for a typed delete: the
- * name the person typed. Optional: the pages that delete send no body, so
- * the route checks a confirmation only when one is sent.
+ * name the person typed. Optional in the schema, as billing's
+ * DeletePeriodBody is, so that a request without one is answered by the
+ * route, with 428 `*_delete_confirmation_required` and the name to type,
+ * rather than a 400: the route requires it.
  */
 const typedConfirmation = (message: string) =>
   z
@@ -489,7 +491,7 @@ const typedConfirmation = (message: string) =>
 /**
  * DELETE /api/communities/[id]. The community comes from the path.
  * `confirmation` is a typed action's: the community's name, which the route
- * checks when one is sent.
+ * requires.
  */
 export const DeleteCommunityBody = z.strictObject(
   { confirmation: typedConfirmation("confirmation needs the community's name, typed") },

@@ -327,18 +327,19 @@ key is a 400.
   actions, since every action is a staff route.
 
 An entry's `confirm` is the level of the step the GUI host shows before it
-sends, and the host sends the confirmation that step asks for. Not every
-route requires one. Billing's period delete does: a request with no
-confirmation answers 428 `billing_delete_confirmation_required`. Community
-management's three typed deletes (`DELETE /api/communities/[id]`,
-`/api/microgrids/[id]` and `/api/tenants/[id]`) check the name only when a
-confirmation is sent (428 `*_delete_name_mismatch` for the wrong one), and
-still delete on a request with no body, as they did before they were
-described, since their pages send none. Its access removal's ceremony has
-nothing to tick or type, so that route has nothing to check either. A
-client other than the host sends the confirmation its entry's level asks
-for; those routes do not refuse a request that leaves it out. When the
-pages send it, the three deletes require it and this paragraph changes.
+sends, and the host sends the confirmation that step asks for. The route
+stays the authority and checks that confirmation on every write (ADR-006,
+decision 10), so a client other than the host sends what its entry's level
+asks for too. The typed deletes refuse a request without it: billing's
+period delete answers 428 `billing_delete_confirmation_required`, and
+community management's three (`DELETE /api/communities/[id]`,
+`/api/microgrids/[id]` and `/api/tenants/[id]`) answer 428
+`*_delete_confirmation_required`, each naming the record to type; a
+confirmation with another name, or none typed, answers 428
+`*_delete_name_mismatch`. Nothing is deleted on either. Their pages send
+the name their dialogs ask for. Community management's access removal is a
+ceremony with nothing to tick or type, so its route has nothing in it to
+check.
 
 An entry's `availability` lists each check that refused it in `reasons`,
 and each check not decided in `unchecked`, so `available: true` means only

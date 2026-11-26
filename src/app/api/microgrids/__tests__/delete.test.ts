@@ -1,5 +1,7 @@
 /**
- * DELETE /api/microgrids/[id] + GET delete-preview route tests (#89).
+ * DELETE /api/microgrids/[id] + GET delete-preview route tests (#89), and
+ * the typed name every delete must carry: 428 with no confirmation (no body,
+ * `{}`, or a confirmation with nothing typed) or the wrong name.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -101,9 +103,12 @@ function configureEntityLookup(
 
 const VALID_UUID = "550e8400-e29b-41d4-a716-446655440000";
 
-function makeDelete(id: string): NextRequest {
+/** A DELETE with the microgrid's name typed, as its page and the GUI host send it. */
+function makeDelete(id: string, typed = "Demo Microgrid"): NextRequest {
   return new NextRequest(`http://localhost/api/microgrids/${id}`, {
     method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ confirmation: { acknowledged: [], typed } }),
   });
 }
 
@@ -334,15 +339,31 @@ describe("DELETE /api/microgrids/[id] with the GUI host's typed confirmation", (
     infoSpy.mockRestore();
   });
 
-  it("answers 428 and deletes nothing when the name typed is another", async () => {
+  it("answers 428 and deletes nothing when the name typed is another, or none was typed", async () => {
     const { DELETE } = await import("../[id]/route");
-    const res = await DELETE(confirmed("Demo"), { params: Promise.resolve({ id: VALID_UUID }) });
-    expect(res.status).toBe(428);
-    expect(await res.json()).toEqual({
-      error: "Type the microgrid's name, Demo Microgrid, to delete it.",
-      code: "microgrid_delete_name_mismatch",
-      field: "confirmation",
-    });
+    for (const request of [confirmed("Demo"), withBody(JSON.stringify({ confirmation: { acknowledged: [] } }))]) {
+      const res = await DELETE(request, { params: Promise.resolve({ id: VALID_UUID }) });
+      expect(res.status).toBe(428);
+      expect(await res.json()).toEqual({
+        error: "Type the microgrid's name, Demo Microgrid, to delete it.",
+        code: "microgrid_delete_name_mismatch",
+        field: "confirmation",
+      });
+    }
+    expect(mockRpcImpl).not.toHaveBeenCalled();
+  });
+
+  it("answers 428 and deletes nothing without a confirmation, whether the body is empty or {}", async () => {
+    const { DELETE } = await import("../[id]/route");
+    const bare = new NextRequest(`http://localhost/api/microgrids/${VALID_UUID}`, { method: "DELETE" });
+    for (const request of [bare, withBody(""), withBody("{}")]) {
+      const res = await DELETE(request, { params: Promise.resolve({ id: VALID_UUID }) });
+      expect(res.status).toBe(428);
+      expect(await res.json()).toEqual({
+        error: "Type the microgrid's name, Demo Microgrid, to delete it.",
+        code: "microgrid_delete_confirmation_required",
+      });
+    }
     expect(mockRpcImpl).not.toHaveBeenCalled();
   });
 

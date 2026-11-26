@@ -135,14 +135,16 @@ export async function PATCH(
  *
  * Idempotency: first-delete wins, repeats 404 (AC-ROUTE-7).
  *
- * Confirmation: `community.delete-microgrid` is a typed action, so the GUI
- * host sends DeleteMicrogridBody's `confirmation`, the name the person
- * typed, and a name that is not the microgrid's answers 428
- * `microgrid_delete_name_mismatch` with nothing deleted. A request with no
- * body, as the microgrid page's delete dialog sends after its own typed
- * check (DeleteEntityButton), is not asked for one: requiring it would
- * change that page. If the page comes to send the confirmation, require it.
- * docs/cordis-runtime.md tells the action catalog's clients so.
+ * Confirmation: `community.delete-microgrid` is a typed action. The body is
+ * DeleteMicrogridBody (src/lib/community-management/schemas.ts), and a
+ * DELETE often has none, so an empty one is read as `{}`. The route checks
+ * the confirmation on every request, as billing's period delete does:
+ *   - no `confirmation`: 428 `microgrid_delete_confirmation_required`,
+ *     naming the microgrid to type. Nothing is deleted.
+ *   - a name that is not the microgrid's, or none typed: 428
+ *     `microgrid_delete_name_mismatch`.
+ * The GUI host sends the name typed in its step, and the microgrid page's
+ * delete dialog (DeleteEntityButton) the name it asked for.
  *
  * Revalidation (AC-UI-6): both `/communities/<community_id>` and
  * `/microgrids` layouts are busted.
@@ -160,7 +162,7 @@ export async function DELETE(
     );
   }
 
-  // A DELETE often has no body; an empty one is read as no confirmation.
+  // A DELETE often has no body; an empty one is read as `{}`, which asks for the name.
   const empty = (await request.clone().text()).trim() === "";
   const parsed = empty
     ? ({ ok: true, data: DeleteMicrogridBody.parse({}) } as const)
@@ -209,13 +211,16 @@ export async function DELETE(
     );
   }
   const { confirmation } = parsed.data;
-  if (confirmation && !typedNameMatches(confirmation.typed, microgrid.name)) {
+  const typeTheName = `Type the microgrid's name, ${microgrid.name.trim()}, to delete it.`;
+  if (!confirmation) {
     return NextResponse.json(
-      {
-        error: `Type the microgrid's name, ${microgrid.name}, to delete it.`,
-        code: "microgrid_delete_name_mismatch",
-        field: "confirmation",
-      },
+      { error: typeTheName, code: "microgrid_delete_confirmation_required" },
+      { status: 428 }
+    );
+  }
+  if (!typedNameMatches(confirmation.typed, microgrid.name)) {
+    return NextResponse.json(
+      { error: typeTheName, code: "microgrid_delete_name_mismatch", field: "confirmation" },
       { status: 428 }
     );
   }
