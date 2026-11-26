@@ -725,14 +725,19 @@ Cordis service, and it opens no scope and never uses the service role.
   listed watchers run, the counts are over them alone, and a listed watcher
   whose plugin is off is reported in `off`.
 - Every action, proposal and composer is removed. A model or signal that
-  carries a reference `assistant-references.ts` refuses (tenant, device,
-  rate schedule, billing period, line item, payment attempt, a tenant's
-  access (`community.tenant-access`), a kind of a
-  plugin whose reading is refused, any `/api` path, a page path with a
-  segment of a refused kind, a page path no view or catalog page serves,
-  an undeclared search parameter or a fragment, an outside link, a share or
-  a download) is refused whole, and an answer
-  over 200 000 characters of JSON is refused. The host's own refusals pass
+  carries a reference `assistant-references.ts` refuses is refused whole:
+  an entity reference of a tenant, device, rate schedule, billing period,
+  line item, payment attempt, a tenant's access (`community.tenant-access`),
+  a person (`org.user`), or a kind of a plugin whose reading
+  `ASSISTANT_READING` refuses; any `/api` path; a page path with a fragment,
+  one no view or catalog page serves, or one with a segment of a refused
+  kind; a page path whose view or catalog page belongs to a plugin whose
+  reading is refused (billing, payments, Pesapal, the tenant app,
+  operations), or whose view is a tenant view, bare or with any search
+  parameter, declared or not; a search parameter other than `org` and the
+  view's declared `query` names on any other page path (a catalog page no
+  view serves takes none); an outside link; a share or a download. An
+  answer over 200 000 characters of JSON is refused. The host's own refusals pass
   on with their codes, so an unavailable, disabled or unsupported read is
   never shown as zero.
 - Every request names its organization in `org`, which is required: a view

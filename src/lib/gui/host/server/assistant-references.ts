@@ -13,7 +13,7 @@ import "server-only";
  * - an entity reference (`entity`, each of `related`, and `ref` on a Value
  *   with `t: "ref"`) of a kind in ASSISTANT_REFUSED_KINDS (tenant, device,
  *   rate schedule, billing period, line item, payment attempt, community
- *   management's tenant access), or of a
+ *   management's tenant access, the organization directory's person), or of a
  *   plugin's own kind whose alias names no plugin in the catalog or a plugin
  *   ASSISTANT_READING refuses (./contribution-schema.ts). Devices are refused
  *   because an EntityRef's label is a device's name, which decision 6 keeps
@@ -22,14 +22,21 @@ import "server-only";
  *   same-origin path, so every OutHref (wa.me, tel:, sms:), which is
  *   contact detail; every /api path, since an assistant is given no action
  *   and no download and an API path can name a tenant or device in a
- *   segment whatever plugin owns it (`/api/tenants/<id>`); a page path that
- *   names no contributed view and no catalog page; a page path with a
- *   segment of a refused kind; a page path with a search parameter other
- *   than its view's declared `query` names and `org` (a catalog page that
- *   no view serves takes none), since a parameter such as `?tenant=` names
- *   a record the path does not; and a page path with a fragment, which can
- *   name one too. A declared parameter is allowed whatever record it
- *   names, so this holds only while no view's `query` names a refused
+ *   segment whatever plugin owns it (`/api/tenants/<id>`); a page path with
+ *   a fragment, which can name a record; a page path that names no
+ *   contributed view and no catalog page; a page path whose view or catalog
+ *   page belongs to a plugin ASSISTANT_READING refuses (billing, payments,
+ *   Pesapal, the tenant app, operations), bare or with any parameter, since
+ *   nobody reviews such a plugin's pages or their `query` against ADR-007
+ *   (its views can never be on ASSISTANT_READS) and its parameters can name
+ *   a tenant or a bill (`?tenant_id=`, `?bill=`); a tenant view's path (`scope:
+ *   "tenant"`), bare or with any parameter (`?unit=` names the unit); a page
+ *   path with a segment of a refused kind; and a page path with a search
+ *   parameter other than its view's declared `query` names and `org` (a
+ *   catalog page that no view serves takes none), since a parameter such as
+ *   `?tenant=` names a record the path does not. A declared parameter of a
+ *   "per view" plugin's organization view is allowed whatever record it
+ *   names, so this holds only while no such view's `query` names a refused
  *   record (see the revisit condition below);
  * - a LinkRef's `share` or `download`, which carry free text.
  *
@@ -43,9 +50,10 @@ import "server-only";
  * name, an EntityRef under `ref` on anything but the `t: "ref"` Value, or
  * one under `related` anywhere but an element of the array it holds.
  * If a model shape gains one there, ASSISTANT_REFUSED_KINDS or
- * ASSISTANT_READING changes, or a view whose segments are all allowed
- * declares a `query` parameter naming a tenant, device, billing or payment
- * record, revisit this rule.
+ * ASSISTANT_READING changes, a view of a "per view" plugin whose segments
+ * are all allowed declares a `query` parameter naming a tenant, device,
+ * person, billing or payment record, or a view scope other than "tenant"
+ * comes to be about a tenant's own unit, revisit this rule.
  */
 import { CORE_ENTITY_KINDS, getPluginByAlias, matchCatalogPage } from "@/lib/plugins/bundled";
 import { isSameOriginPath } from "../shared/href";
@@ -74,7 +82,7 @@ export function refusedKind(kind: string): boolean {
   const dot = kind.indexOf(".");
   if (dot <= 0) return true;
   const plugin = getPluginByAlias(kind.slice(0, dot));
-  return plugin === undefined || ASSISTANT_READING[plugin.name] !== "per view";
+  return plugin === undefined || refusedPlugin(plugin.name);
 }
 
 const isPlain = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -92,13 +100,23 @@ export function hrefRefusal(href: string, views: readonly RegisteredView[]): str
   const view = matchView(views, path);
   if (view) {
     for (const kind of Object.values(view.view.def.params)) if (refusedKind(kind)) return kind;
+    // Before the parameters: a refused plugin's view and a tenant view are
+    // refused bare, so none of their declared `query` names is ever allowed.
+    if (refusedPlugin(view.view.plugin)) return "refused plugin";
+    if (view.view.def.scope === "tenant") return "tenant view";
     const allowed = new Set<string>([...(view.view.def.query ?? []), "org"]);
     return names.every((name) => allowed.has(name)) ? null : "search parameter";
   }
   const page = matchCatalogPage(path);
   if (!page) return "unknown page";
   for (const kind of Object.values(page.page.params)) if (refusedKind(kind)) return kind;
+  if (refusedPlugin(page.plugin.name)) return "refused plugin";
   return names.length === 0 ? null : "search parameter";
+}
+
+/** Whether ASSISTANT_READING refuses `plugin`'s reading; a name missing from it is refused. */
+function refusedPlugin(plugin: string): boolean {
+  return (ASSISTANT_READING as Readonly<Record<string, string>>)[plugin] !== "per view";
 }
 
 function entityRefusal(ref: unknown): string | null {

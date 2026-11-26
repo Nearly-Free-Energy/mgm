@@ -436,9 +436,13 @@ says so.
   (`ASSISTANT_REFUSED_KINDS`: tenant, device, rate schedule, billing
   period, line item and payment attempt, and community management's
   `community.tenant-access`, a tenant's access to its unit, whose label is
-  the person's address) or of a plugin kind whose plugin
+  the person's address, and the organization directory's `org.user`, a
+  person) or of a plugin kind whose plugin
   is unknown or refused; an href that leaves the origin, names no view or
-  catalog page, has a segment of a refused kind, carries a search
+  catalog page, has a segment of a refused kind, names a view or catalog
+  page of a refused plugin or a tenant view (bare or with any search
+  parameter, since a refused plugin's `query` is never reviewed against
+  this decision and can name a tenant or a bill), carries a search
   parameter its view does not declare or a fragment, or is any API route
   (an assistant is given no action or download, and an API path can name
   a tenant or device whatever plugin owns it); and a link's share or
