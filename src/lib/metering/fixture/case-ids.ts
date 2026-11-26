@@ -11,6 +11,7 @@
  * same values; if either changes, change both.
  */
 import type { DeviceType } from "@/lib/types/domain";
+import { SYNTHETIC_EDGE_ID_PREFIX } from "../fixture-provider";
 
 const UUID_PREFIX = "00000000-0000-4000-8000-";
 
@@ -49,12 +50,12 @@ export function caseDeviceId(nn: string, dd: string): string {
 
 /**
  * The synthetic edge of microgrid *nn*: its number in decimal, two digits
- * (microgrid 0a's edge is `SYNTHETIC-EDGE-CASE-10`). The prefix is the
- * fixture provider's reserved one (`SYNTHETIC_EDGE_ID_PREFIX`), so the
- * synthetic provider serves these microgrids.
+ * (microgrid 0a's edge is `SYNTHETIC-EDGE-CASE-10`). It starts with the
+ * fixture provider's reserved prefix, so the synthetic provider serves these
+ * microgrids.
  */
 export function caseEdgeId(nn: string): string {
-  return `SYNTHETIC-EDGE-CASE-${String(caseNumber(nn)).padStart(2, "0")}`;
+  return `${SYNTHETIC_EDGE_ID_PREFIX}CASE-${String(caseNumber(nn)).padStart(2, "0")}`;
 }
 
 export type CaseDevice = {
