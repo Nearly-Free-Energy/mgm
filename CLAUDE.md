@@ -54,7 +54,7 @@ npm run db:types:check
 
 RLS tests (`src/lib/supabase/__tests__/rls.test.ts`) require:
 
-1. **Local Supabase CLI running** — `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase start` (do NOT run against cloud). The variable gives a new local database a throwaway credential encryption key; without it the migrations stop at `00018` (`docs/runbooks/dek.md`).
+1. **Local Supabase CLI running**, with Supabase CLI 3.4 or later (`npx supabase` runs the pinned one; `docs/setup.md`, "Upgrading to Supabase CLI 3") — `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase start` (do NOT run against cloud). The variable gives a new local database a throwaway credential encryption key; without it the migrations stop at `00018` (`docs/runbooks/dek.md`).
 2. **`SUPABASE_JWT_SECRET` in `.env.local`** — retrieve with `supabase status -o env | grep '^JWT_SECRET='`
 3. **Seed loaded** — run `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset` once after `supabase start`
 

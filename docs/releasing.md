@@ -182,9 +182,10 @@ billing, payment links and checkout failed. Keep that gap short:
    ```
 
    From here until step 5, record no payments by hand and start no checkout.
-3. Apply the migrations (`supabase db push --remote`: since Supabase CLI 3 a
-   bare `db push` targets the local database, and it asks you to confirm a
-   change to a hosted project).
+3. Apply the migrations (`supabase db push --remote=<project ref>`: since
+   Supabase CLI 3 a bare `db push` targets the local database, naming the
+   ref keeps the target from depending on which project the checkout is
+   linked to, and the CLI asks you to confirm a change to a hosted project).
 4. Promote the staged deployment straight away.
 5. Resume the worker, and run it once to settle any payment a customer
    completed in the gap, whose provider notification reached the old release
@@ -205,7 +206,7 @@ available" until it is reloaded.
 
 To roll back after step 4, run the reverse script and promote the previous
 deployment, with the worker paused as in step 2, then record the migration as
-reverted (`supabase migration repair --remote --status reverted <version>`).
+reverted (`supabase migration repair --remote=<project ref> --status reverted <version>`).
 
 A reverse script holds only until a later migration changes an object it
 touches; by then a later release is the rollback target, and the script, its

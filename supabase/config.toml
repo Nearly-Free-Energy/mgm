@@ -210,9 +210,12 @@ web3 = 30
 # secret = ""
 
 [auth.email]
-# Turns the email provider on or off for every user, existing users included.
-# Email link or code is MGM's only sign-in (RFC #186), so false locks everyone
-# out. To stop new sign-ups only, use enable_signup under [auth].
+# Turns Auth's own email endpoints (/otp for email, /magiclink, sign-up, /resend,
+# /recover and password sign-in) on or off for every user. MGM's sign-in
+# (RFC #186) uses /admin/generate_link and /verify, which do not read it in
+# Auth v2.198.0; if sign-in moves to /otp or /magiclink, or a later Auth
+# checks it there, false would lock everyone out. To stop new sign-ups only,
+# use enable_signup under [auth].
 enabled = true
 # If enabled, a user will be required to confirm any email change on both the old, and new email
 # addresses. If disabled, only the new email is required to confirm.

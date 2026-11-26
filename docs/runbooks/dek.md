@@ -106,11 +106,11 @@ first migration run:
    `.env` file cannot apply (see "Local development and CI"):
 
    ```bash
-   MGM_ALLOW_DEV_CREDENTIAL_KEY= supabase db push --remote
+   MGM_ALLOW_DEV_CREDENTIAL_KEY= supabase db push --remote=<project ref>
    ```
 
-   `--remote` targets the linked project: since Supabase CLI 3 a bare
-   `db push` targets the local database.
+   Name the project: since Supabase CLI 3 a bare `db push` targets the local
+   database, and a bare `--remote` the project the checkout is linked to.
 
    Check that the output has no "Generated a throwaway credential encryption
    key" warning. Not every Supabase CLI version prints server warnings, so
