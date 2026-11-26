@@ -153,6 +153,11 @@ export function DiscoverMeterInline({
     };
   }, []);
 
+  // The edge picked now, for a save that returns after the operator picked
+  // another: its outcome belongs to the list of the edge it was sent for.
+  // Written where the edge changes, not during render.
+  const pickedEdgeIdRef = React.useRef(pickedEdgeId);
+
   const pickedEdge = sortedEdges.find((e) => e.id === pickedEdgeId) ?? null;
 
   // Filter discovery results to consumption_meter not yet linked.
@@ -241,6 +246,12 @@ export function DiscoverMeterInline({
     if (!pickedEdge) return;
     const candidate = candidates.find((d) => d.componentId === pickedComponentId);
     if (!candidate) return;
+    // The edge this save is for. The edge picker stays open while it runs,
+    // and picking another edge clears the list, so the list a save returns
+    // to may be another edge's, where the same component id can name a
+    // different device.
+    const savingEdgeId = pickedEdge.id;
+    const edgeChanged = () => pickedEdgeIdRef.current !== savingEdgeId;
     setSaveError(null);
     setPhase("saving");
 
@@ -264,6 +275,9 @@ export function DiscoverMeterInline({
 
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
+        // Picking another edge discarded this pick, so its refusal has no
+        // selection left to retry.
+        if (edgeChanged()) return;
         setSaveError(
           body.error ??
             `Could not save the device (HTTP ${res.status}). Your selection is preserved — please retry.`
@@ -282,6 +296,7 @@ export function DiscoverMeterInline({
       };
       const saved = data.saved?.[0];
       if (!saved) {
+        if (edgeChanged()) return;
         setSaveError("Server did not return the saved device. Please retry.");
         setPhase("ready");
         return;
@@ -300,6 +315,12 @@ export function DiscoverMeterInline({
       };
 
       onDevicePersisted(newMeter);
+      // The meter is saved on its edge whichever edge is picked now, so the
+      // wizard gets it above. The list here is another edge's once the
+      // operator has picked one, and marking its device with the same
+      // component id would take a meter that is not saved out of the
+      // candidates, so the list and the pick are left as they are.
+      if (edgeChanged()) return;
       // The meter is saved now, and the wizard's own meter list holds it
       // and selects it. Mark it `alreadyAdded`, as the next discover would,
       // so it leaves the candidates: picking it here again would send it to
@@ -316,6 +337,7 @@ export function DiscoverMeterInline({
       setPhase("ready");
     } catch (err) {
       if ((err as { name?: string } | undefined)?.name === "AbortError") return;
+      if (edgeChanged()) return;
       setSaveError(
         "Network error while saving. Your selection is preserved — please retry."
       );
@@ -365,6 +387,7 @@ export function DiscoverMeterInline({
           <Select
             value={pickedEdgeId}
             onValueChange={(v) => {
+              pickedEdgeIdRef.current = v;
               setPickedEdgeId(v);
               setDiscovered([]);
               setSkipped([]);
