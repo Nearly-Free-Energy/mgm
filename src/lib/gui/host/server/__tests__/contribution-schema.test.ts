@@ -113,6 +113,12 @@ describe("parseContribution", () => {
     }
   });
 
+  it("accepts a strict object at the input's root, with its bound field among the properties", () => {
+    const c = copy(BILLING_SURFACE) as Draft;
+    c.actions[0].input = z.strictObject({ microgrid_id: z.uuid(), name: z.string() });
+    expect(() => parseContribution(c, CATALOG)).not.toThrow();
+  });
+
   it("accepts an action offered only on its own plugin's views", () => {
     const c = copy(BILLING_SURFACE) as Draft;
     c.actions[0].targeted = false;
@@ -322,6 +328,11 @@ describe("parseContribution", () => {
     ["an input field of any JSON", (c) => (c.actions[0].input = z.strictObject({ data: z.json() })), ["actions", 0, "input"], "billing.create-period: the input accepts any value at /$defs/__schema0; describe what it takes"],
     ["an input with a catchall of unknowns", (c) => (c.actions[0].input = z.strictObject({ note: z.string() }).catchall(z.unknown())), ["actions", 0, "input"], "billing.create-period: the input accepts any value at /additionalProperties; describe what it takes"],
     ["an input list of unknowns", (c) => (c.actions[0].input = z.strictObject({ tiers: z.array(z.unknown()) })), ["actions", 0, "input"], "billing.create-period: the input accepts any value at /properties/tiers/items; describe what it takes"],
+    // describeInput removes bound fields and confirmation from a root object's properties alone.
+    ["an input whose root is a union", (c) => (c.actions[0].input = z.union([z.strictObject({ microgrid_id: z.uuid(), name: z.string() }), z.strictObject({ microgrid_id: z.uuid(), copy_of: z.uuid() })])), ["actions", 0, "input"], "billing.create-period: the input's root is not an object with properties; make it a z.strictObject"],
+    ["an input whose root is a discriminated union", (c) => (c.actions[0].input = z.discriminatedUnion("mode", [z.strictObject({ mode: z.literal("new"), microgrid_id: z.uuid() }), z.strictObject({ mode: z.literal("copy"), microgrid_id: z.uuid() })])), ["actions", 0, "input"], "billing.create-period: the input's root is not an object with properties; make it a z.strictObject"],
+    ["an input whose root is a record", (c) => (c.actions[0].input = z.record(z.string(), z.string())), ["actions", 0, "input"], "billing.create-period: the input's root is not an object with properties; make it a z.strictObject"],
+    ["an input whose root is a scalar", (c) => (c.actions[0].input = z.string()), ["actions", 0, "input"], "billing.create-period: the input's root is not an object with properties; make it a z.strictObject"],
     // Examples
     ["a view without examples", (c) => (c.views[0].examples = []), ["views", 0, "examples"], "a view needs at least one example"],
     ["an example of another view", (c) => (c.views[0].examples[0].view = "billing.period-review"), ["views", 0, "examples", 0, "view"], "an example must name its view, billing.periods"],

@@ -235,9 +235,9 @@ describe("user_profiles — UPDATE policy", () => {
     // RLS "Users edit own profile or super_admin edits any" policy returns 0
     // rows when an org_manager targets another user's profile. The route
     // PATCH /api/users/[id]/profile converts the 0-row result into HTTP 403
-    // ("Not authorized to update this profile."). This test verifies the RLS
-    // gate; route-level 403 mapping is confirmed by the route's `data.length === 0`
-    // check in src/app/api/users/[id]/profile/route.ts.
+    // ("Not authorized to update this profile.") after asking who the caller
+    // is. This test verifies the RLS gate; the route-level 403 is pinned by
+    // src/app/api/users/[id]/profile/__tests__/route.test.ts (case 2b).
     if (skipIfRequested()) return;
 
     const { data, error } = await B.client

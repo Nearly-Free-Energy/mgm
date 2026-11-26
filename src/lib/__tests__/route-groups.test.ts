@@ -36,6 +36,10 @@ const PAGES_OUTSIDE_GUI = [
   "forgot-password/page.tsx",
   "login/page.tsx",
   "no-access/page.tsx",
+  // Sign-in for clients that are not a browser (#271): reached by staff and
+  // tenant-only people alike, before any organization is known.
+  "oauth/code/page.tsx",
+  "oauth/consent/page.tsx",
   "reset-password/page.tsx",
   "review/page.tsx",
   "setup/page.tsx",
