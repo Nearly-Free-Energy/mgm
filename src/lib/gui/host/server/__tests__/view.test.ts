@@ -11,7 +11,8 @@ import type { RegisteredAction, RegisteredSignal, RegisteredView, SurfaceSnapsho
 
 const checkGate = vi.fn();
 const resolveTargetOrganization = vi.fn();
-vi.mock("@/lib/runtime/gate", () => ({
+vi.mock("@/lib/runtime/gate", async (importOriginal) => ({
+  codePrefix: (await importOriginal<typeof import("@/lib/runtime/gate")>()).codePrefix,
   checkGate: (...args: unknown[]) => checkGate(...args),
   resolveTargetOrganization: (...args: unknown[]) => resolveTargetOrganization(...args),
 }));
@@ -268,6 +269,16 @@ describe("dispatchView", () => {
     expect(loadOf(siteDay)).not.toHaveBeenCalled();
     const db = await dispatch(`/microgrids/${MG}/setup/rates`);
     expect(db).toMatchObject({ ok: true, value: { notice: { tone: "warning", text: "Could not check whether this part of MGM is enabled." } } });
+  });
+
+  it("refuses a vendor view of a hyphenated plugin whose gate throws with the gate's own code", async () => {
+    snapshot = snapshotOf([{ ...siteDay, plugin: "community-management" }]);
+    checkGate.mockRejectedValue(new Error("down"));
+    expect(await dispatch(`/microgrids/${MG}/operations`)).toMatchObject({
+      ok: false,
+      status: 503,
+      code: "community_management_gate_unavailable",
+    });
   });
 
   it("resolves the view's actions: its own shown disabled with the gate's copy, others' appended or left out", async () => {

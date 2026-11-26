@@ -66,7 +66,8 @@ const displayName = (plugin: MgmPluginName) =>
 
 const CORE_KINDS: ReadonlySet<string> = new Set(CORE_ENTITY_KINDS);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const OWN_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+/** The id of a plugin's own kind of record: a short token. The OpenAPI document (../server/openapi.ts) describes such a path segment with it. */
+export const OWN_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
 /** Whether `id` has the shape of an id of `kind`: a UUID for a core kind, a short token for a plugin's own. */
 export function idFits(kind: string, id: string): boolean {

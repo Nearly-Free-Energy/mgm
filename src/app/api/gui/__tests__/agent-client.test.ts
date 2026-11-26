@@ -5,6 +5,15 @@
  * and give it less (src/lib/gui/host/server/__tests__/agent.test.ts). This
  * is the host's own fence: middleware refuses the same requests first
  * (middleware.test.ts).
+ *
+ * The client is stood in, recorded as the caller each case names, as
+ * createClient records a client built on a bearer token. The view route's
+ * cases are the part of the agent refusal that
+ * src/lib/runtime/__tests__/bearer-session.db.test.ts cannot reach yet: there
+ * a real agent token reaches this route as an agent client, but until #274
+ * creates the `mgm_agent` role no role rows are read for it, so the route
+ * refuses it with 403 `gui_no_access` before any view is looked up. When
+ * #274 lands, that file can expect these answers end to end.
  */
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,12 +22,19 @@ import { recordCaller, type Caller } from "@/lib/runtime/caller";
 const ORG = "e7100000-0000-4000-8003-000000000001";
 let caller: Caller;
 let getUserCalls: number;
+/** What each table answers: the person's role rows and the organization they manage. */
+const ROWS: Record<string, unknown[]> = {
+  user_roles: [{ role: "org_manager", scope_type: "org", scope_id: ORG }],
+  organizations: [{ id: ORG, name: "Org" }],
+};
 const client = () => {
-  const chain: Record<string, unknown> = {
-    then: (resolve: (r: unknown) => unknown) =>
-      Promise.resolve({ data: [{ role: "org_manager", scope_type: "org", scope_id: ORG }], error: null }).then(resolve),
+  const chainFor = (table: string) => {
+    const chain: Record<string, unknown> = {
+      then: (resolve: (r: unknown) => unknown) => Promise.resolve({ data: ROWS[table] ?? [], error: null }).then(resolve),
+    };
+    for (const op of ["select", "eq", "returns", "order"]) chain[op] = () => chain;
+    return chain;
   };
-  for (const op of ["select", "eq", "returns", "order"]) chain[op] = () => chain;
   const made = {
     auth: {
       getUser: async () => {
@@ -26,7 +42,7 @@ const client = () => {
         return { data: { user: { id: "e7100000-0000-4000-8003-0000000000aa", email: "m@test.local" } } };
       },
     },
-    from: () => chain,
+    from: (table: string) => chainFor(table),
   };
   recordCaller(made, caller);
   return made;
@@ -34,6 +50,13 @@ const client = () => {
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => client() }));
 const surfaceSnapshot = vi.fn();
 vi.mock("@/lib/gui/host/server/snapshot", () => ({ surfaceSnapshot: () => surfaceSnapshot() }));
+// The plugin gate answers on for every plugin, so a view's own gate never
+// refuses: any refusal below is the agent's.
+const checkGate = vi.fn();
+vi.mock("@/lib/runtime/gate", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/runtime/gate")>()),
+  checkGate: (...args: unknown[]) => checkGate(...args),
+}));
 
 import { GET as catalog } from "../catalog/route";
 import { GET as manifest } from "../manifest/route";
@@ -46,11 +69,34 @@ const AGENT: Caller = { kind: "agent", clientId: "e7100000-0000-4000-8fff-000000
 const OPERATOR: Caller = { kind: "operator", clientId: "e7100000-0000-4000-8fff-0000000000c2" };
 const at = (path: string, init?: { method: string; body: string }) => new NextRequest(`http://localhost${path}`, init);
 
+/** A metrics view of the metering plugin on `path`, marked for an assistant when `agent` is "read". */
+function viewOn(id: string, path: string, agent?: "read") {
+  return {
+    plugin: "metering",
+    def: {
+      id,
+      path,
+      kind: "metrics",
+      params: {},
+      cost: "db",
+      declares: { keys: ["soc"] },
+      examples: [{ title: `${id} example` }],
+      ...(agent ? { agent } : {}),
+      load: vi.fn(async () => ({ ok: true, model: { title: "Today", actions: [], body: { tiles: [] } } })),
+    },
+  };
+}
+const unmarked = viewOn("metering.unmarked", "/billing");
+const marked = viewOn("metering.marked", "/organizations", "read");
+
 beforeEach(() => {
   caller = AGENT;
   getUserCalls = 0;
+  checkGate.mockReset().mockResolvedValue({ ok: true, organizationId: ORG });
+  unmarked.def.load.mockClear();
+  marked.def.load.mockClear();
   surfaceSnapshot.mockReset().mockResolvedValue({
-    views: [],
+    views: [unmarked, marked],
     actions: new Map(),
     nav: [],
     signals: [],
@@ -82,10 +128,32 @@ describe("the GUI host's routes and an agent client", () => {
     expect(surfaceSnapshot).not.toHaveBeenCalled();
   });
 
-  it("lets it into the view route, which answers a view it may not read as a page that does not exist", async () => {
-    const res = await view(at("/api/gui/view?href=%2Fbilling"));
+  it("lets it into the view route, which answers a view not marked for an assistant as a page that does not exist", async () => {
+    const res = await view(at(`/api/gui/view?href=${encodeURIComponent(`/billing?org=${ORG}`)}`));
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ code: "gui_not_found" });
+    expect(unmarked.def.load).not.toHaveBeenCalled();
+    expect(checkGate).not.toHaveBeenCalled();
+  });
+
+  it("refuses it a marked view at the assistant gate, which refuses while no assistant plugin is installed, before the view's gate or loader", async () => {
+    const res = await view(at(`/api/gui/view?href=${encodeURIComponent(`/organizations?org=${ORG}`)}`));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ok: false, status: 409, code: "assistant_disabled" });
+    expect(marked.def.load).not.toHaveBeenCalled();
+    expect(checkGate).not.toHaveBeenCalled();
+  });
+
+  it("loads the same views for an operator client, which holds the person's access", async () => {
+    caller = OPERATOR;
+    for (const [href, def] of [
+      [`/billing?org=${ORG}`, unmarked.def],
+      [`/organizations?org=${ORG}`, marked.def],
+    ] as const) {
+      const res = await view(at(`/api/gui/view?href=${encodeURIComponent(href)}`));
+      expect(res.status, href).toBe(200);
+      expect(def.load).toHaveBeenCalledOnce();
+    }
   });
 
   it("does not refuse an operator client, which holds the person's access", async () => {

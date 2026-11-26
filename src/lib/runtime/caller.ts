@@ -117,18 +117,24 @@ export function claimsOfToken(token: string): Record<string, unknown> | null {
  */
 const CALLERS = new WeakMap<object, Caller>();
 
-/** Records who `client` acts for. createClient (@/lib/supabase/server) calls it for every client it makes. */
+/**
+ * Records who `client` acts for. createClient (@/lib/supabase/server) calls
+ * it, through bearerClientFor, for each client it builds on a bearer token;
+ * a cookie client is not recorded and reads as a browser session through
+ * callerOf's fallback.
+ */
 export function recordCaller(client: object, caller: Caller): void {
   CALLERS.set(client, caller);
 }
 
 /**
- * Who `client` acts for. A client createClient did not make (the service
- * role, a test's stub) reads as a browser session: the kind restricts only
- * clients, and every client token reaches MGM's code through createClient,
- * the one place that builds a client from a bearer token (a guard test in
- * ./__tests__/request-session.test.ts holds that). If another place starts
- * building one, it must record its caller here.
+ * Who `client` acts for. A client not built on a bearer token (createClient's
+ * cookie client, the service role, a test's stub) reads as a browser
+ * session: the kind restricts only clients, and every client token reaches
+ * MGM's code through createClient, the one place that builds a client from
+ * a bearer token. A guard test in ./__tests__/request-session.test.ts pins
+ * the files that may build a Supabase client at all; if another place
+ * starts building one on a bearer token, it must record its caller here.
  */
 export function callerOf(client: object): Caller {
   return CALLERS.get(client) ?? BROWSER;
