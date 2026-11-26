@@ -18,6 +18,8 @@
  *       consumption meter, without the online hint and without calling the
  *       saved meter unclassified
  *   (c) a discovery whose consumption meters are all saved says the same
+ *   (d) and still names the unsaved devices of other types found beside
+ *       them, with the hint to change a device's type
  *
  * The rest of this component is covered through the wizard in
  * TenantWizard.test.tsx § (k).
@@ -254,5 +256,41 @@ describe("DiscoverMeterInline — a meter saved from the picker", () => {
     await waitFor(() => expect(screen.getByText(/No new consumption meters on this edge/i)).toBeDefined());
     expect(screen.queryByText(/not classified as a consumption meter/i)).toBeNull();
     expect(screen.queryByText(/Make sure the edge is online/i)).toBeNull();
+  });
+
+  it("(d) still names the unsaved devices of other types when every consumption meter is saved", async () => {
+    const unsaved = (componentId: string, alias: string): DiscoveredDevice => ({
+      componentId,
+      factoryId: "Meter.Chint.DDSU666",
+      alias,
+      nature: "io.openems.edge.meter.api.ElectricityMeter",
+      openemsChannelAddress: null,
+      suggestedDeviceType: "other",
+      alreadyAdded: false,
+    });
+    respond({
+      edgeId: "edge1",
+      online: true,
+      devices: [
+        { ...meter("meter9"), alreadyAdded: true },
+        unsaved("meter10", "Workshop Meter"),
+        { ...meter("ess0"), alias: "Saved battery", suggestedDeviceType: "battery", alreadyAdded: true },
+      ],
+    });
+    renderPicker();
+
+    fireEvent.click(screen.getByRole("button", { name: /Discover meters/i }));
+
+    await waitFor(() => expect(screen.getByText(/No new consumption meters on this edge/i)).toBeDefined());
+    expect(screen.queryAllByRole("radio")).toHaveLength(0);
+    expect(screen.queryByText(/Make sure the edge is online/i)).toBeNull();
+    // The unsaved device of another type is named, with its type and the hint.
+    expect(screen.getByText(/Also found 1 device not classified as a consumption meter/i)).toBeDefined();
+    expect(screen.getByText(/Workshop Meter/)).toBeDefined();
+    expect(screen.getByText(/— Other/)).toBeDefined();
+    expect(screen.getByText(/change its type to Consumption meter/i)).toBeDefined();
+    // Saved devices are on the edge's device list already: neither is named.
+    expect(screen.queryByText(/House meter9/)).toBeNull();
+    expect(screen.queryByText(/Saved battery/)).toBeNull();
   });
 });

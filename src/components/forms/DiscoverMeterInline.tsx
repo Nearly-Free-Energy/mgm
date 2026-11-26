@@ -94,6 +94,31 @@ function pickDefaultEdgeId(
   return firstWithout?.id ?? sortedEdges[0].id;
 }
 
+/**
+ * Devices discovery did not classify as consumption meters, each with its
+ * type, and how to offer one of them here.
+ */
+function UnofferedDevices({ devices }: { devices: DiscoveredDevice[] }) {
+  return (
+    <>
+      <ul className="mt-2 space-y-1">
+        {devices.map((d) => (
+          <li key={d.componentId} className="font-mono text-xs">
+            {d.alias || d.componentId}
+            <span className="ml-2 font-sans text-muted-foreground">
+              — {humanReadable(d.suggestedDeviceType)}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2">
+        If one of these meters a tenant, open it on the edge&apos;s device
+        list and change its type to Consumption meter.
+      </p>
+    </>
+  );
+}
+
 export function DiscoverMeterInline({
   edges,
   edgeIdsWithoutConsumptionMeter,
@@ -138,6 +163,19 @@ export function DiscoverMeterInline({
     () =>
       discovered.filter(
         (d) => d.suggestedDeviceType === OFFERED_TYPE && d.alreadyAdded !== true
+      ),
+    [discovered]
+  );
+
+  // Unsaved devices discovery did not classify as consumption meters. When
+  // no new consumption meter is offered, these are named with the hint to
+  // change a device's type, since one of them may meter a tenant. A saved
+  // device is left out: its type was chosen when it was saved, while an
+  // unsaved one carries only discovery's guess.
+  const unofferedUnsaved = React.useMemo(
+    () =>
+      discovered.filter(
+        (d) => d.suggestedDeviceType !== OFFERED_TYPE && d.alreadyAdded !== true
       ),
     [discovered]
   );
@@ -408,16 +446,30 @@ export function DiscoverMeterInline({
           meter that is already saved (one saved from this list included) is
           not unclassified: when every consumption meter found is saved, there
           is simply no new one, and the edge is reachable and configured, so
-          the hint stays out. */}
+          the hint stays out. Unsaved devices of other types found beside
+          them are still named, with the hint to change a device's type, as
+          the second branch names them. */}
       {showResults && edgeOnline && candidates.length === 0 && (
         discovered.length === 0 ||
         discovered.some((d) => d.suggestedDeviceType === OFFERED_TYPE) ? (
-          <p className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">
-            No new consumption meters on this edge.
-            {discovered.length === 0 &&
-              skipped.length === 0 &&
-              " Make sure the edge is online and has components configured."}
-          </p>
+          <div className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">
+            <p>
+              No new consumption meters on this edge.
+              {discovered.length === 0 &&
+                skipped.length === 0 &&
+                " Make sure the edge is online and has components configured."}
+            </p>
+            {unofferedUnsaved.length > 0 && (
+              <>
+                <p className="mt-2 text-foreground">
+                  Also found {unofferedUnsaved.length}{" "}
+                  {unofferedUnsaved.length === 1 ? "device" : "devices"} not
+                  classified as a consumption meter:
+                </p>
+                <UnofferedDevices devices={unofferedUnsaved} />
+              </>
+            )}
+          </div>
         ) : (
           <div className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">
             <p className="text-foreground">
@@ -427,20 +479,7 @@ export function DiscoverMeterInline({
               a consumption meter, so {discovered.length === 1 ? "it" : "none"}{" "}
               can bill a tenant.
             </p>
-            <ul className="mt-2 space-y-1">
-              {discovered.map((d) => (
-                <li key={d.componentId} className="font-mono text-xs">
-                  {d.alias || d.componentId}
-                  <span className="ml-2 font-sans text-muted-foreground">
-                    — {humanReadable(d.suggestedDeviceType)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2">
-              If one of these meters a tenant, open it on the edge&apos;s
-              device list and change its type to Consumption meter.
-            </p>
+            <UnofferedDevices devices={discovered} />
           </div>
         )
       )}
