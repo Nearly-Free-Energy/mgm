@@ -4,10 +4,18 @@ import {
   composeCommunityManagement,
   type CommunityManagementError,
 } from "@/lib/community-management";
+import { RevokeTenantAccessBody } from "@/lib/community-management/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 /**
  * DELETE /api/tenants/[id]/access/[accessId] — remove one person's access
- * to a unit's tenant pages (RFC mgm#197 § 6), from the tenant record.
+ * to a unit's tenant pages (RFC mgm#197 § 6), from the tenant record, as
+ * `community.revoke-tenant-access`.
+ *
+ * The body is optional: the tenant page sends none, and the GUI host sends
+ * RevokeTenantAccessBody's `confirmation`, a ceremony's with nothing ticked
+ * or typed, so there is nothing in it to check. A body that is not
+ * RevokeTenantAccessBody answers 400 `invalid_body`.
  *
  * The unit and its organization are read with the caller's own client as
  * POST /api/tenants/[id]/access reads them, then
@@ -48,7 +56,7 @@ const tenantNotFound = () =>
   NextResponse.json({ error: "Tenant not found", code: "tenant_not_found" }, { status: 404 });
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string; accessId: string }> }
 ): Promise<NextResponse> {
   const { id, accessId } = await params;
@@ -57,6 +65,10 @@ export async function DELETE(
   }
   if (!UUID_RE.test(accessId)) {
     return NextResponse.json({ error: "Invalid access ID — expected UUID" }, { status: 400 });
+  }
+  if ((await request.clone().text()).trim() !== "") {
+    const parsed = await parseJsonBody(request, RevokeTenantAccessBody);
+    if (!parsed.ok) return parsed.response;
   }
 
   const supabase = await createClient();

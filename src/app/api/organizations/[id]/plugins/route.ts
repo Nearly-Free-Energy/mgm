@@ -34,7 +34,8 @@ function mapError(error: unknown): NextResponse {
  * Returns definitions merged with organization state, dependency readiness,
  * and recent audit history. A missing state row reads as the plugin's
  * default (`defaultEnabled` in bundled.ts): enabled, so existing deployments
- * need no backfill, except for the tenant app, which is off until turned on.
+ * need no backfill, except for the tenant app and the operations plugin,
+ * which are off until turned on.
  */
 export async function GET(
   _request: NextRequest,

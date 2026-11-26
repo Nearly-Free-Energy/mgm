@@ -9,9 +9,11 @@
  * confirmation need besides that: the review's shape, the label of each
  * acknowledgement and the period's name, which the person types.
  *
- * Client-safe: imports only zod.
+ * Client-safe: imports only zod and the typed-name check
+ * (src/lib/validation/typed-name.ts), which imports nothing.
  */
 import { z } from "zod";
+import { typedNameMatches } from "@/lib/validation/typed-name";
 
 /**
  * The label a person ticks for each acknowledgement the database can
@@ -184,12 +186,8 @@ export function periodName(startDate: string, endDate: string): string | null {
   return `${s.d} ${month(s.m)} ${s.y} to ${e.d} ${month(e.m)} ${e.y}`;
 }
 
-const normalise = (s: string) => s.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
-
 /** Whether what the person typed is the period's name, ignoring case and spacing. */
-export function typedNameMatches(typed: string | undefined, name: string): boolean {
-  return typed !== undefined && normalise(typed) === normalise(name);
-}
+export { typedNameMatches };
 
 /** The required acknowledgements the person did not tick, in the review's order. */
 export function missingAcknowledgements(review: CloseReview, acknowledged: readonly string[]): CloseAcknowledgementId[] {

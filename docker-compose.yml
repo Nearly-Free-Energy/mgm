@@ -15,7 +15,7 @@ services:
       retries: 10
 
   gotrue:
-    image: supabase/gotrue:v2.187.0
+    image: supabase/gotrue:v2.198.0
     depends_on:
       postgres: { condition: service_healthy }
     environment:

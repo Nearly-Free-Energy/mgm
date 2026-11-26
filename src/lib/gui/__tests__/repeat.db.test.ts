@@ -34,6 +34,9 @@ vi.mock("@/lib/supabase/server", () => ({
     return session.caller.client;
   },
 }));
+// The community management routes refresh pages they change, which needs a
+// Next.js request; sent here as plain handlers, there is none.
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import type { MgmPluginName } from "@/lib/plugins/bundled";
 import { getMgmRuntime, resetMgmRuntimeForTests } from "@/lib/runtime/root";
@@ -44,11 +47,13 @@ import {
   shouldSkip,
 } from "@/lib/supabase/__tests__/rls.helpers";
 import { BILLING_CASES } from "./repeat/billing";
+import { COMMUNITY_MANAGEMENT_CASES } from "./repeat/community-management";
 import { absentIgnores, handlerFor, send, snapshot, without, type CaseModule, type Fixture } from "./repeat/harness";
 import { PAYMENTS_CASES } from "./repeat/payments";
 
 /** One module per plugin with "safe" actions. A plugin's first "safe" action adds its module here. */
 const MODULES: Partial<Record<MgmPluginName, CaseModule>> = {
+  "community-management": COMMUNITY_MANAGEMENT_CASES,
   billing: BILLING_CASES,
   payments: PAYMENTS_CASES,
 };
@@ -137,6 +142,14 @@ describe.skipIf(shouldSkip())("each safe action sent twice (live database)", () 
     vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", await mintServiceRoleJwt());
     vi.stubEnv("MGM_PUBLIC_SUPABASE_URL", LOCAL_SUPABASE_URL);
     vi.stubEnv("SUPABASE_INTERNAL_URL", "");
+    // No deployment sender (src/lib/config/mail-sender.ts reads these per
+    // call), so a notice a route sends, such as community management's grant,
+    // finds no sender here whatever the environment sets, and no mail leaves
+    // the test: the fetch guard below cannot see SMTP. The fixtures save no
+    // organization sender. If sendNotice comes to read another sender,
+    // revisit.
+    vi.stubEnv("MGM_SMTP_URL", "");
+    vi.stubEnv("MGM_MAIL_FROM", "");
     fetchSpy = vi.spyOn(globalThis, "fetch");
     const runtime = await getMgmRuntime();
     for (const [plugin, module] of modules) {
@@ -169,6 +182,7 @@ describe.skipIf(shouldSkip())("each safe action sent twice (live database)", () 
     const before = await snapshot(fixture.orgId);
     const first = await send(handler, def, c.params, body);
     expect(first.status, first.text).toBe(c.first);
+    if (c.firstAnswer) expect(JSON.parse(first.text), "the first answer").toMatchObject(c.firstAnswer);
     const once = await snapshot(fixture.orgId);
     // Compared as the second send is, so a first send that moved only an
     // ignored column does not count as having written.

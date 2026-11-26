@@ -1,7 +1,9 @@
 /**
  * DELETE /api/communities/[id] + GET delete-preview route tests (#89).
  *
- * Covers: 400 invalid UUID, 403 unauthorized, 404 not found, 204 happy.
+ * Covers: 400 invalid UUID, 403 unauthorized, 404 not found, 204 happy,
+ * and the typed name every delete must carry: 428 with no confirmation (no
+ * body, `{}`, or a confirmation with nothing typed) or the wrong name.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -90,9 +92,12 @@ function configureEntityLookup(
 
 const VALID_UUID = "550e8400-e29b-41d4-a716-446655440000";
 
-function makeDelete(id: string): NextRequest {
+/** A DELETE with the community's name typed, as its page and the GUI host send it. */
+function makeDelete(id: string, typed = "Kisakye"): NextRequest {
   return new NextRequest(`http://localhost/api/communities/${id}`, {
     method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ confirmation: { acknowledged: [], typed } }),
   });
 }
 
@@ -237,5 +242,83 @@ describe("GET /api/communities/[id]/delete-preview", () => {
     expect((await res.json()).error).toBe(
       "This community has 1 closed billing period and 1 billing period with recorded payments. Closed billing and billing with recorded payments are kept, so this community cannot be deleted."
     );
+  });
+});
+
+describe("DELETE /api/communities/[id] with the GUI host's typed confirmation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    canAccessReturn = true;
+    pluginEnabled = true;
+    getUserReturn = { user: { id: "user-1" } };
+    configureEntityLookup({ data: { id: VALID_UUID, name: "Kisakye East", org_id: "org-1" }, error: null });
+  });
+
+  const withBody = (body: string) =>
+    new NextRequest(`http://localhost/api/communities/${VALID_UUID}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+  const confirmed = (typed: string) => withBody(JSON.stringify({ confirmation: { acknowledged: [], typed } }));
+
+  it("deletes when the name typed is the community's, ignoring case and spacing", async () => {
+    mockRpcImpl.mockResolvedValueOnce({ data: 1, error: null });
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const { DELETE } = await import("../[id]/route");
+    const res = await DELETE(confirmed("  kisakye   EAST "), { params: Promise.resolve({ id: VALID_UUID }) });
+    expect(res.status).toBe(204);
+    expect(mockRpcImpl).toHaveBeenCalledWith("fn_entity_delete_community", { p_id: VALID_UUID });
+    infoSpy.mockRestore();
+  });
+
+  it("answers 428 and deletes nothing when the name typed is another, or none was typed", async () => {
+    const { DELETE } = await import("../[id]/route");
+    for (const request of [confirmed("Kisakye"), withBody(JSON.stringify({ confirmation: { acknowledged: [] } }))]) {
+      const res = await DELETE(request, { params: Promise.resolve({ id: VALID_UUID }) });
+      expect(res.status).toBe(428);
+      expect(await res.json()).toEqual({
+        error: "Type the community's name, Kisakye East, to delete it.",
+        code: "community_delete_name_mismatch",
+        field: "confirmation",
+      });
+    }
+    expect(mockRpcImpl).not.toHaveBeenCalled();
+  });
+
+  it("deletes a community whose name is longer than 200 characters, typed in full", async () => {
+    const name = `Kisakye ${"East ".repeat(60)}`.trim();
+    configureEntityLookup({ data: { id: VALID_UUID, name, org_id: "org-1" }, error: null });
+    mockRpcImpl.mockResolvedValueOnce({ data: 1, error: null });
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const { DELETE } = await import("../[id]/route");
+    const res = await DELETE(confirmed(name), { params: Promise.resolve({ id: VALID_UUID }) });
+    expect(name.length).toBeGreaterThan(200);
+    expect(res.status).toBe(204);
+    infoSpy.mockRestore();
+  });
+
+  it("answers 428 and deletes nothing without a confirmation, whether the body is empty or {}", async () => {
+    const { DELETE } = await import("../[id]/route");
+    const bare = new NextRequest(`http://localhost/api/communities/${VALID_UUID}`, { method: "DELETE" });
+    for (const request of [bare, withBody(""), withBody("{}")]) {
+      const res = await DELETE(request, { params: Promise.resolve({ id: VALID_UUID }) });
+      expect(res.status).toBe(428);
+      expect(await res.json()).toEqual({
+        error: "Type the community's name, Kisakye East, to delete it.",
+        code: "community_delete_confirmation_required",
+      });
+    }
+    expect(mockRpcImpl).not.toHaveBeenCalled();
+  });
+
+  it("answers 400 invalid_body for a body that is not a confirmation, and deletes nothing", async () => {
+    const { DELETE } = await import("../[id]/route");
+    for (const body of ["{not json", JSON.stringify({ name: "Kisakye East" })]) {
+      const res = await DELETE(withBody(body), { params: Promise.resolve({ id: VALID_UUID }) });
+      expect(res.status).toBe(400);
+      expect((await res.json()).code).toBe("invalid_body");
+    }
+    expect(mockRpcImpl).not.toHaveBeenCalled();
   });
 });

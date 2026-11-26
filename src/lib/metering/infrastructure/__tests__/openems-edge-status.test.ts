@@ -13,16 +13,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getMicrogridEmsConfig = vi.fn();
 const getEdgesStatus = vi.fn();
+const queryHistoricSamples = vi.fn();
 vi.mock("@/lib/openems/config", () => ({ getMicrogridEmsConfig: (...a: unknown[]) => getMicrogridEmsConfig(...a) }));
 vi.mock("@/lib/openems", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/openems")>();
-  return { ...actual, createOpenEmsClient: () => ({ getEdgesStatus: (...a: unknown[]) => getEdgesStatus(...a) }) };
+  return {
+    ...actual,
+    createOpenEmsClient: () => ({
+      getEdgesStatus: (...a: unknown[]) => getEdgesStatus(...a),
+      queryHistoricSamples: (...a: unknown[]) => queryHistoricSamples(...a),
+    }),
+  };
 });
 
 import { OpenEmsError } from "@/lib/openems";
 import type { MeteringComposition } from "../../compose";
 import { EDGE_STATUS_CONCURRENCY, EDGE_STATUS_FRESH_MS, _resetEdgeStatusCacheForTests, type EdgeStatusRead } from "../edge-status-cache";
-import { createEdgeStatusReader, openEmsEdgeStatusRead, readingOrder } from "../openems-edge-status";
+import { createEdgeStatusReader, meterOutcome, openEmsEdgeStatusRead, readingOrder } from "../openems-edge-status";
 
 const ORG = "e7f40000-0000-4000-8000-000000000001";
 const supabase = { marker: "person's client" } as unknown as SupabaseClient;
@@ -33,6 +40,7 @@ beforeEach(() => {
   _resetEdgeStatusCacheForTests();
   getMicrogridEmsConfig.mockReset();
   getEdgesStatus.mockReset();
+  queryHistoricSamples.mockReset();
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -57,7 +65,57 @@ describe("openEmsEdgeStatusRead", () => {
   });
 });
 
+describe("meterOutcome", () => {
+  const status = { state: "read" as const, total: 2, offline: 1, online: ["edge0"], readAt: Date.parse("2026-11-25T09:00:00Z") };
+  const meters = [
+    { edgeId: "edge0", componentId: "meter0" },
+    { edgeId: "edge0", componentId: "meter1" },
+    { edgeId: "edge1", componentId: "meter2" },
+  ];
+
+  it("counts only the meters on online edges, and quiet ones among them", () => {
+    expect(meterOutcome(meters, status, { state: "read", quiet: [meters[1], meters[2]], failedEdges: [], readAt: status.readAt })).toEqual({ state: "read", total: 2, quiet: 1, readAt: "2026-11-25T09:00:00.000Z" });
+  });
+
+  it("gives no outcome when no meter is on an online edge, and passes on failed and late", () => {
+    expect(meterOutcome([meters[2]], status, { state: "read", quiet: [meters[2]], failedEdges: [], readAt: status.readAt })).toBeUndefined();
+    expect(meterOutcome(meters, status, { state: "failed", readAt: status.readAt })).toEqual({ state: "failed", readAt: "2026-11-25T09:00:00.000Z" });
+    expect(meterOutcome(meters, status, { state: "late" })).toEqual({ state: "late" });
+  });
+
+  it("fails only for a failed edge that is online; one the backend does not know is already offline", () => {
+    const answer = (failedEdges: string[]) => ({ state: "read" as const, quiet: [], failedEdges, readAt: status.readAt });
+    expect(meterOutcome(meters, status, answer(["edge1"]))).toEqual({ state: "read", total: 2, quiet: 0, readAt: "2026-11-25T09:00:00.000Z" });
+    expect(meterOutcome(meters, status, answer(["edge0"]))).toEqual({ state: "failed", readAt: "2026-11-25T09:00:00.000Z" });
+  });
+});
+
 describe("createEdgeStatusReader", () => {
+  it("reads a microgrid's status and meters side by side, from one stored configuration", async () => {
+    getMicrogridEmsConfig.mockResolvedValue({ type: "direct_url", url: "https://ems.example.test/rest" });
+    let statusStarted = false;
+    let meterStartedBeforeStatusAnswered = false;
+    let answerStatus: (v: EdgeStatusRead) => void = () => {};
+    getEdgesStatus.mockImplementation(() => {
+      statusStarted = true;
+      return new Promise<EdgeStatusRead>((resolve) => (answerStatus = resolve));
+    });
+    queryHistoricSamples.mockImplementation(async (_e: string, channels: string[]) => {
+      meterStartedBeforeStatusAnswered = statusStarted;
+      answerStatus([{ edgeId: "edge0", online: true }]);
+      return { timestamps: [new Date().toISOString()], data: { [channels[0]]: [null] } };
+    });
+    const out = await createEdgeStatusReader(composition, supabase).getEdgeStatuses(
+      [{ microgridId: "mg", edgeIds: ["edge0"], meters: [{ edgeId: "edge0", componentId: "meter0" }] }],
+      later(),
+    );
+    expect(meterStartedBeforeStatusAnswered).toBe(true);
+    expect(getMicrogridEmsConfig).toHaveBeenCalledTimes(1);
+    expect(out).toEqual([
+      { microgridId: "mg", state: "read", total: 1, offline: 0, readAt: expect.any(String), meters: { state: "read", total: 1, quiet: 1, readAt: expect.any(String) } },
+    ]);
+  });
+
   it("answers each microgrid in order: read, or failed without the backend's text", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     getMicrogridEmsConfig.mockImplementation(async (_c: unknown, id: string) => {
@@ -67,8 +125,8 @@ describe("createEdgeStatusReader", () => {
     getEdgesStatus.mockResolvedValue([{ edgeId: "edge0", online: false }, { edgeId: "edge1", online: true }]);
     const out = await createEdgeStatusReader(composition, supabase).getEdgeStatuses(
       [
-        { microgridId: "good", edgeIds: ["edge0", "edge1"] },
-        { microgridId: "bad", edgeIds: ["edge0"] },
+        { microgridId: "good", edgeIds: ["edge0", "edge1"], meters: [] },
+        { microgridId: "bad", edgeIds: ["edge0"], meters: [] },
       ],
       later(),
     );
@@ -93,7 +151,7 @@ describe("createEdgeStatusReader", () => {
       running--;
       return [];
     });
-    const sites = (prefix: string) => Array.from({ length: EDGE_STATUS_CONCURRENCY + 2 }, (_, i) => ({ microgridId: `${prefix}${i}`, edgeIds: ["edge0"] }));
+    const sites = (prefix: string) => Array.from({ length: EDGE_STATUS_CONCURRENCY + 2 }, (_, i) => ({ microgridId: `${prefix}${i}`, edgeIds: ["edge0"], meters: [] }));
     const a = createEdgeStatusReader(composition, supabase, { read }).getEdgeStatuses(sites("a"), later());
     const b = createEdgeStatusReader(composition, supabase, { read }).getEdgeStatuses(sites("b"), later());
     let started = 0;
@@ -118,7 +176,7 @@ describe("createEdgeStatusReader", () => {
         return [{ edgeId: "edge0", online: true }];
       });
       const n = EDGE_STATUS_CONCURRENCY;
-      const sites = Array.from({ length: n * 3 }, (_, i) => ({ microgridId: `mg${String(i).padStart(2, "0")}`, edgeIds: ["edge0"] }));
+      const sites = Array.from({ length: n * 3 }, (_, i) => ({ microgridId: `mg${String(i).padStart(2, "0")}`, edgeIds: ["edge0"], meters: [] }));
       const ids = (list: readonly { microgridId: string }[]) => list.map((s) => s.microgridId);
       const reader = createEdgeStatusReader(composition, supabase, { read });
 
@@ -152,7 +210,7 @@ describe("createEdgeStatusReader", () => {
   it("answers late, with no read, a microgrid asked about after the deadline", async () => {
     const backend = vi.fn(async (): Promise<EdgeStatusRead> => []);
     const out = await createEdgeStatusReader(composition, supabase, { read: () => backend }).getEdgeStatuses(
-      [{ microgridId: "mg", edgeIds: ["edge0"] }],
+      [{ microgridId: "mg", edgeIds: ["edge0"], meters: [] }],
       Date.now() - 1,
     );
     expect(out).toEqual([{ microgridId: "mg", state: "late" }]);

@@ -65,6 +65,7 @@ export default defineConfig({
             "src/lib/tenant-app/__tests__/usage.db.test.ts",
             "src/lib/supabase/__tests__/meter_readings_insert_only.test.ts",
             "src/lib/supabase/__tests__/openems_id_format.test.ts",
+            "src/lib/community-management/__tests__/actions.db.test.ts",
             // Component tests of the interface kit and host run in the
             // "gui" project below, in jsdom. Without this line each would
             // also run here, in node, and fail.
@@ -134,6 +135,7 @@ export default defineConfig({
             "src/lib/tenant-app/__tests__/usage.db.test.ts",
             "src/lib/supabase/__tests__/meter_readings_insert_only.test.ts",
             "src/lib/supabase/__tests__/openems_id_format.test.ts",
+            "src/lib/community-management/__tests__/actions.db.test.ts",
             "src/app/api/users/[id]/resend-invite/__tests__/rls-route.test.ts",
             "src/app/api/users/invite/__tests__/rls-route.test.ts",
             "src/app/api/gui/view/__tests__/site-day.db.test.ts",

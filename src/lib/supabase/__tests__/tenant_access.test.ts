@@ -94,6 +94,7 @@ import {
 import { countEntityDescendants } from "@/lib/entity-descendants";
 import {
   MGM_BUNDLED_PLUGINS,
+  OPERATIONS_PLUGIN_NAME,
   TENANT_APP_PLUGIN_NAME,
   TENANT_APP_PLUGIN_VERSION,
   isEnabledByDefault,
@@ -933,7 +934,7 @@ desc("the tenant-app plugin's state", () => {
 
   // default-off-plugins.test.ts compares the migration text with the
   // catalog; this asks the database itself.
-  it("answers each bundled plugin's catalog default when the organization has no row: tenant-app off, the rest on", async () => {
+  it("answers each bundled plugin's catalog default when the organization has no row: tenant-app and operations off, the rest on", async () => {
     const svc = await serviceClient();
     const rows = await svc.from("mgm_plugins").select("plugin_name").eq("org_id", F.otherOrg);
     expect(rows.data).toEqual([]);
@@ -943,7 +944,8 @@ desc("the tenant-app plugin's state", () => {
       Object.fromEntries(MGM_BUNDLED_PLUGINS.map((plugin) => [plugin.name, isEnabledByDefault(plugin)])),
     );
     expect(answers[TENANT_APP_PLUGIN_NAME]).toBe(false);
-    expect(Object.values(answers).filter((on) => !on)).toHaveLength(1);
+    expect(answers[OPERATIONS_PLUGIN_NAME]).toBe(false);
+    expect(Object.values(answers).filter((on) => !on)).toHaveLength(2);
   });
 
   it("is off for the tenant's organization until its manager turns it on; the tenant cannot", async () => {

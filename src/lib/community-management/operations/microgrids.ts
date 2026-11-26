@@ -22,6 +22,7 @@ import {
 } from "./shared";
 import {
   communityFailure,
+  type CommunityManagementError,
   type CommunityManagementRepository,
   type CommunityManagementResult,
   type MicrogridCreateInput,
@@ -268,6 +269,54 @@ export async function createMicrogridOperation(
   return { ok: true, data };
 }
 
+/**
+ * The refusal of a currency change on a microgrid that has a closed billing
+ * period, or null when the change may go ahead. Bills and billing periods
+ * store no currency (billing_line_items and billing_periods have no
+ * currency column), so every bill and invoice of the microgrid, closed ones
+ * included, is shown in the microgrid's currency: changing it would relabel
+ * the billing record. The same currency sent again changes nothing and
+ * passes. If bills come to store their currency, this can go.
+ *
+ * This is the route's check, not the database's: an org manager can still
+ * write the column through PostgREST, and a period closed between this read
+ * and the update is not seen. If the currency must never move under a
+ * closed period, the guard belongs in a trigger on microgrids, as the other
+ * column-level write restrictions are; then this becomes its friendly copy.
+ */
+async function currencyChangeRefusal(
+  repo: CommunityManagementRepository,
+  id: string,
+  currency: string
+): Promise<CommunityManagementError | null> {
+  const { data, error } = await repo.getMicrogridCurrencyUse(id);
+  if (error) {
+    return communityFailure({
+      status: 503,
+      code: "microgrid_currency_unchecked",
+      message: "Could not check this microgrid's billing periods. Retry the request.",
+    });
+  }
+  if (!data) {
+    return communityFailure({
+      status: 404,
+      code: "microgrid_not_found",
+      message: "Microgrid not found.",
+    });
+  }
+  if (data.currency === currency || data.closedPeriods === 0) return null;
+  const periods =
+    data.closedPeriods === 1
+      ? "1 closed billing period"
+      : `${data.closedPeriods} closed billing periods`;
+  return communityFailure({
+    status: 409,
+    code: "microgrid_currency_locked",
+    message: `The currency cannot change once a billing period is closed: this microgrid has ${periods}, and its bills are shown in ${data.currency}.`,
+    field: "currency",
+  });
+}
+
 export async function updateMicrogridOperation(
   repo: CommunityManagementRepository,
   scope: OrganizationScope | undefined,
@@ -291,6 +340,11 @@ export async function updateMicrogridOperation(
 
   const accessError = await requireScopedAccess(repo, scope, resolved.orgId);
   if (accessError) return accessError;
+
+  if (parsed.data.currency !== undefined) {
+    const refusal = await currencyChangeRefusal(repo, id, parsed.data.currency);
+    if (refusal) return refusal;
+  }
 
   const { data, error } = await repo.updateMicrogrid(id, parsed.data);
   if (error) {

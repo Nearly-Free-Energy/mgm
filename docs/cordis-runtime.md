@@ -326,6 +326,22 @@ key is a 400.
   organization but holds a unit, or whose rows are all tenant rows, gets no
   actions, since every action is a staff route.
 
+An entry's `confirm` is the level of the step the GUI host shows before it
+sends, and the host sends the confirmation that step asks for. The route
+stays the authority and checks that confirmation on every write (ADR-006,
+decision 10), so a client other than the host sends what its entry's level
+asks for too. The typed deletes refuse a request without it: billing's
+period delete answers 428 `billing_delete_confirmation_required`, and
+community management's three (`DELETE /api/communities/[id]`,
+`/api/microgrids/[id]` and `/api/tenants/[id]`) answer 428
+`*_delete_confirmation_required`, each naming the record to type; a
+confirmation with another name, or none typed, answers 428
+`*_delete_name_mismatch`. Nothing is deleted on either. The community
+page and the tenants list send the name their dialogs ask for; no page
+deletes a microgrid, which only the GUI host's typed step does. Community management's access removal is a
+ceremony with nothing to tick or type, so its route has nothing in it to
+check.
+
 An entry's `availability` lists each check that refused it in `reasons`,
 and each check not decided in `unchecked`, so `available: true` means only
 that nothing refused it:
@@ -385,13 +401,21 @@ successive loads rotate through an organization too large to read in one
 budget. A read still under way at the deadline is reported as not read for
 this load and finishes into the cache for the next; one that never got a
 slot leaves nothing behind. It returns at most 50 signals, offline gateways
-ahead of statuses that could not be read. An organization with no such
+ahead of quiet meters, and both ahead of what could not be read. An organization with no such
 microgrid composes nothing and calls no backend, so a local database and
 the browser smoke stay deterministic. A microgrid whose read fails or times
 out is reported as such, a signal about that site, and the watcher is
-unchecked only when the organization's own database reads fail. It reports
-offline gateways only; a meter that stopped reporting while its gateway is
-online needs per-component reads and is follow-up work. Each declares examples,
+unchecked only when the organization's own database reads fail. Beside
+each status read it makes a second cached read under the same rules and
+slots: each meter's `ActivePower` history at five-minute resolution, one
+request per edge (`src/lib/metering/infrastructure/meter-activity.ts`).
+Meters (consumption, grid and PV devices with a component id)
+on an online gateway with no reading for half an hour are one signal per
+microgrid, after the offline gateways; a meter read that failed is a signal
+that the meters could not be checked, and one with no answer by the
+deadline is left for the next load. Batteries, inverters and EV chargers
+are not asked about, since their power channel depends on the driver or
+the OpenEMS version. Each declares examples,
 which `contribute()` parses and `gui-surface.test.ts` holds to the plugin's
 own released pages. Severities follow fixed rules, listed in ADR-006
 decision 9; the installed app's badge counts only the `warn` and `critical`
@@ -410,12 +434,27 @@ lists the module that exports its contribution in `SURFACE_MODULES` there,
 as an `@/` specifier. That module's exports must reach every function the
 plugin registered.
 
+A route described after it shipped may keep the answers it gave bad bodies
+before: `parseJsonBody` (`src/lib/validation/parse-body.ts`) takes the
+route's own refusals (`BodyRefusals`), which replace its generic 400 for
+each issue the route answered itself. Community management's routes do
+(the `*_REFUSALS` in `src/lib/community-management/schemas.ts`, which its
+`schemas.test.ts` holds to the capability's own answers); a new route
+answers the generic 400. A path segment that names a plugin's own entity
+kind resolves through the `organizationOf` the plugin contributes.
+Community management's `community.tenant-access`, a tenant's access to its
+unit, is the first: an org manager cannot read the role row it names, so
+it resolves only beside the tenant whose access list holds it
+(`tenantAccessOrganization`).
+
 The reverse direction is checked by
 `src/lib/runtime/__tests__/described-writes.test.ts`: every write handler
 under `src/app/api` on a released path is named by an action, or listed in
 `UNDESCRIBED_WRITES` (`src/lib/runtime/__tests__/route-rules.ts`), either as
-permanent, with the reason the route is not a person's action, or as not yet
-described, with the issue in `DESCRIBING_ISSUES` that will describe it.
+permanent, with the reason the route is not a person's action (no person
+sends it, or it writes nothing: a `POST` that only reads, such as the OpenEMS
+connection test, is not an action), or as not yet described, with the issue
+in `DESCRIBING_ISSUES` that will describe it.
 Unlike the gate rule (§ "The gate"), it covers core plugins. It finds
 handlers with the TypeScript AST and checks that the gate rule's handler
 finder sees each of them.
@@ -601,9 +640,11 @@ composer's check, not the gate's.
 
 A missing `mgm_plugins` row means enabled, so existing organizations need no
 backfill, except for a plugin the catalog marks `defaultEnabled: false`, as
-it marks the tenant app: that plugin is off for an organization until an
-operator turns it on there (RFC mgm#197 § 3), so no organization's tenants
-get an app nobody switched on. `mgm_plugin_enabled_for_org` names those
+it marks the tenant app and the operations plugin: that plugin is off for an
+organization until an operator turns it on there, so no organization's
+tenants get an app nobody switched on (RFC mgm#197 § 3), and no
+organization's investigations share the installation-wide evidence budget
+without opting in (#133). `mgm_plugin_enabled_for_org` names those
 plugins in SQL, while Settings → Plugins reads `defaultEnabled`
 (`resolvePluginStatuses`, and `validatePluginToggle` for a plugin's
 dependents). `src/lib/plugins/__tests__/default-off-plugins.test.ts` reads
