@@ -96,7 +96,7 @@ describe("PluginsPageClient", () => {
     expect(html).toContain("tenants cannot open the tenant app");
     expect(html).not.toContain("fail closed");
   });
-  it("says nothing uses the operations plugin yet instead of the write-refusal note", () => {
+  it("says turning the operations plugin on or off changes nothing yet, instead of the write-refusal note", () => {
     const html = renderToStaticMarkup(
       (
         <PluginsPageClient
@@ -125,7 +125,7 @@ describe("PluginsPageClient", () => {
       ) as React.ReactElement
     );
 
-    expect(html).toContain("Nothing uses this plugin yet.");
+    expect(html).toContain("Turning it on or off changes nothing yet.");
     expect(html).not.toContain("fail closed");
     expect(html).not.toContain("keep existing records");
   });

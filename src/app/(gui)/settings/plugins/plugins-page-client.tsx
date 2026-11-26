@@ -33,11 +33,12 @@ function offNote(name: string): string {
   }
   if (name === OPERATIONS_PLUGIN_NAME) {
     // Nothing reads this plugin's state yet (OPERATIONS_PLUGIN in
-    // bundled.ts). When investigations ship, say what turning it off does,
-    // and promise nothing about kept records: their retention deletes
-    // expired investigations whatever the plugin's state (ADR-007
+    // bundled.ts, whose description already says nothing uses it, so this
+    // note does not repeat that). When investigations ship, say what turning
+    // it off does, and promise nothing about kept records: their retention
+    // deletes expired investigations whatever the plugin's state (ADR-007
     // decision 3).
-    return "Nothing uses this plugin yet.";
+    return "Turning it on or off changes nothing yet.";
   }
   return "Disabled plugins keep existing records; community, microgrid, and tenant writes fail closed until the plugin is re-enabled.";
 }
