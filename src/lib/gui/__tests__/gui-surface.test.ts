@@ -76,6 +76,7 @@ const APP = path.join(REPO, "src/app");
 
 /** Each plugin's module of action body schemas. Add a plugin's entry with its first action. */
 const SCHEMA_MODULES: Partial<Record<MgmPluginName, string>> = {
+  "organization-directory": "@/lib/organization-directory/schemas",
   "community-management": "@/lib/community-management/schemas",
   metering: "@/lib/metering/schemas",
   billing: "@/lib/billing/schemas",

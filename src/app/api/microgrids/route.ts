@@ -47,7 +47,7 @@ function mapError(error: CommunityManagementError): NextResponse {
  *   "A microgrid named '{name}' already exists in this community."
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const parsed = await parseJsonBody(request, CreateMicrogridBody, CREATE_MICROGRID_REFUSALS);
+  const parsed = await parseJsonBody(request, CreateMicrogridBody, { refusals: CREATE_MICROGRID_REFUSALS });
   if (!parsed.ok) return parsed.response;
   const body = parsed.data;
   const communityId = body.community_id;

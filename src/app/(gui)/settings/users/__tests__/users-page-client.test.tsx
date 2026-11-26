@@ -9,6 +9,8 @@
  *         - super_admin: always visible on Invited rows.
  *         - org_manager: only on org_manager rows in their orgs;
  *                        hidden on super_admin / cross-org / orphan rows.
+ *   - "Revoke access" in the Edit dialog: super admins only, never for
+ *     themselves.
  *   - Per-row "Sending…" state isolates correctly when two rows are
  *     clicked in sequence (the first row's in-flight state does not
  *     bleed into the second's button label).
@@ -159,6 +161,50 @@ describe("UsersPageClient — Resend visibility (org_manager)", () => {
     expect(
       rowOf(rows[3]!).queryByRole("button", { name: /^resend$/i })
     ).toBeNull();
+  });
+});
+
+// ── Revoke visibility ────────────────────────────────────────────────
+
+describe("UsersPageClient — Revoke visibility", () => {
+  // DELETE /api/users/[id] removes no colleague's row for an org manager
+  // (the user_roles SELECT policies show them only their own), so the page
+  // offers Revoke only where the route can act: a super admin, for anyone
+  // but themselves. org.remove-user's prepare refuses the same callers.
+  const colleague = makeRow({
+    user_id: "aaaaaaaa-3333-4000-8000-000000000001",
+    email: "colleague@example.com",
+    role: "org_manager",
+    scope_type: "org",
+    scope_id: ORG_A,
+    email_confirmed_at: "2026-04-23T00:00:00Z",
+  });
+  const self = makeRow({ user_id: CALLER, email: "me@example.com", email_confirmed_at: "2026-04-23T00:00:00Z" });
+
+  function openEdit(callerRole: "super_admin" | "org_manager", row: UserVisibleRow) {
+    render(
+      <UsersPageClient
+        rows={[row]}
+        orgs={[{ id: ORG_A, name: "Org A" }]}
+        callerRole={callerRole}
+        callerOrgIds={callerRole === "org_manager" ? [ORG_A] : []}
+        currentUserId={CALLER}
+      />
+    );
+    fireEvent.click(rowOf(row).getByRole("button", { name: /^edit$/i }));
+    return screen.queryByRole("button", { name: /^revoke access$/i });
+  }
+
+  it("hides Revoke from an org manager, even for a colleague in their own organization", () => {
+    expect(openEdit("org_manager", colleague)).toBeNull();
+  });
+
+  it("offers Revoke to a super admin for someone else", () => {
+    expect(openEdit("super_admin", colleague)).not.toBeNull();
+  });
+
+  it("hides Revoke from a super admin for themselves", () => {
+    expect(openEdit("super_admin", self)).toBeNull();
   });
 });
 

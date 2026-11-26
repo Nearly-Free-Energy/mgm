@@ -1,9 +1,19 @@
 import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { getServerSupabaseSettings } from "@/lib/config/public-runtime-config";
 import { cookieOptionsFor } from "@/lib/config/cookie-options";
+import { bearerClientFor } from "@/lib/runtime/request-session";
 
+/**
+ * The caller's own client for this request, under row-level security: a
+ * client on the request's bearer token when middleware accepted one (an
+ * `/api` request from the CLI, RFC #259 § 2), else the cookie session's.
+ * See bearerClientFor (@/lib/runtime/request-session) for the bearer side.
+ */
 export async function createClient() {
+  const bearer = bearerClientFor(await headers());
+  if (bearer) return bearer;
+
   const cookieStore = await cookies();
 
   // Request-time, validated (#46): server-only SUPABASE_INTERNAL_URL

@@ -31,6 +31,10 @@ const HOST_PAGES: Record<string, string> = {
   "/reset-password": "Redirects old reset links to /login, dropping their token (RFC #186).",
   "/accept-invite": "Redirects old invitation links to /login (RFC #186).",
   "/auth/confirm": "Where the sign-in email's link lands, signed out (RFC #186).",
+  "/oauth/consent":
+    "Where Supabase Auth sends a person who runs mgm login, before any organization is known (RFC #259 § 1); serves staff and tenant-only people alike. Unreleased until the CLI ships.",
+  "/oauth/code":
+    "The sign-in code for the terminal, the clients' one return address; reads no session (RFC #259 § 1). Unreleased until the CLI ships.",
   "/no-access": "Shown to a signed-in user with no role.",
   "/setup": "First-run setup, before any organization exists.",
   "/review": "Redirects old bookmarks to the dashboard; owns no content.",

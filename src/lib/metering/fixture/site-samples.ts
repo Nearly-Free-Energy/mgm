@@ -11,6 +11,13 @@
 import { addDaysToDateKey, startOfDayInZone } from "@/lib/timezone/day-key";
 import { isSiteResolution, LOW_BATTERY_PCT } from "../site-operations";
 import type { SiteSamples, SiteSamplesRequest } from "../types";
+import {
+  PINNED_DAYS,
+  pinnedDayKey,
+  pinnedRefusalError,
+  type PinnedDay,
+  type PinnedDays,
+} from "./pinned-days";
 import { fnv1a, mulberry32 } from "./random";
 
 export const SITE_FIXTURE_SEED = "mgm-fixture-site-v1";
@@ -136,14 +143,28 @@ function startDay(seed: string, microgridId: string, date: string): DayState {
  * `request.sources` gives an all-null series, never zeros; a gap (gateway
  * down, or dark because the battery is at its floor in a cut) is null in
  * every series.
+ *
+ * `pinned` days (pinned-days.ts) are masked after each bin is drawn, so
+ * every value outside a mask is the unpinned output. The default is always
+ * `PINNED_DAYS`, whatever the seed: its pins are chosen for
+ * `SITE_FIXTURE_SEED`'s base days and list only the case microgrids 0b to
+ * 14, so another seed gets the same masks on whatever day it draws. If a
+ * test compares another seed's output with a pinned day, revisit.
  */
 export function generateSiteSamples(
   request: SiteSamplesRequest,
   seed: string = SITE_FIXTURE_SEED,
+  pinned: PinnedDays = PINNED_DAYS,
 ): SiteSamples {
   const { microgridId, sources, timezone, resolutionMinutes } = request;
   if (!isSiteResolution(resolutionMinutes)) {
     throw new RangeError("resolutionMinutes must be a whole number of minutes that divides an hour");
+  }
+  // A refused day refuses every read whose window includes it, as a
+  // provider that cannot read a day refuses the whole request.
+  for (let date = request.startDate; date <= request.endDate; date = addDaysToDateKey(date, 1)) {
+    const refusal = pinned[pinnedDayKey(microgridId, date)]?.refuse;
+    if (refusal) throw pinnedRefusalError(refusal, microgridId, date);
   }
   const binMs = resolutionMinutes * 60_000;
   const hours = resolutionMinutes / 60;
@@ -169,11 +190,21 @@ export function generateSiteSamples(
 
   let day: DayState | null = null;
   let dayDate = "";
+  let pin: PinnedDay | undefined;
+  // A reset or held meter's counter at its overlay's first bin, by device id.
+  let references = new Map<string, number>();
+  // Dropped bins, counted only when the window holds a day that drops some,
+  // so a read of other days stays as uncounted as the generator's own.
+  let dropped = 0;
+  let countsDropped = false;
   for (let t = startMs; t < endMs; t += binMs) {
     const local = clock(t);
     if (local.date !== dayDate) {
       dayDate = local.date;
       day = startDay(seed, microgridId, local.date);
+      pin = pinned[pinnedDayKey(microgridId, local.date)];
+      references = new Map();
+      if (pin?.dropTimestamps) countsDropped = true;
     }
     const d = day as DayState;
     const minute = local.minute;
@@ -208,7 +239,30 @@ export function generateSiteSamples(
     const servedBeforeWh = d.servedWh;
     d.servedWh += servedW * hours;
 
-    const offline = gatewayDown || dark;
+    const pinnedDown = pin?.gatewayDown ? inAny(minute, pin.gatewayDown) : false;
+    const offline = gatewayDown || dark || pinnedDown;
+    // A counter's bin value is about its reading at the bin's middle.
+    const servedMidWh = (servedBeforeWh + d.servedWh) / 2;
+    const counters = houseIds.map((id, i) => {
+      const share = (HOUSES_SHARE * houseWeights[i]) / weightSum;
+      const counterWh = Math.round(houseBaseWh[i] + share * (d.dayIndex * DAY_LOAD_CAP_WH + servedMidWh));
+      const overlay = pin?.meters?.[id];
+      if (!overlay) return offline ? null : counterWh;
+      if ("silent" in overlay) return offline || inAny(minute, [overlay.silent]) ? null : counterWh;
+      // Taken at the overlay's first bin whether or not that bin is sent,
+      // so it does not depend on another mask.
+      const from = "resetAt" in overlay ? overlay.resetAt : overlay.holdFrom;
+      if (minute >= from && !references.has(id)) references.set(id, counterWh);
+      const reference = references.get(id);
+      if (offline) return null;
+      if (reference === undefined) return counterWh;
+      return "resetAt" in overlay ? counterWh - reference : reference;
+    });
+    if (pin?.dropTimestamps && inAny(minute, [pin.dropTimestamps])) {
+      dropped += 1;
+      continue;
+    }
+
     const value = (present: unknown, v: number) => (offline || present === null ? null : v);
     out.timestamps.push(t);
     out.batterySocPct.push(value(sources.battery, round1(d.socPct)));
@@ -217,13 +271,8 @@ export function generateSiteSamples(
     out.gridVoltageV.push(value(sources.gridMeter, inCut ? 0 : round1(voltage)));
     out.loadPowerW.push(value(sources.load, Math.round(loadW)));
     out.pvPowerW.push(value(sources.pv, Math.round(pvW)));
-    // A counter's bin value is about its reading at the bin's middle.
-    const servedMidWh = (servedBeforeWh + d.servedWh) / 2;
-    houseIds.forEach((id, i) => {
-      const share = (HOUSES_SHARE * houseWeights[i]) / weightSum;
-      const counter = houseBaseWh[i] + share * (d.dayIndex * DAY_LOAD_CAP_WH + servedMidWh);
-      out.houseEnergyWh[id].push(offline ? null : Math.round(counter));
-    });
+    houseIds.forEach((id, i) => out.houseEnergyWh[id].push(counters[i]));
   }
+  if (countsDropped) out.unreadableTimestamps = dropped;
   return out;
 }

@@ -7,11 +7,10 @@
  * code: the identifiers themselves are in `fixture/case-ids.ts`, which the
  * fixture may read.
  *
- * Variants 01 to 0a and cases C01 to C14 restate docs/investigation-cases.md
- * §1 and §2; if either changes, change both. Variants 0b to 14 and the
- * pending cases' microgrids and dates are A2-4's pins, which §1 and §2 do
- * not hold yet (both say "pending"); when A2-4 writes them there, revisit
- * this comment. A2-3 fills each case's `evidence`, and A2-12 its `result`.
+ * The variants and cases restate docs/investigation-cases.md §1 and §2; if
+ * either changes, change both. C15 to C24 run on the pinned days of
+ * `fixture/pinned-days.ts`, one microgrid each (0b to 14). A2-3 fills each
+ * case's `evidence`, and A2-12 its `result`.
  */
 import type { SiteScenario } from "../fixture/site-samples";
 import type { SiteSourceAvailability } from "../site-operations";
@@ -45,7 +44,8 @@ export type CaseFigures = {
   lightsOnPct: number;
   cutMinutes: number | null;
   housesEveningMetersMissing: number;
-  housesEveningKwh: number;
+  /** Null when no tenant meter could be counted (C16). */
+  housesEveningKwh: number | null;
   dark: MinuteRange[];
   cuts: MinuteRange[] | null;
   /** The day's bins: `soc.length`. */
@@ -76,8 +76,8 @@ export type InvestigationCase = {
   microgrid: string;
   date: string;
   /**
-   * The scenario `siteScenario` draws for the day. A pending case's day is
-   * the base its overlay (A2-4) applies to.
+   * The scenario `siteScenario` draws for the day. For C15 to C24 it is the
+   * base day their pinned masks (fixture/pinned-days.ts) apply to.
    */
   scenario: SiteScenario;
   /** A2-3 fills it. */
@@ -86,7 +86,7 @@ export type InvestigationCase = {
   result?: unknown;
 } & (
   | { mechanism: "exists"; read: CaseRead }
-  /** A pending case has no read: A2-4 pins it with its scenario and flips the mechanism. */
+  /** A pending case has no read until its scenario exists. None is pending now. */
   | { mechanism: "pending"; read: null }
 );
 
@@ -101,8 +101,8 @@ const plain = (overrides: Partial<CaseVariant> = {}): CaseVariant => ({
 });
 
 /**
- * Every case microgrid, 01 to 14 in hexadecimal. 0b to 14 serve the pending
- * cases, one each (A2-4's pinned days); 13 holds C23's legacy meter.
+ * Every case microgrid, 01 to 14 in hexadecimal. 0b to 14 serve C15 to C24,
+ * one each, on their pinned days; 13 holds C23's legacy meter.
  */
 export const CASE_VARIANTS: Readonly<Record<string, CaseVariant>> = {
   "01": plain(),
@@ -157,15 +157,6 @@ export const CLEAR_DEFAULTS: Omit<CaseFigures, "housesEveningKwh"> = {
 };
 
 const SOURCES = CLEAR_DEFAULTS.sources;
-
-const pending = (id: CaseId, microgrid: string, date: string): InvestigationCase => ({
-  id,
-  microgrid,
-  date,
-  mechanism: "pending",
-  scenario: "clear",
-  read: null,
-});
 
 /**
  * The 24 cases. kWh and percentages are stored as computed, unrounded; the
@@ -270,15 +261,60 @@ export const CASES: readonly InvestigationCase[] = [
     id: "C14", microgrid: "0a", date: "2026-09-01", mechanism: "exists", scenario: "clear",
     read: { ok: false, status: 409, code: "metering_disabled" },
   },
-  // Pending: one microgrid each, on a day whose base is clear (A2-4).
-  pending("C15", "0b", "2026-09-04"),
-  pending("C16", "0c", "2026-09-04"),
-  pending("C17", "0d", "2026-09-03"),
-  pending("C18", "0e", "2026-09-06"),
-  pending("C19", "0f", "2026-09-04"),
-  pending("C20", "10", "2026-09-02"),
-  pending("C21", "11", "2026-09-02"),
-  pending("C22", "12", "2026-09-05"),
-  pending("C23", "13", "2026-09-03"),
-  pending("C24", "14", "2026-09-03"),
+  // C15 to C24: one microgrid each, on a pinned day whose base is clear
+  // (fixture/pinned-days.ts). A refusal the fixture throws as 502 reaches
+  // the caller as 503 (capability.ts, `fromMeteringError`).
+  {
+    id: "C15", microgrid: "0b", date: "2026-09-04", mechanism: "exists", scenario: "clear",
+    read: { ok: true, figures: { housesEveningMetersMissing: 1, housesEveningKwh: 4.035 } },
+  },
+  {
+    id: "C16", microgrid: "0c", date: "2026-09-04", mechanism: "exists", scenario: "clear",
+    read: {
+      ok: true,
+      figures: { noDataMinutes: 40, knownMinutes: 1400, housesEveningMetersMissing: 3, housesEveningKwh: null },
+    },
+  },
+  {
+    id: "C17", microgrid: "0d", date: "2026-09-03", mechanism: "exists", scenario: "clear",
+    read: { ok: true, figures: { housesEveningMetersMissing: 1, housesEveningKwh: 4.271 } },
+  },
+  {
+    id: "C18", microgrid: "0e", date: "2026-09-06", mechanism: "exists", scenario: "clear",
+    read: {
+      ok: true,
+      figures: { noDataMinutes: 150, knownMinutes: 1290, unreadableTimestamps: 30, housesEveningKwh: 6.755 },
+    },
+  },
+  {
+    id: "C19", microgrid: "0f", date: "2026-09-04", mechanism: "exists", scenario: "clear",
+    read: { ok: false, status: 503, code: "METERING_UNREADABLE_TIMESTAMPS" },
+  },
+  {
+    id: "C20", microgrid: "10", date: "2026-09-02", mechanism: "exists", scenario: "clear",
+    read: { ok: false, status: 503, code: "METERING_UNAVAILABLE" },
+  },
+  {
+    id: "C21", microgrid: "11", date: "2026-09-02", mechanism: "exists", scenario: "clear",
+    read: { ok: true, figures: { noDataMinutes: 180, knownMinutes: 1260, housesEveningKwh: 6.667 } },
+  },
+  {
+    // The held meter is counted, at 0 kWh: nothing is missing.
+    id: "C22", microgrid: "12", date: "2026-09-05", mechanism: "exists", scenario: "clear",
+    read: { ok: true, figures: { housesEveningKwh: 3.928 } },
+  },
+  {
+    id: "C23", microgrid: "13", date: "2026-09-03", mechanism: "exists", scenario: "clear",
+    read: {
+      ok: true,
+      figures: {
+        housesEveningMetersMissing: 2, sources: { ...SOURCES, houseMetersUnreadable: 1 },
+        housesEveningKwh: 3.875,
+      },
+    },
+  },
+  {
+    id: "C24", microgrid: "14", date: "2026-09-03", mechanism: "exists", scenario: "clear",
+    read: { ok: false, status: 503, code: "METERING_INVALID_DATA" },
+  },
 ];

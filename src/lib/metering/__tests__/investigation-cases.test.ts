@@ -216,7 +216,7 @@ function figuresOf(day: SiteDayRead): CaseFigures {
     lightsOnPct: day.lightsOnPct as number,
     cutMinutes: day.cutMinutes,
     housesEveningMetersMissing: day.housesEveningMetersMissing,
-    housesEveningKwh: day.housesEveningKwh as number,
+    housesEveningKwh: day.housesEveningKwh,
     dark: minutes(day, day.dark),
     cuts: day.cuts === null ? null : minutes(day, day.cuts),
     bins: day.soc.length,
@@ -272,7 +272,7 @@ describe.each(CASES)("$id", (c) => {
 
   const read = c.read;
   if (read === null) {
-    it.todo("figures (A2-4)");
+    it.todo("figures, once the scenario exists");
   } else if (read.ok) {
     it("reads the day with §2's figures, and a clear day's elsewhere", async () => {
       const result = await capabilityFor(c).getSiteDay({
@@ -284,7 +284,8 @@ describe.each(CASES)("$id", (c) => {
       const { housesEveningKwh, lightsOnPct, ...exact } = { ...CLEAR_DEFAULTS, ...read.figures };
       const { housesEveningKwh: actualKwh, lightsOnPct: actualLit, ...actualExact } = actual;
       expect(actualExact).toEqual(exact);
-      expect(actualKwh).toBeCloseTo(housesEveningKwh, 3);
+      if (housesEveningKwh === null) expect(actualKwh).toBeNull();
+      else expect(actualKwh).toBeCloseTo(housesEveningKwh, 3);
       expect(actualLit).toBeCloseTo(lightsOnPct, 2);
     });
   } else {

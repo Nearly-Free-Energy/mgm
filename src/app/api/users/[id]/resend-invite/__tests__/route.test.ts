@@ -237,6 +237,24 @@ describe("POST /api/users/[id]/resend-invite", () => {
     expect(res.status).toBe(400);
   });
 
+  // ── 400: a body that is not ResendInviteBody (org.resend-invite's input) ──
+  it("takes no body or the GUI host's empty object, and refuses any field before the session is read", async () => {
+    mockCaller = null;
+    const { POST } = await import("../route");
+    const withBody = (body: string) =>
+      new NextRequest(`http://localhost/api/users/${TARGET_UUID}/resend-invite`, {
+        method: "POST",
+        body,
+        headers: { "content-type": "application/json" },
+      });
+    const refused = await POST(withBody(JSON.stringify({ email: "x@example.test" })), makeContext(TARGET_UUID));
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: "Unknown field: email", code: "invalid_body" });
+    expect((await POST(withBody("{"), makeContext(TARGET_UUID))).status).toBe(400);
+    // `{}` passes the body check and reaches Step A, which finds no session here.
+    expect((await POST(withBody("{}"), makeContext(TARGET_UUID))).status).toBe(401);
+  });
+
   // ── 401: no session ──────────────────────────────────────────────
   it("returns 401 when no caller session is present", async () => {
     mockCaller = null;
