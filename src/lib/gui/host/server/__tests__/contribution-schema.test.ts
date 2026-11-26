@@ -642,6 +642,11 @@ describe("assistant reading", () => {
       expect(error.issues).toEqual([issue(["views", 0, "declares", "keys"], differs("the entry names a key twice"))]);
     });
 
+    it("refuses an entry that names an ext path twice", () => {
+      const error = pinned(() => {}, (e) => (e.declares = { ...e.declares, ext: { ...e.declares.ext!, paths: [...e.declares.ext!.paths, "date"] } }));
+      expect(error.issues).toEqual([issue(["views", 0, "ext", "zod"], differs("the entry names an ext path twice"))]);
+    });
+
     it("refuses a new ext version, and an ext the entry does not pin", () => {
       const v3 = pinned((c) => (c.views[0].ext = { ...c.views[0].ext, schema: "metering.site-day@3" }));
       expect(v3.issues).toContainEqual(
