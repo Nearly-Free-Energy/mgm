@@ -20,6 +20,7 @@ import {
   type SiteDayReadFacts,
   type SiteSourceAvailability,
 } from "./site-operations";
+import { SITE_DAY_RESOLUTION_MINUTES } from "./site-day-evidence";
 import { addDaysToDateKey, dayKeyInZone, isCalendarDateKey } from "@/lib/timezone/day-key";
 import type {
   ManagedDevice,
@@ -45,8 +46,8 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** The daily operations view reads 5-minute bins (what OpenEMS keeps). */
-const SITE_RESOLUTION_MINUTES = 5;
+/** The daily operations view reads 5-minute bins (what OpenEMS keeps), the one resolution evidence `@1` defines. */
+const SITE_RESOLUTION_MINUTES = SITE_DAY_RESOLUTION_MINUTES;
 export { SITE_DAYS_MAX };
 /** How many chunk reads `getSiteDays` runs at once. */
 export const SITE_DAYS_PARALLEL = 3;

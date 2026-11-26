@@ -77,6 +77,21 @@ export const EVENING_START_HOUR = 18;
  * missing rather than as having used less.
  */
 export const HOUSE_READING_TOLERANCE_MS = 30 * 60_000;
+/**
+ * The version of the figures computeSiteDayDetail works out, stored as
+ * `by.calc` in the investigation evidence (docs/investigation-evidence.md
+ * §4 "Versions"). Bump it with any change to a figure's meaning or to a
+ * threshold (the constants above, which the evidence keeps as `params`).
+ * `__tests__/site-day-calc-version.test.ts` pins a digest of the calculated
+ * evidence over a frozen corpus for each version and fails until this is
+ * bumped and the new version's digest is added; an existing version's
+ * digest is never edited, since stored evidence cites it.
+ *
+ * Version 1 counts a tenant meter that was asked of the provider but left
+ * out of its samples as missing (`houseMeterIds`, A2-2), and counts a meter
+ * whose ids fail the stored format as unreadable in a capture.
+ */
+export const SITE_DAY_CALC_VERSION = 1;
 /** The hour whose battery level is reported before the evening window. */
 export const SOC_CHECK_HOUR = 17;
 

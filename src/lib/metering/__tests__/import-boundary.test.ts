@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 import * as path from "node:path";
 
 const PLUGIN_ROOT = path.resolve(__dirname, "..");
-const GUARDED = ["capability.ts", "repository.ts", "types.ts"];
+const GUARDED = ["capability.ts", "repository.ts", "types.ts", "site-day-evidence.ts"];
 
 // Runtime import specifiers the domain layer must never touch.
 const FORBIDDEN = [
