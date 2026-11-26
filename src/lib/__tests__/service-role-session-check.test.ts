@@ -287,6 +287,11 @@ const ENTRIES: Record<string, Entry> = {
     reason:
       "getRequestUserAccess (getUser) redirects to /login before resolveGoTarget, whose getManifest reads the session again before the manifest's reads.",
   },
+  "src/app/oauth/consent/page.tsx": {
+    kind: "session",
+    reason:
+      "getUser() redirects to /login before fn_client_authorization_read, a service_role-only read of the sign-in's client for that user's id, which names nothing about a sign-in Supabase Auth bound to someone else. Unreleased until the CLI ships; it stays \"session\" when released.",
+  },
   "src/app/setup/page.tsx": {
     kind: "session",
     reason: "getUser() redirects to /login before organizationExists().",
@@ -321,6 +326,11 @@ const ENTRIES: Record<string, Entry> = {
     kind: "session",
     reason:
       "getUser() answers 401 before the service-role bootstrap RPC (after the bootstrap token check).",
+  },
+  "src/app/api/auth/oauth/approvals/route.ts": {
+    kind: "session",
+    reason:
+      "Middleware answers a bearer request it does not accept and a client's token in the cookie first; the route itself refuses any Authorization header and a cross-site request before reading anything, then getUser() answers 401, and a client's token in the cookie 401, before fn_client_approval_record writes the approval for that user's id as the service role (ADR-008 decision 2). Unreleased until the CLI ships; it stays \"session\" when released.",
   },
   "src/app/api/users/invite/route.ts": {
     kind: "session",
@@ -454,6 +464,12 @@ const ENTRIES: Record<string, Entry> = {
   },
 
   // ── Unreleased routes (404 in middleware) ────────────────────────────────
+  "src/app/api/auth/discovery/route.ts": {
+    kind: "unreleased",
+    path: "/api/auth/discovery",
+    reason:
+      "What mgm login --url asks before anyone is signed in (RFC #259 § 1): it reads only client_id and kind from mgm_clients as the service role, after a per-address rate limit, and answers with values that are already public; it decrypts nothing. It is in middleware's PUBLIC_PATHS, so releasing it with the CLI moves it to \"public\".",
+  },
   "src/app/api/openems/status/route.ts": {
     kind: "unreleased",
     path: "/api/openems/status",
