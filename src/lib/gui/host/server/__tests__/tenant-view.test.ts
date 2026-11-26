@@ -20,7 +20,7 @@ vi.mock("@/lib/runtime/gate", () => ({
 let snapshot: SurfaceSnapshot;
 vi.mock("../snapshot", () => ({ surfaceSnapshot: async () => snapshot }));
 
-import { dispatchView } from "../view";
+import { dispatchView, SYNTHETIC_NOTICE } from "../view";
 import { ORG_A, contextFor, managerOf, superAdmin, tableClient, tenantOf } from "./host-fakes";
 
 const UNIT_A = "e7400000-0000-4000-8000-00000000000a";
@@ -138,6 +138,23 @@ describe("dispatchView for a tenant view", () => {
     load().mockResolvedValue({ ok: true, model: { ...record(), actions: [{ action: "community.edit-tenant", params: { id: UNIT_A } }] } });
     const out = await dispatch("/my");
     expect(out).toMatchObject({ ok: true, value: { actions: [] } });
+  });
+
+  it("shows the loader's notice, after the host's notice on generated figures", async () => {
+    const own = { tone: "info" as const, text: "Readings for today arrive by noon." };
+    load().mockResolvedValue({ ok: true, model: { ...record(), notice: own } });
+    expect(await dispatch("/my")).toMatchObject({ ok: true, value: { notice: own } });
+
+    const synthetic = record();
+    synthetic.body.sections[0].fields[0].value = { t: "text", text: "Unit 4", synthetic: true } as never;
+    load().mockResolvedValue({ ok: true, model: { ...synthetic, notice: own } });
+    expect(await dispatch("/my")).toMatchObject({
+      ok: true,
+      value: { notice: { tone: "warning", text: `${SYNTHETIC_NOTICE.text} ${own.text}` } },
+    });
+    // A loader's danger tone outranks the host's warning.
+    load().mockResolvedValue({ ok: true, model: { ...synthetic, notice: { ...own, tone: "danger" } } });
+    expect(await dispatch("/my")).toMatchObject({ ok: true, value: { notice: { tone: "danger" } } });
   });
 
   it("serves the unit `unit` names among the person's units, in any case", async () => {

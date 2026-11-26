@@ -139,7 +139,10 @@ read a stored credential, or to send data to another origin.
      shows its own notice first (the gate's, else the one on generated
      figures), then the loader's, in one notice, and a loader's `danger`
      tone outranks the host's warning (`shownNotice` in
-     `host/server/view.ts`). Its views of cost `vendor` are refused.
+     `host/server/view.ts`). The same holds whether the plugin is on or
+     off, and on a tenant view, where the host asks no gate, so its own
+     notice can only be the one on generated figures. Its views of cost
+     `vendor` are refused.
    - Its sections are still listed where they are attached, so their place
      shows the gate's notice. Its tabs and tiles are left out, unless the
      attachment declares `whilePluginOff: "listed"`.
