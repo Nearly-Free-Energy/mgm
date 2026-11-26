@@ -16,6 +16,7 @@ import "server-only";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { rolesCanAccessOrg, rolesIncludeStaff, type CurrentUserAccess } from "@/lib/auth/access";
 import { formatLocale } from "@/lib/locale";
+import { BROWSER, type Caller } from "@/lib/runtime/caller";
 import type { UserRoleRecord } from "@/lib/types/domain";
 import type { Fmt, InstallationRequest, SurfaceRequest, TenantRequest } from "../../surface";
 import { tenantUnitIds } from "../shared/tenant-units";
@@ -31,6 +32,15 @@ export type HostAccess = Readonly<{ user: User; roles: readonly UserRoleRecord[]
 
 export type HostContext = Readonly<{
   access: HostAccess;
+  /**
+   * Who is calling (RFC #259 § 2): the person's browser session, or a
+   * client acting as them. The host's routes take it from the client their
+   * session was checked on (openHostRequest in ./http.ts), so it comes from
+   * claims Supabase Auth accepted. An agent client is refused by every
+   * route but the catalog and the view route, and those give it less
+   * (buildActionCatalog in ./catalog.ts, dispatchView in ./view.ts).
+   */
+  caller: Caller;
   newClient: ClientFactory;
   locale: string;
   now: Date;
@@ -76,7 +86,18 @@ function localeOf(headers: Headers): string {
 export function hostContext(
   access: CurrentUserAccess,
   headers: Headers,
-  deps: { newClient: ClientFactory; makeFmt: (locale: string) => Fmt; now?: Date },
+  deps: {
+    newClient: ClientFactory;
+    makeFmt: (locale: string) => Fmt;
+    now?: Date;
+    /**
+     * Who is calling: callerOf (@/lib/runtime/caller) of the client the
+     * session was checked on. A browser session when omitted, which only
+     * the pages (cookie-only: createClient refuses them a bearer token) and
+     * tests do; a route must pass it (openHostRequest).
+     */
+    caller?: Caller;
+  },
 ): { ok: true; ctx: HostContext } | HostRefusal {
   if (!access.user) {
     return { ok: false, status: 401, code: "gui_unauthenticated", message: "Sign in to continue." };
@@ -87,6 +108,7 @@ export function hostContext(
   const locale = localeOf(headers);
   const ctx: HostContext = {
     access: Object.freeze({ user: access.user, roles: Object.freeze([...access.roles]) }),
+    caller: deps.caller ?? BROWSER,
     newClient: deps.newClient,
     locale,
     now: deps.now ?? new Date(),
