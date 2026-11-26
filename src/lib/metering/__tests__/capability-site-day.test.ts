@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MeteringCapability, pickSiteSources, unreadableHouseMeters } from "../capability";
+import { MeteringCapability, pickSiteSources, siteSourceEvidence, unreadableHouseMeters } from "../capability";
 import { MeteringRegistry } from "../registry";
 import { MeteringError } from "../errors";
 import type {
@@ -1140,6 +1140,115 @@ describe("unreadableHouseMeters", () => {
   it("lists nothing without linked meters", () => {
     expect(unreadableHouseMeters(SITE_DEVICES, [])).toEqual([]);
     expect(unreadableHouseMeters([], ["m-1"])).toEqual([]);
+  });
+});
+
+describe("the stored-id format check (requireStorableIds)", () => {
+  const CAPTURE = { requireStorableIds: true };
+  const M1 = "660e8400-e29b-41d4-a716-44665544d011";
+  const M2 = "660e8400-e29b-41d4-a716-44665544d012";
+  const M3 = "660e8400-e29b-41d4-a716-44665544d013";
+  const M4 = "d0000000-0000-0000-0000-000000000004";
+  const BAT2 = "660e8400-e29b-41d4-a716-44665544b002";
+
+  it("leaves out a device whose ids fall outside the format, and reads the next one of its type", () => {
+    const devices = [
+      device({ id: BATTERY_ID, name: "A battery", deviceType: "battery", componentId: "ess 0" }),
+      device({ id: BAT2, name: "B battery", deviceType: "battery", componentId: "ess1" }),
+      device({ id: GRID_ID, name: "Grid", deviceType: "grid_meter", edgeOpenemsId: "edge/0", componentId: "meter0" }),
+    ];
+    const captured = pickSiteSources(devices, [], CAPTURE);
+    expect(captured.battery).toEqual({ id: BAT2, edgeOpenemsId: "edge0", componentId: "ess1" });
+    expect(captured.gridMeter).toBeNull();
+    // The page's reads apply no format check.
+    const page = pickSiteSources(devices);
+    expect(page.battery?.id).toBe(BATTERY_ID);
+    expect(page.gridMeter?.id).toBe(GRID_ID);
+    expect(pickSiteSources(devices, [], {})).toEqual(page);
+  });
+
+  it("refuses an id that only fits once trimmed, and one over 64 characters", () => {
+    for (const componentId of [" meter1", "meter1 ", "m".repeat(65), "meter\n1"]) {
+      const devices = [device({ id: BATTERY_ID, deviceType: "battery", componentId })];
+      expect(pickSiteSources(devices, [], CAPTURE).battery, JSON.stringify(componentId)).toBeNull();
+    }
+    const fits = [device({ id: BATTERY_ID, deviceType: "battery", componentId: "m".repeat(64) })];
+    expect(pickSiteSources(fits, [], CAPTURE).battery?.id).toBe(BATTERY_ID);
+  });
+
+  it("counts a tenant meter with ids outside the format as unreadable, id_not_storable", () => {
+    const devices = [
+      device({ id: M1, name: "Meter 01", componentId: "meter1" }),
+      device({ id: M2, name: "Meter 02", edgeOpenemsId: "edge/0" }),
+      device({ id: M3, name: "Meter 03", componentId: " meter3" }),
+      // A missing id stays tenant_meter_unreadable, whatever the other holds.
+      device({ id: M4, name: "Meter 04", edgeOpenemsId: "edge/0", componentId: "" }),
+    ];
+    const ids = [M1, M2, M3, M4];
+    expect(unreadableHouseMeters(devices, ids, CAPTURE)).toEqual([
+      { id: M2, reason: "id_not_storable" },
+      { id: M3, reason: "id_not_storable" },
+      { id: M4, reason: "tenant_meter_unreadable" },
+    ]);
+    const captured = pickSiteSources(devices, ids, CAPTURE);
+    expect(captured.houseMeters.map((m) => m.id)).toEqual([M1]);
+    expect(captured.houseMetersUnreadable).toBe(3);
+    // Without the check, only the meter missing an id is unreadable.
+    expect(unreadableHouseMeters(devices, ids)).toEqual([{ id: M4, reason: "tenant_meter_unreadable" }]);
+    const page = pickSiteSources(devices, ids);
+    expect(page.houseMeters.map((m) => m.id)).toEqual([M1, M2, M3]);
+    expect(page.houseMetersUnreadable).toBe(1);
+  });
+});
+
+describe("siteSourceEvidence", () => {
+  const BAT2 = "660e8400-e29b-41d4-a716-44665544b002";
+  const INV = "d0000000-0000-0000-0000-000000000003";
+
+  it("records each chosen source by device, edge and component", () => {
+    const devices = [
+      device({ id: BATTERY_ID, name: "Battery", deviceType: "battery", componentId: "ess0" }),
+      device({ id: GRID_ID, name: "Grid", deviceType: "grid_meter", componentId: "meter0", edgeOpenemsId: "edge7" }),
+      device({ id: INV, name: "Inverter", deviceType: "inverter", componentId: "inverter0" }),
+      device({ id: PV_ID, name: "PV", deviceType: "pv_meter", componentId: "meter4" }),
+    ];
+    const sources = pickSiteSources(devices, [], { requireStorableIds: true });
+    expect(siteSourceEvidence(devices, sources)).toEqual({
+      battery: { device: BATTERY_ID, edge: "edge0", component: "ess0" },
+      grid_meter: { device: GRID_ID, edge: "edge7", component: "meter0" },
+      inverter: { device: INV, edge: "edge0", component: "inverter0" },
+      pv_meter: { device: PV_ID, edge: "edge0", component: "meter4" },
+    });
+  });
+
+  it("says why a type has no source: missing ids before the format", () => {
+    const devices = [
+      // Both ids, one outside the format: id_not_storable.
+      device({ id: BATTERY_ID, name: "Battery", deviceType: "battery", componentId: "ess 0" }),
+      // A missing id with a bad other id: source_not_readable.
+      device({ id: GRID_ID, name: "Grid", deviceType: "grid_meter", edgeOpenemsId: "edge/0", componentId: "" }),
+      // A missing id beside one outside the format: id_not_storable, since a
+      // device with both ids was excluded by the format alone.
+      device({ id: INV, name: "Inverter A", deviceType: "inverter", componentId: "" }),
+      device({ id: BAT2, name: "Inverter B", deviceType: "inverter", componentId: "inv/0" }),
+      // No solar meter registered: source_not_readable.
+    ];
+    const sources = pickSiteSources(devices, [], { requireStorableIds: true });
+    expect(siteSourceEvidence(devices, sources)).toEqual({
+      battery: { reason: "id_not_storable" },
+      grid_meter: { reason: "source_not_readable" },
+      inverter: { reason: "id_not_storable" },
+      pv_meter: { reason: "source_not_readable" },
+    });
+  });
+
+  it("records the valid device when a second of its type fails the format", () => {
+    const devices = [
+      device({ id: BATTERY_ID, name: "A battery", deviceType: "battery", componentId: "ess 0" }),
+      device({ id: BAT2, name: "B battery", deviceType: "battery", componentId: "ess1" }),
+    ];
+    const sources = pickSiteSources(devices, [], { requireStorableIds: true });
+    expect(siteSourceEvidence(devices, sources).battery).toEqual({ device: BAT2, edge: "edge0", component: "ess1" });
   });
 });
 

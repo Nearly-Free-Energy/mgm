@@ -95,8 +95,11 @@ export type SiteSources = {
   houseMeters: DeviceConfig[];
   /**
    * Linked tenant meters that cannot be read because they have no edge
-   * or component id. Not requested; reported so a total that leaves them
-   * out does not look complete.
+   * or component id, or, in a capture, because their ids fall outside the
+   * stored format (`requireStorableIds` in capability.ts; the page's reads
+   * apply no format check, and if getSiteDay comes to apply it, revisit).
+   * Not requested; reported so a total that leaves them out does not look
+   * complete.
    */
   houseMetersUnreadable: number;
 };

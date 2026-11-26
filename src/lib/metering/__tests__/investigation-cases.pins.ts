@@ -8,8 +8,9 @@
  *
  * The variants and cases restate docs/investigation-cases.md §1 and §2; if
  * either changes, change both. C15 to C24 run on the pinned days of
- * `fixture/pinned-days.ts`, one microgrid each (0b to 14). A2-3 fills each
- * case's `evidence`, and A2-12 its `result`.
+ * `fixture/pinned-days.ts`, one microgrid each (0b to 14). A case's expected
+ * evidence (A2-3) is `CASE_EVIDENCE` in investigation-cases.evidence.ts;
+ * A2-12 fills its `result`.
  */
 import type { SiteScenario } from "../fixture/site-samples";
 import type { SiteSourceAvailability } from "../site-operations";
@@ -79,8 +80,6 @@ export type InvestigationCase = {
    * base day their pinned masks (fixture/pinned-days.ts) apply to.
    */
   scenario: SiteScenario;
-  /** A2-3 fills it. */
-  evidence?: unknown;
   /** A2-12 fills it. */
   result?: unknown;
 } & (

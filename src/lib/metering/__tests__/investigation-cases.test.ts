@@ -3,7 +3,9 @@
  * (docs/investigation-cases.md §1 "Rules that keep the set deterministic"):
  * each case is rebuilt from its pins through `MeteringCapability.getSiteDay`
  * and the synthetic provider, and its scenario and figures are checked
- * against §2. A pin that moves fails here.
+ * against §2; its evidence is captured through `captureSiteDay` and checked
+ * against `CASE_EVIDENCE` (investigation-cases.evidence.ts). A pin that
+ * moves fails here.
  *
  * The stubs below stand in for the installation docs/investigation-cases.md
  * §1 describes. Each restates §1 or another file, and says which. A2-5's
@@ -13,11 +15,23 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { startOfDayInZone } from "@/lib/timezone/day-key";
+import { validateTimezone } from "@/lib/validation/timezone";
 import { MeteringCapability } from "../capability";
 import { FixtureMeteringProvider } from "../fixture-provider";
 import { MeteringRegistry } from "../registry";
 import type { ManagedDevice, MeteringRepository, MeteringScope } from "../repository";
-import type { SiteDayRead, TimeRange } from "../site-operations";
+import { SITE_DAY_CALC_VERSION, type SiteDayRead, type TimeRange } from "../site-operations";
+import {
+  meterEntries,
+  resolveEvidencePointer,
+  siteDayEvidenceSchema,
+  type MeterReading,
+  type SiteDayEvidenceRead,
+  type SiteDayItemKey,
+  type SiteDayWindow,
+  type SummaryFigure,
+} from "../site-day-evidence";
 import {
   CASE_DEVICES,
   CASE_ORG_A,
@@ -39,6 +53,13 @@ import {
   type InvestigationCase,
   type MinuteRange,
 } from "./investigation-cases.pins";
+import {
+  CASE_EVIDENCE,
+  CLEAR_ITEMS,
+  SUMMARY_FROM_FIGURES,
+  type CaseEvidence,
+  type ExpectedItem,
+} from "./investigation-cases.evidence";
 
 /** After every pinned date, so each is a finished day in its zone. */
 const NOW = new Date("2026-11-25T00:00:00Z");
@@ -202,6 +223,19 @@ function capabilityFor(c: InvestigationCase): MeteringCapability {
   );
 }
 
+/**
+ * The window creation would have recorded for the case's operation
+ * (evidence §3 O2): its date, in the microgrid's stored zone when valid,
+ * else UTC as a fallback. It stands in for the operation's window, which
+ * A2-11's step passes; if creation's zone rule changes, revisit.
+ */
+function RECORDED_WINDOW(c: InvestigationCase): SiteDayWindow {
+  const zone = CASE_VARIANTS[c.microgrid].zone;
+  return validateTimezone(zone)
+    ? { date: c.date, tz: "UTC", zone: "fallback" }
+    : { date: c.date, tz: zone, zone: "microgrid" };
+}
+
 const minutes = (day: SiteDayRead, ranges: TimeRange[]): MinuteRange[] =>
   ranges.map((r) => [(r.startMs - day.dayStartMs) / 60_000, (r.endMs - day.dayStartMs) / 60_000]);
 
@@ -256,6 +290,17 @@ describe("case ids", () => {
     expect(Object.entries(CASE_VARIANTS).filter(([, v]) => v.org === "B").map(([nn]) => nn)).toEqual(["0a"]);
   });
 
+  it("has expected evidence for every case that exists", () => {
+    // So whoever turns a case to `exists` fills its evidence in the same commit.
+    const missing = CASES.filter((c) => c.mechanism === "exists" && !CASE_EVIDENCE[c.id]).map((c) => c.id);
+    expect(missing).toEqual([]);
+    for (const c of CASES) {
+      const evidence = CASE_EVIDENCE[c.id];
+      if (!evidence || !c.read) continue;
+      expect(evidence.outcome === "read", c.id).toBe(c.read.ok);
+    }
+  });
+
   it("has a read for every existing case and none for a pending one", () => {
     // The type already ties them; this catches a cast or a widened type, since
     // a case that lost its read would otherwise become a todo with no failure.
@@ -298,7 +343,146 @@ describe.each(CASES)("$id", (c) => {
     });
   }
 
-  it.todo("evidence keys (A2-3)");
+  if (c.mechanism === "pending") {
+    it.todo("evidence (after its scenario exists)");
+  } else {
+    it("captures §2's evidence", async () => {
+      const evidence = CASE_EVIDENCE[c.id];
+      if (!evidence) throw new Error(`${c.id} has no expected evidence`);
+      await expectEvidence(c, evidence);
+    });
+  }
   it.todo("expected result (A2-12)");
 });
 
+
+const exactItem = (item: unknown): ExpectedItem => {
+  const { c, reason, in: inputs } = item as { c: ExpectedItem["c"]; reason?: string; in?: string[] };
+  return c === "unavailable"
+    ? ({ c, reason, ...(inputs ? { in: inputs } : {}) } as ExpectedItem)
+    : ({ c } as ExpectedItem);
+};
+
+/** The case's capture, checked against its expected evidence and its pins. */
+async function expectEvidence(c: InvestigationCase, expected: CaseEvidence) {
+  const window = RECORDED_WINDOW(c);
+  const query = { microgrid_id: caseMicrogridId(c.microgrid), date: c.date };
+  const capture = await capabilityFor(c).captureSiteDay(query, window);
+  expect(capture.outcome).toBe(expected.outcome);
+  if (capture.outcome === "access_refused") throw new Error(`${c.id} was refused access`);
+  expect(siteDayEvidenceSchema.safeParse(capture.snapshot).success).toBe(true);
+  const snapshot = capture.snapshot;
+  expect(snapshot.by.calc).toBe(SITE_DAY_CALC_VERSION);
+  expect(snapshot.window.date).toBe(c.date);
+
+  if (expected.outcome === "refused") {
+    if (capture.outcome !== "refused") throw new Error("not refused");
+    const refused = capture.snapshot;
+    const items = Object.fromEntries(Object.entries(refused.items).filter(([key]) => key !== "read"));
+    expect(Object.fromEntries(Object.entries(items).map(([key, item]) => [key, exactItem(item)]))).toEqual(
+      expected.items
+    );
+    expect(refused.items.read).toEqual({ c: "unavailable", k: "read", ...expected.read });
+    expect(refused.by.provider).toBe(expected.provider);
+    expect(capture.zoneRead).toEqual(expected.zoneRead);
+    expect({ tz: refused.window.tz, zone: refused.window.zone }).toEqual(expected.window);
+    expect(refused.window.caveat !== undefined).toBe(expected.window.zone === "fallback");
+    return;
+  }
+
+  if (capture.outcome !== "read" || !c.read?.ok) throw new Error("not read");
+  const s: SiteDayEvidenceRead = capture.snapshot;
+  const pins = { ...CLEAR_DEFAULTS, ...c.read.figures };
+
+  // Keys and kinds: CLEAR_ITEMS with the case's changes, and timestamps from the pins.
+  const kinds: Partial<Record<SiteDayItemKey, ExpectedItem>> = {};
+  for (const [key, item] of Object.entries({ ...CLEAR_ITEMS, ...expected.items })) {
+    if (item) kinds[key as SiteDayItemKey] = item;
+  }
+  kinds.timestamps =
+    pins.unreadableTimestamps === null ? { c: "unavailable", reason: "not_reported" } : { c: "fact" };
+  expect(Object.keys(s.items).sort()).toEqual(Object.keys(kinds).sort());
+  for (const [key, item] of Object.entries(s.items)) {
+    expect(exactItem(item), key).toEqual(kinds[key as SiteDayItemKey]);
+  }
+  if (pins.unreadableTimestamps !== null) {
+    expect(s.items.timestamps).toEqual({ c: "fact", k: "timestamps", dropped: pins.unreadableTimestamps });
+  }
+
+  // Window, from the pins.
+  expect(s.window).toMatchObject({ tz: pins.timezone, zone: pins.zone, bins: pins.bins, res: 5 });
+  expect(s.window.caveat !== undefined).toBe(pins.zone === "fallback");
+  expect(s.window.t0).toBe(startOfDayInZone(c.date, pins.timezone).getTime());
+
+  // Ranges and what decided them, each pointer resolving to its value.
+  for (const key of ["dark_cut", "dark_lowbat", "dark_after_lowbat", "no_data"] as const) {
+    const item = s.items[key];
+    if (item?.c !== "calculated") {
+      expect(expected.ranges?.[key], key).toBeUndefined();
+      continue;
+    }
+    expect(item.ranges, key).toEqual(expected.ranges?.[key]);
+    if (item.k === "no_data") {
+      expect(item.ruledOut.map((r) => ({ grid: r.grid?.ptr ?? null, soc: r.soc?.ptr ?? null }))).toEqual(
+        expected.ruledOut
+      );
+      for (const r of item.ruledOut) {
+        for (const p of [r.grid, r.soc]) if (p) expect(resolveEvidencePointer(s, p.ptr)).toBe(p.v);
+      }
+    } else {
+      expect(item.decidedBy.map((p) => p.ptr)).toEqual(expected.decidedBy?.[key as Exclude<typeof key, "no_data">]);
+      for (const p of item.decidedBy) {
+        const at = resolveEvidencePointer(s, p.ptr);
+        if ("v" in p) expect(at).toBe(p.v);
+        else expect(Array.isArray(at)).toBe(true);
+      }
+    }
+  }
+
+  // Summary: the pinned figures, with rule Z's nulls.
+  const nulls = new Set(expected.nullFigures ?? []);
+  for (const [figure, field] of Object.entries(SUMMARY_FROM_FIGURES) as [SummaryFigure, keyof typeof pins][]) {
+    const stored = s.items.summary[figure];
+    if (nulls.has(figure)) expect(stored, figure).toBeNull();
+    else if (figure === "tenantMetersEveningKwh") expect(stored as number).toBeCloseTo(pins[field] as number, 3);
+    else if (figure === "lightsOnPct") expect(stored as number).toBeCloseTo(pins[field] as number, 2);
+    else expect(stored, figure).toEqual(pins[field]);
+  }
+
+  // Meters: the window, each reading's component, the outcomes and the unreadable meters.
+  expect(s.items.meter_window).toEqual({
+    c: "calculated",
+    k: "meter_window",
+    ...(expected.meterWindow ?? { start: [209, 216], end: [281, 287] }),
+  });
+  const variant = CASE_VARIANTS[c.microgrid];
+  for (const [id, reading] of meterEntries<MeterReading>(s.items.meter_readings)) {
+    const dd = id.slice(-2);
+    expect(id).toBe(caseDeviceId(c.microgrid, dd));
+    expect(reading.component).toBe(CASE_DEVICES.find((d) => d.dd === dd)?.componentId);
+    const pinned = expected.meterReadings?.[dd as "11"];
+    if (pinned) expect({ start: reading.start, end: reading.end }).toEqual(pinned);
+  }
+  const readable = CASE_DEVICES.filter(
+    (d) => d.tenantLinked && !variant.omit.includes(d.dd) && !variant.legacy.includes(d.dd)
+  ).map((d) => caseDeviceId(c.microgrid, d.dd));
+  expect(meterEntries(s.items.meter_readings).map(([id]) => id)).toEqual(readable);
+  expect(Object.fromEntries(meterEntries<string>(s.items.meter_outcomes).map(([id, o]) => [id.slice(-2), o]))).toEqual(
+    expected.meterOutcomes ?? {}
+  );
+  const devices = (list: string[] | undefined) => (list ?? []).map((dd) => caseDeviceId(c.microgrid, dd));
+  expect(s.items.m_unreadable?.devices ?? []).toEqual(devices(expected.unreadable?.tenant_meter_unreadable));
+  expect(s.items.m_id_not_storable?.devices ?? []).toEqual(devices(expected.unreadable?.id_not_storable));
+
+  expect(capture.zoneRead).toEqual({ tz: pins.timezone, zone: pins.zone });
+  expect(capture.endedBeforeDay).toBe(false);
+
+  // The same figures as the page's read of the day.
+  const page = await capabilityFor(c).getSiteDay(query);
+  if (!page.ok) throw new Error(`Refused: ${page.status} ${page.code}`);
+  const figures = figuresOf(page.data);
+  for (const [figure, field] of Object.entries(SUMMARY_FROM_FIGURES) as [SummaryFigure, keyof CaseFigures][]) {
+    const stored = s.items.summary[figure];
+    if (stored !== null) expect(stored, figure).toBe(figures[field]);
+  }
+}

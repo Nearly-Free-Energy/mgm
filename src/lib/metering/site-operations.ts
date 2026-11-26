@@ -37,7 +37,10 @@
  *   before; an end, later than the start, from up to half an hour before
  *   the last bin. A meter without both, whose counter went backwards (reset
  *   or replaced), or without the identifiers to be read at all, is counted
- *   as missing and left out of the sum rather than read as zero.
+ *   as missing and left out of the sum rather than read as zero. A capture
+ *   also leaves out, as unreadable, a meter whose ids fall outside the
+ *   stored format (`requireStorableIds` in capability.ts); the page's reads
+ *   do not, and if getSiteDay comes to apply the format check, revisit.
  * - Battery supplied, evening: the battery's discharge over the same
  *   window. It differs from what the houses used by the grid's share,
  *   conversion losses and the site's own use.
@@ -74,6 +77,21 @@ export const EVENING_START_HOUR = 18;
  * missing rather than as having used less.
  */
 export const HOUSE_READING_TOLERANCE_MS = 30 * 60_000;
+/**
+ * The version of the figures computeSiteDayDetail works out, stored as
+ * `by.calc` in the investigation evidence (docs/investigation-evidence.md
+ * §4 "Versions"). Bump it with any change to a figure's meaning or to a
+ * threshold (the constants above, which the evidence keeps as `params`).
+ * `__tests__/site-day-calc-version.test.ts` pins a digest of the calculated
+ * evidence over a frozen corpus for each version and fails until this is
+ * bumped and the new version's digest is added; an existing version's
+ * digest is never edited, since stored evidence cites it.
+ *
+ * Version 1 counts a tenant meter that was asked of the provider but left
+ * out of its samples as missing (`houseMeterIds`, A2-2), and counts a meter
+ * whose ids fail the stored format as unreadable in a capture.
+ */
+export const SITE_DAY_CALC_VERSION = 1;
 /** The hour whose battery level is reported before the evening window. */
 export const SOC_CHECK_HOUR = 17;
 
@@ -122,7 +140,12 @@ export type SiteSourceAvailability = {
   pv: boolean;
   /** At least one tenant meter is linked, readable or not. */
   houses: boolean;
-  /** Linked tenant meters without the identifiers to read them. */
+  /**
+   * Linked tenant meters that cannot be read: without the identifiers, or,
+   * in a capture, with ids outside the stored format (`requireStorableIds`
+   * in capability.ts; the page's reads apply no format check, and if
+   * getSiteDay comes to apply it, revisit).
+   */
   houseMetersUnreadable: number;
 };
 
@@ -291,9 +314,27 @@ export type MinuteRange = [start: number, end: number];
  * Z). If the ranges start reading source availability themselves, revisit.
  * The meter fields differ: `meter_readings` and `meter_outcomes` follow
  * `sources.houses` and are empty when it is false, while `meter_window`
- * depends only on the bins read.
+ * depends only on the bins read. `series` keeps every bin's six values, so
+ * a deciding reading at position `pos ≥ 0` is `series[reading.series][pos]`.
  */
 export type SiteDayDetail = {
+  /**
+   * The six site series as computeSiteDay picks them: for each bin read, the
+   * first sample in the bin, null for an empty bin. One value per bin read
+   * (`readUntilMs`), so a read that ends before the day holds fewer than the
+   * day's bins. A bin is online when any of the six has a value, which
+   * decides dark and no-data time. Values are as the provider returned them,
+   * unrounded. Evidence §4's `series` item copies these, with a series whose
+   * source is unavailable stored as null whole (site-day-evidence.ts).
+   */
+  series: {
+    soc: (number | null)[];
+    batW: (number | null)[];
+    gridW: (number | null)[];
+    gridV: (number | null)[];
+    loadW: (number | null)[];
+    pvW: (number | null)[];
+  };
   /** The previous day's last voltage and SoC readings, as `[pos, v]`; null when it had none. */
   carry_in: { gridV: [pos: number, v: number] | null; soc: [pos: number, v: number] | null };
   /** Gaps that began with the grid known to be off: decided by the voltage reading below GRID_PRESENT_MIN_V. */
@@ -734,6 +775,14 @@ export function computeSiteDayDetail(input: SiteDayInput): { day: SiteDayOperati
     return { ranges: list, min: list.reduce((sum, [start, end]) => sum + end - start, 0) };
   };
   const detail: SiteDayDetail = {
+    series: {
+      soc: bins.map((b) => b.soc),
+      batW: bins.map((b) => b.batteryW),
+      gridW: bins.map((b) => b.gridW),
+      gridV: bins.map((b) => b.volts),
+      loadW: bins.map((b) => b.loadW),
+      pvW: bins.map((b) => b.pvW),
+    },
     carry_in: carryIn,
     dark_cut: { ...causeRanges("dark_cut"), decidedBy: darkCutBy },
     dark_lowbat: { ...causeRanges("dark_lowbat"), decidedBy: darkLowbatBy },

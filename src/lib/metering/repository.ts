@@ -16,6 +16,7 @@ import type {
   DiscoveredMeter,
 } from "./types";
 import type { SiteDayOperations, SiteDayRead } from "./site-operations";
+import type { SiteDayCapture, SiteDayWindow } from "./site-day-evidence";
 export type { MeteringProviderName } from "./registry";
 
 export type MeteringScope = {
@@ -170,6 +171,22 @@ export interface MeteringCapabilityContract {
   getSiteDay(query: unknown): Promise<MeteringResult<SiteDayRead>>;
   /** Query `{ microgrid_id, start_date, end_date }`; one entry per day, in order. */
   getSiteDays(query: unknown): Promise<MeteringResult<SiteDayOperations[]>>;
+  /**
+   * One site day as investigation evidence, `site-day-evidence/1`
+   * (docs/investigation-evidence.md §4): what getSiteDay reads, plus every
+   * fact and calculated item the snapshot stores. Query as getSiteDay's; its
+   * date must be the window's. `window` is the operation's (evidence §3 O2,
+   * "a date and a zone, fixed at creation"): every refused snapshot takes its
+   * date, and its zone too when the read is refused before or at its zone
+   * read (then `zoneRead` is null). Every refusal but an access refusal comes
+   * back as a refused snapshot, and so does MGM's own defect in building the
+   * snapshot, whether one of the builder's checks or any other throw from
+   * building it; an access refusal comes back with no snapshot. It throws
+   * (a SiteDayEvidenceDefect) only when even the refused snapshot built from
+   * constants and `window` fails its schema, which means `window` itself is
+   * not a valid operation window.
+   */
+  captureSiteDay(query: unknown, window: SiteDayWindow): Promise<SiteDayCapture>;
 }
 
 /** Candidate connection for test-without-save (never persisted). */
