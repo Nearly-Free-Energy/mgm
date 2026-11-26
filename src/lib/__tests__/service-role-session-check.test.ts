@@ -86,7 +86,12 @@ const MODULES: Record<string, Module> = {
   "src/lib/metering/infrastructure/openems-edge-status.ts": {
     privilegedExports: "all",
     reason:
-      "Calls getMicrogridEmsConfig to build an OpenEMS client for each microgrid's edge status. createEdgeStatusReader takes a MeteringComposition, so its caller has run composeMetering (authorizeOrganization, getUser) first; its one caller is the metering.edge-status watcher.",
+      "Calls getMicrogridEmsConfig to build an OpenEMS client for each microgrid's edge status and meter history. createEdgeStatusReader takes a MeteringComposition, so its caller has run composeMetering (authorizeOrganization, getUser) first; its one caller is the metering.edge-status watcher.",
+  },
+  "src/lib/metering/infrastructure/meter-activity.ts": {
+    privilegedExports: [],
+    reason:
+      "Imports only openems-provider's pure sample helpers (toEpochMs, queryBatchOrEach); it reads no configuration and builds no client, but asks the client it is handed, which openems-edge-status.ts builds after composeMetering. Its exports reach nothing privileged.",
   },
   "src/lib/metering/surface/edge-status-signals.ts": {
     privilegedExports: [],
