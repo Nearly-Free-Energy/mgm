@@ -11,10 +11,14 @@ import {
   ASSISTANT_READING,
   SurfaceContributionError,
   contributionSchema,
+  extKeyPaths,
   parseContribution,
   strictProblems,
+  withholdMode,
   type SurfaceCatalog,
 } from "../contribution-schema";
+import { SiteDayExt } from "@/lib/metering/surface/site-day-ext";
+import { SITE_DAY_KEYS } from "@/lib/metering/surface/site-day-model";
 
 /** The real catalog, whose billing plugin owns the fixture's pages, plus a second non-core plugin. */
 const SMS = {
@@ -413,44 +417,92 @@ describe("tenant views and the tenant audience", () => {
 });
 
 describe("assistant reading", () => {
-  /** METERING_SURFACE with the mark on its one view, metering.site-day. */
+  /** METERING_SURFACE without site-day's mark, which each case sets or leaves out itself. */
+  const UNMARKED = (() => {
+    const c = copy(METERING_SURFACE) as Draft;
+    delete c.views[0].agent;
+    return c;
+  })();
+  /** UNMARKED with the mark on its one view, metering.site-day. */
   const marked = (c: Draft) => (c.views[0].agent = "read");
-  /** METERING_SURFACE with the mark on its one watcher, metering.connection. */
+  /** UNMARKED with the mark on its one watcher, metering.connection. */
   const watched = (c: Draft) => (c.signals[0].agent = "read");
   const issue = (path: PropertyKey[], message: string) => expect.objectContaining({ path, message });
   const unlisted = (noun: string, id: string) =>
     `"${id}" is not on the list of ${noun} an assistant may read (src/lib/gui/assistant-reads.ts)`;
   /** Any refusal by the list. */
   const onList = expect.objectContaining({ message: expect.stringContaining("is not on the list") });
-  const SITE_DAY: readonly AssistantRead[] = [{ kind: "view", id: "metering.site-day" }];
+  /** A view's entry that pins nothing it has, for views refused before the pin matters. */
+  const bare = (id: string): AssistantRead => ({ kind: "view", id, declares: { keys: [], ext: null }, links: [] });
+  /** Site-day's entry, pinning what the view declares today. */
+  const siteDayEntry = (): Extract<AssistantRead, { kind: "view" }> => ({
+    kind: "view",
+    id: "metering.site-day",
+    declares: { keys: [...SITE_DAY_KEYS], ext: { schema: "metering.site-day@2", paths: extKeyPaths(SiteDayExt) } },
+    links: ["metering.day-previous"],
+    withhold: { ext: ["timezoneNotice"] },
+  });
+  const SITE_DAY: readonly AssistantRead[] = [siteDayEntry()];
   const CONNECTION: readonly AssistantRead[] = [{ kind: "watcher", id: "metering.connection" }];
 
-  it("lists nothing yet", () => {
-    // ADR-007 decision 8: the list starts empty, and A1's pull requests add
-    // its first entries, one each, with the mark. Each of them changes this.
-    expect(ASSISTANT_READS).toEqual([]);
+  // ADR-007 decision 8: A1's pull requests add the first entries, one each,
+  // with the mark. Each of them changes this.
+  it("lists metering.site-day and nothing else", () => {
+    expect(ASSISTANT_READS.map((r) => `${r.kind} ${r.id}`)).toEqual(["view metering.site-day"]);
+  });
+
+  describe("metering.site-day's entry", () => {
+    const listed = ASSISTANT_READS.find((r) => r.id === "metering.site-day") as Extract<AssistantRead, { kind: "view" }>;
+
+    it("is the real contribution's, which registers with the real list", () => {
+      expect(METERING_SURFACE.views?.[0]).toMatchObject({ id: "metering.site-day", agent: "read" });
+      expect(() => parseContribution(METERING_SURFACE, CATALOG)).not.toThrow();
+      // The same as the walk finds today: the entry is pasted, never computed.
+      expect([...listed.declares.keys].sort()).toEqual([...SITE_DAY_KEYS].sort());
+      expect(listed.declares.ext).toEqual({ schema: "metering.site-day@2", paths: extKeyPaths(SiteDayExt) });
+    });
+
+    it("withholds the time zone notice and never lists its link", () => {
+      expect(listed.withhold).toEqual({ ext: ["timezoneNotice"] });
+      expect(listed.links).not.toContain("metering.set-timezone");
+    });
+
+    it("refuses the real contribution with one more key", () => {
+      const error = refusal((c) => (c.views[0].declares.keys = [...c.views[0].declares.keys, "revenue"]), CATALOG, METERING_SURFACE, ASSISTANT_READS);
+      expect(error.issues).toEqual([
+        issue(
+          ["views", 0, "declares", "keys"],
+          `"metering.site-day"'s declaration differs from its entry in src/lib/gui/assistant-reads.ts: keys (not in the entry: revenue)`,
+        ),
+      ]);
+    });
+
+    it("refuses the real contribution without its entry", () => {
+      const error = refusal(() => {}, CATALOG, METERING_SURFACE, []);
+      expect(error.issues).toEqual([issue(["views", 0, "agent"], unlisted("views", "metering.site-day"))]);
+    });
   });
 
   describe("views", () => {
     it("accepts the mark on a listed view about an organization's records that takes no signals", () => {
-      const c = copy(METERING_SURFACE) as Draft;
+      const c = copy(UNMARKED) as Draft;
       marked(c);
       expect(c.views[0].params).toEqual({ id: "microgrid" });
       expect(parseContribution(c, CATALOG, SITE_DAY).contribution.views?.[0].agent).toBe("read");
     });
 
     it("refuses the mark on a view that is not on the list", () => {
-      const error = refusal(marked, CATALOG, METERING_SURFACE);
+      const error = refusal(marked, CATALOG, UNMARKED, []);
       expect(error.issues).toEqual([issue(["views", 0, "agent"], unlisted("views", "metering.site-day"))]);
     });
 
     it("refuses the mark on a view listed as a watcher", () => {
-      const error = refusal(marked, CATALOG, METERING_SURFACE, [{ kind: "watcher", id: "metering.site-day" }]);
+      const error = refusal(marked, CATALOG, UNMARKED, [{ kind: "watcher", id: "metering.site-day" }]);
       expect(error.issues).toEqual([issue(["views", 0, "agent"], unlisted("views", "metering.site-day"))]);
     });
 
     it("refuses the mark on each of billing's views, even listed", () => {
-      const listed = BILLING_SURFACE.views!.map((v) => ({ kind: "view" as const, id: v.id }));
+      const listed = BILLING_SURFACE.views!.map((v) => bare(v.id));
       const error = refusal((c) => c.views.forEach((v: Draft) => (v.agent = "read")), CATALOG, BILLING_SURFACE, listed);
       for (const i of BILLING_SURFACE.views!.keys())
         expect(error.issues).toContainEqual(issue(["views", i, "agent"], "a billing view cannot be read by an assistant"));
@@ -458,7 +510,7 @@ describe("assistant reading", () => {
     });
 
     it("refuses the mark on payments' views, even listed", () => {
-      const error = refusal(marked, CATALOG, PAYMENTS_SURFACE, [{ kind: "view", id: PAYMENTS_SURFACE.views![0].id }]);
+      const error = refusal(marked, CATALOG, PAYMENTS_SURFACE, [bare(PAYMENTS_SURFACE.views![0].id)]);
       expect(error.issues).toContainEqual(issue(["views", 0, "agent"], "a payments view cannot be read by an assistant"));
       expect(error.issues).not.toContainEqual(onList);
     });
@@ -469,7 +521,7 @@ describe("assistant reading", () => {
     it.each(["billing", "payments", "pesapal", "tenant-app", "sms-reminders"])(
       "refuses the mark on a listed view contributed by %s",
       (plugin) => {
-        const error = refusal((c) => Object.assign(c, { plugin }) && marked(c), CATALOG, METERING_SURFACE, SITE_DAY);
+        const error = refusal((c) => Object.assign(c, { plugin }) && marked(c), CATALOG, UNMARKED, SITE_DAY);
         expect(error.issues).toContainEqual(issue(["views", 0, "agent"], `a ${plugin} view cannot be read by an assistant`));
       },
     );
@@ -480,7 +532,7 @@ describe("assistant reading", () => {
         const error = refusal(
           (c) => Object.assign(c.views[0], { params: { id: kind } }) && marked(c),
           CATALOG,
-          METERING_SURFACE,
+          UNMARKED,
           SITE_DAY,
         );
         expect(error.issues).toEqual([issue(["views", 0, "agent"], `a view whose path names a ${kind} cannot be read by an assistant`)]);
@@ -514,7 +566,7 @@ describe("assistant reading", () => {
           marked(c);
         },
         CATALOG,
-        METERING_SURFACE,
+        UNMARKED,
         SITE_DAY,
       );
       expect(error.issues).toEqual([issue(["views", 0, "agent"], `a view reached from ${group} navigation cannot be read by an assistant`)]);
@@ -528,7 +580,7 @@ describe("assistant reading", () => {
           marked(c);
         },
         CATALOG,
-        METERING_SURFACE,
+        UNMARKED,
         SITE_DAY,
       );
       expect(error.issues).toEqual([issue(["views", 0, "agent"], "a view that takes signals cannot be read by an assistant")]);
@@ -541,7 +593,7 @@ describe("assistant reading", () => {
           marked(c);
         },
         CATALOG,
-        METERING_SURFACE,
+        UNMARKED,
         SITE_DAY,
       );
       expect(error.issues).toEqual([
@@ -550,7 +602,7 @@ describe("assistant reading", () => {
     });
 
     it("accepts the mark on a listed view whose prefix list is empty", () => {
-      const c = copy(METERING_SURFACE) as Draft;
+      const c = copy(UNMARKED) as Draft;
       c.views[0].declares.prefixes = [];
       marked(c);
       expect(parseContribution(c, CATALOG, SITE_DAY).contribution.views?.[0].agent).toBe("read");
@@ -560,7 +612,7 @@ describe("assistant reading", () => {
     // request that does changes this.
     it.each([
       ["unlisted", undefined],
-      ["listed", [{ kind: "view", id: TENANT_APP_SURFACE.views![0].id }] as const],
+      ["listed", [bare(TENANT_APP_SURFACE.views![0].id)]],
     ])("gives a marked tenant view, %s, one refusal", (_listed, reads) => {
       // tenant.home declares a key prefix, so this also pins that the prefix
       // refusal leaves a tenant view to its own.
@@ -570,20 +622,114 @@ describe("assistant reading", () => {
     });
   });
 
+  // ADR-007 decision 8: a marked view's declaration is pinned by its entry.
+  describe("the pin", () => {
+    const differs = (what: string) => expect.stringContaining(`"metering.site-day"'s declaration differs from its entry in src/lib/gui/assistant-reads.ts: ${what}`);
+    /** UNMARKED marked, refused against `entry` (site-day's, changed by `edit`). */
+    const pinned = (change: (c: Draft) => void, edit: (e: ReturnType<typeof siteDayEntry>) => void = () => {}) => {
+      const entry = siteDayEntry();
+      edit(entry);
+      return refusal(
+        (c) => {
+          marked(c);
+          change(c);
+        },
+        CATALOG,
+        UNMARKED,
+        [entry],
+      );
+    };
+
+    it("accepts a marked view whose declaration is its entry's, keys in any order", () => {
+      const entry = siteDayEntry();
+      const c = copy(UNMARKED) as Draft;
+      marked(c);
+      c.views[0].declares.keys = [...SITE_DAY_KEYS].reverse();
+      expect(parseContribution(c, CATALOG, [entry]).contribution.views?.[0].agent).toBe("read");
+    });
+
+    it("refuses a key the view adds, and one it drops", () => {
+      const added = pinned((c) => (c.views[0].declares.keys = [...SITE_DAY_KEYS, "revenue"]));
+      expect(added.issues).toEqual([issue(["views", 0, "declares", "keys"], differs("keys (not in the entry: revenue)"))]);
+      const dropped = pinned((c) => (c.views[0].declares.keys = SITE_DAY_KEYS.filter((k) => k !== "soc")));
+      // The examples' soc series is now undeclared too.
+      expect(dropped.issues).toContainEqual(issue(["views", 0, "declares", "keys"], differs("keys (not in the view: soc)")));
+    });
+
+    it("refuses an entry that names a key twice", () => {
+      const error = pinned(() => {}, (e) => (e.declares = { ...e.declares, keys: [...e.declares.keys, "soc"] }));
+      expect(error.issues).toEqual([issue(["views", 0, "declares", "keys"], differs("the entry names a key twice"))]);
+    });
+
+    it("refuses an entry that names an ext path twice", () => {
+      const error = pinned(() => {}, (e) => (e.declares = { ...e.declares, ext: { ...e.declares.ext!, paths: [...e.declares.ext!.paths, "date"] } }));
+      expect(error.issues).toEqual([issue(["views", 0, "ext", "zod"], differs("the entry names an ext path twice"))]);
+    });
+
+    it("refuses a new ext version, and an ext the entry does not pin", () => {
+      const v3 = pinned((c) => (c.views[0].ext = { ...c.views[0].ext, schema: "metering.site-day@3" }));
+      expect(v3.issues).toContainEqual(
+        issue(["views", 0, "ext", "schema"], differs("ext schema (the view's is metering.site-day@3, the entry's metering.site-day@2)")),
+      );
+      const none = pinned(() => {}, (e) => (e.declares = { ...e.declares, ext: null }));
+      expect(none.issues).toContainEqual(
+        issue(["views", 0, "ext", "schema"], differs("ext schema (the view's is metering.site-day@2, the entry's none)")),
+      );
+    });
+
+    it("refuses a field added to the ext at any depth", () => {
+      const options = (SiteDayExt._zod.def as unknown as { options: z.ZodObject[] }).options;
+      const wider = z.discriminatedUnion("state", [
+        options[0].extend({ sources: (options[0].shape.sources as z.ZodObject).extend({ wind: z.boolean().optional() }) }),
+        options[1],
+        options[2],
+      ]);
+      const error = pinned((c) => (c.views[0].ext = { ...c.views[0].ext, zod: wider }));
+      expect(error.issues).toEqual([issue(["views", 0, "ext", "zod"], differs("ext paths (not in the entry: sources.wind)"))]);
+    });
+
+    it("refuses an entry that withholds a path it does not pin, or one that cannot be withheld", () => {
+      const unpinned = pinned(() => {}, (e) => (e.withhold = { ext: ["address"] }));
+      expect(unpinned.issues).toEqual([
+        issue(["views", 0, "ext"], `"metering.site-day"'s entry in src/lib/gui/assistant-reads.ts withholds "address", which is not one of its pinned ext paths`),
+      ]);
+      const required = pinned(() => {}, (e) => (e.withhold = { ext: ["notes"] }));
+      expect(required.issues).toEqual([
+        issue(
+          ["views", 0, "ext"],
+          `"metering.site-day"'s entry in src/lib/gui/assistant-reads.ts withholds "notes", which the ext schema does not let be null everywhere it is, nor optional everywhere`,
+        ),
+      ]);
+    });
+
+    it("refuses a link id of another plugin's", () => {
+      const error = pinned(() => {}, (e) => (e.links = ["metering.day-previous", "billing.savings"]));
+      expect(error.issues).toEqual([
+        issue(["views", 0, "agent"], `"metering.site-day"'s entry in src/lib/gui/assistant-reads.ts lists the link "billing.savings", which must start with the alias "metering."`),
+      ]);
+    });
+
+    it("does not pin a view that is listed but not marked", () => {
+      const entry = siteDayEntry();
+      entry.declares = { keys: [], ext: null };
+      expect(() => parseContribution(UNMARKED, CATALOG, [entry])).not.toThrow();
+    });
+  });
+
   describe("watchers", () => {
     it("accepts the mark on a listed watcher", () => {
-      const c = copy(METERING_SURFACE) as Draft;
+      const c = copy(UNMARKED) as Draft;
       watched(c);
       expect(parseContribution(c, CATALOG, CONNECTION).contribution.signals?.[0].agent).toBe("read");
     });
 
     it("refuses the mark on a watcher that is not on the list", () => {
-      const error = refusal(watched, CATALOG, METERING_SURFACE);
+      const error = refusal(watched, CATALOG, UNMARKED);
       expect(error.issues).toEqual([issue(["signals", 0, "agent"], unlisted("watchers", "metering.connection"))]);
     });
 
     it("refuses the mark on a watcher listed as a view", () => {
-      const error = refusal(watched, CATALOG, METERING_SURFACE, [{ kind: "view", id: "metering.connection" }]);
+      const error = refusal(watched, CATALOG, UNMARKED, [bare("metering.connection")]);
       expect(error.issues).toEqual([issue(["signals", 0, "agent"], unlisted("watchers", "metering.connection"))]);
     });
 
@@ -599,7 +745,7 @@ describe("assistant reading", () => {
     });
 
     it("refuses a mark other than read", () => {
-      const error = refusal((c) => (c.signals[0].agent = "write"), CATALOG, METERING_SURFACE, CONNECTION);
+      const error = refusal((c) => (c.signals[0].agent = "write"), CATALOG, UNMARKED, CONNECTION);
       expect(error.issues).toContainEqual(expect.objectContaining({ path: ["signals", 0, "agent"] }));
     });
   });
@@ -660,6 +806,62 @@ describe("strictProblems", () => {
       nothing: z.null(),
     });
     expect(strictProblems(schema)).toEqual([]);
+  });
+});
+
+describe("extKeyPaths", () => {
+  it("names every property at any depth, dotted, sorted and once", () => {
+    const schema = z.strictObject({
+      b: z.strictObject({ y: z.number(), x: z.string().nullable() }).optional(),
+      a: z.array(z.strictObject({ item: z.boolean() })).readonly(),
+      pair: z.tuple([z.strictObject({ first: z.string() }), z.number()]),
+      either: z.union([z.strictObject({ t: z.literal("a"), only: z.string() }), z.strictObject({ t: z.literal("b") })]),
+      byKind: z.record(z.enum(["k1", "k2"]), z.strictObject({ n: z.number() })),
+      byLiteral: z.record(z.union([z.literal("one"), z.literal("two")]), z.string()),
+      level: z.enum(["low", "high"]).default("low"),
+    });
+    expect(extKeyPaths(schema)).toEqual([
+      "a", "a.item",
+      "b", "b.x", "b.y",
+      "byKind", "byKind.k1", "byKind.k1.n", "byKind.k2", "byKind.k2.n",
+      "byLiteral", "byLiteral.one", "byLiteral.two",
+      "either", "either.only", "either.t",
+      "level",
+      "pair", "pair.first",
+    ]);
+  });
+
+  it("gives a schema used twice its paths at each place", () => {
+    const range = z.strictObject({ start: z.string() });
+    expect(extKeyPaths(z.strictObject({ cuts: z.array(range), dark: z.array(range) }))).toEqual(["cuts", "cuts.start", "dark", "dark.start"]);
+  });
+
+  it("ends a walk through a schema that holds itself", () => {
+    const node = z.strictObject({
+      name: z.string(),
+      get next() {
+        return node.optional();
+      },
+    });
+    expect(extKeyPaths(node)).toEqual(["name", "next"]);
+  });
+});
+
+describe("withholdMode", () => {
+  const schema = z.discriminatedUnion("t", [
+    z.strictObject({ t: z.literal("a"), notice: z.string().nullable(), hint: z.string().optional(), both: z.string().nullable(), list: z.array(z.strictObject({ note: z.string().nullable() })) }),
+    z.strictObject({ t: z.literal("b"), notice: z.string().nullable().readonly(), hint: z.string().nullable().optional(), both: z.string().optional() }),
+  ]);
+
+  it.each([
+    ["nullable in every option", "notice", "null"],
+    ["optional in every option", "hint", "omit"],
+    ["nullable in one option and optional in the other", "both", null],
+    ["required", "t", null],
+    ["inside an array's items", "list.note", "null"],
+    ["not in the schema", "address", null],
+  ] as const)("answers for a path %s", (_name, path, mode) => {
+    expect(withholdMode(schema, path)).toBe(mode);
   });
 });
 

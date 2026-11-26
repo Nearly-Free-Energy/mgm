@@ -77,3 +77,13 @@
 
 # What the Release workflow runs to build the published deployment asset.
 /scripts/release/                      @tushabe @arindahills @dismasfriday
+
+# What the views and watchers on the assistant read list emit
+# (src/lib/gui/assistant-reads.ts, ADR-007 decision 8): their surface and
+# model files, so a later edit to what reaches an assistant gets the same
+# review as the entry. The entry pins keys and ext paths, not the text a
+# loader puts there.
+/src/lib/metering/surface.ts            @tushabe @arindahills @dismasfriday
+/src/lib/metering/surface/site-day.ts   @tushabe @arindahills @dismasfriday
+/src/lib/metering/surface/site-day-model.ts @tushabe @arindahills @dismasfriday
+/src/lib/metering/surface/site-day-ext.ts @tushabe @arindahills @dismasfriday

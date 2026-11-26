@@ -34,9 +34,9 @@ describe("METERING_SURFACE", () => {
       ext: { schema: "metering.site-day@2" },
       load: loadSiteDay,
     });
-    // Not polled, and not readable by an assistant.
+    // Not polled. Readable by an assistant, as listed in src/lib/gui/assistant-reads.ts (#133 A1-2).
     expect(view).not.toHaveProperty("live");
-    expect(view).not.toHaveProperty("agent");
+    expect(view).toHaveProperty("agent", "read");
   });
 
   it("serves the Operations page through the view: a nav entry naming it, and a catalog page served by a view", () => {

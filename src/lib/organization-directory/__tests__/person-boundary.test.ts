@@ -115,7 +115,7 @@ describe("a person (org.user) and assistants", () => {
     const view = (params: Record<string, string>) => ({ ...today, id: "org.person", path: "/settings/users/[id]", params, agent: "read" as const });
     const issues = (params: Record<string, string>) => {
       try {
-        parseContribution({ ...ORGANIZATION_DIRECTORY_SURFACE, views: [view(params)] }, { plugins: MGM_BUNDLED_PLUGINS }, [{ kind: "view", id: "org.person" }]);
+        parseContribution({ ...ORGANIZATION_DIRECTORY_SURFACE, views: [view(params)] }, { plugins: MGM_BUNDLED_PLUGINS }, [{ kind: "view", id: "org.person", declares: { keys: [], ext: null }, links: [] }]);
       } catch (error) {
         if (error instanceof SurfaceContributionError) return error.issues.map((i) => i.message);
         throw error;

@@ -42,6 +42,7 @@ const composeMetering = vi.fn();
 vi.mock("@/lib/metering/compose", () => ({ composeMetering: (...args: unknown[]) => composeMetering(...args) }));
 
 import { METERING_SURFACE } from "@/lib/metering/surface";
+import { SiteDayExt } from "@/lib/metering/surface/site-day-ext";
 import { ASSISTANT_READ_MAX_CHARS, WITHHELD_NOTE, readForAssistant, type AssistantReadRequest } from "../assistant-read";
 import { actionRefSchema, viewModelSchema } from "../model-schema";
 import * as organization from "../organization";
@@ -130,6 +131,17 @@ function ctx(): HostContext {
   return made.ctx;
 }
 const list = (...entries: AssistantRead[]) => reads.splice(0, reads.length, ...entries);
+/** A view's entry, as the read interface uses it: its links and withheld ext paths (the pin is the contribution check's). */
+const viewEntry = (id: string, o: { links?: string[]; withhold?: string[] } = {}): AssistantRead => ({
+  kind: "view",
+  id,
+  declares: { keys: [], ext: null },
+  links: o.links ?? [],
+  ...(o.withhold ? { withhold: { ext: o.withhold } } : {}),
+});
+/** Every link site-day emits but the time zone's. */
+const SITE_DAY_LINKS = ["metering.day-previous", "metering.day-next", "metering.day-today", "metering.microgrid-setup", "metering.edges", "metering.openems-backend"];
+const siteDayEntry = (o: { withhold?: string[] } = {}) => viewEntry("metering.site-day", { links: SITE_DAY_LINKS, ...o });
 const read = (href: string, org: string = ORG_A) => readForAssistant(ctx(), { type: "view", href, org });
 const logged = () => inspect([vi.mocked(console.error).mock.calls, vi.mocked(console.warn).mock.calls], { depth: 10 });
 
@@ -168,7 +180,7 @@ beforeEach(() => {
   savings = view("billing", { id: "billing.savings", path: "/microgrids/[id]/billing", attach: { to: { view: "metering.site-day" }, order: 1, hint: "section" } });
   rates = view("billing", { id: "billing.rates", path: "/microgrids/[id]/setup/rates", attach: { to: "microgrid", order: 2, hint: "tab" } });
   snapshot = snapshotOf([siteDay, savings, rates], { actions: [action("billing", "billing.edit", "/api/microgrids/[id]")] });
-  list({ kind: "view", id: "metering.site-day" });
+  list(siteDayEntry());
   resolveTargetOrganization.mockReset().mockResolvedValue(ORG_A);
   checkGate.mockReset().mockImplementation(async (_s: unknown, r: { plugin: string; target: { id: string } }) => gates.get(r.plugin) ?? { ok: true, organizationId: r.target.id });
   // Past a macrotask, so a dispose that is only started, not awaited, records after the answer.
@@ -267,7 +279,7 @@ describe("readForAssistant, for a view", () => {
       roles = [superAdmin()];
       const home = view("community-management", { id: "community-management.home", path: "/microgrids", params: {}, entity: undefined, agent: "read" } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
       snapshot = snapshotOf([home]);
-      list({ kind: "view", id: "community-management.home" });
+      list(viewEntry("community-management.home"));
       expect(await read("/microgrids", ORG_B)).toMatchObject({ ok: true, value: { org: ORG_B } });
       expect(loadOf(home)).toHaveBeenCalledWith(expect.objectContaining({ organizationId: ORG_B }));
       expect(await read(`/microgrids?org=${ORG_A}`, ORG_B)).toMatchObject({ ok: true, value: { org: ORG_B } });
@@ -276,7 +288,7 @@ describe("readForAssistant, for a view", () => {
     it("refuses an org the person cannot see, for a view whose path names none, before any gate or load", async () => {
       const home = view("community-management", { id: "community-management.home", path: "/microgrids", params: {}, entity: undefined, agent: "read" } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
       snapshot = snapshotOf([home]);
-      list({ kind: "view", id: "community-management.home" });
+      list(viewEntry("community-management.home"));
       expect(await read("/microgrids", ORG_B)).toMatchObject({ ok: false, status: 404, code: "gui_not_found" });
       expect(checkGate).not.toHaveBeenCalled();
       expect(loadOf(home)).not.toHaveBeenCalled();
@@ -293,7 +305,7 @@ describe("readForAssistant, for a view", () => {
     it("loads a listed db view whose plugin is off, under the gate's notice", async () => {
       const edges = view("metering", { id: "metering.edges-view", path: "/microgrids/[id]/setup/edges", agent: "read" } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
       snapshot = snapshotOf([edges]);
-      list({ kind: "view", id: "metering.edges-view" });
+      list(viewEntry("metering.edges-view"));
       gates.set("metering", DISABLED as GateDecision);
       expect(await read(`/microgrids/${MG}/setup/edges`)).toMatchObject({ ok: true, value: { model: { notice: { tone: "warning", text: DISABLED.message } } } });
       expect(loadOf(edges)).toHaveBeenCalledOnce();
@@ -358,7 +370,7 @@ describe("readForAssistant, for a view", () => {
         attach: { to: { view: "metering.site-day" }, order: 3, hint: "tile" },
       } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
       snapshot = snapshotOf([siteDay, tile, rates], { actions: [action("billing", "billing.edit", "/api/microgrids/[id]")] });
-      list({ kind: "view", id: "metering.site-day" }, { kind: "view", id: "community-management.tile" });
+      list(siteDayEntry(), viewEntry("community-management.tile"));
       return tile;
     }
 
@@ -430,7 +442,7 @@ describe("readForAssistant, for a view", () => {
       },
     });
     snapshot = snapshotOf([feed, other]);
-    list({ kind: "view", id: "metering.feed" });
+    list(viewEntry("metering.feed"));
     const out = await read(DAY);
     if (!out.ok) throw new Error("refused");
     expect(out.value.model.kind === "feed" && out.value.model.body.entries[0].embed).toEqual(WITHHELD_EMBED);
@@ -446,7 +458,7 @@ describe("readForAssistant, for a view", () => {
     loadOf(feed).mockResolvedValue({ ok: true, model: { title: "Feed", actions: [], body: { entries: [entry("e1", `/microgrids/${MG}/setup/openems-backend`)] } } });
     loadOf(inner).mockResolvedValue({ ok: true, model: { title: "Inner", actions: [], body: { entries: [entry("e2", `/microgrids/${MG}/setup/edges`)] } } });
     snapshot = snapshotOf([feed, inner, other]);
-    list({ kind: "view", id: "metering.feed" }, { kind: "view", id: "metering.inner" });
+    list(viewEntry("metering.feed"), viewEntry("metering.inner"));
     const out = await read(DAY);
     if (!out.ok || out.value.model.kind !== "feed") throw new Error("refused");
     const embed = out.value.model.body.entries[0].embed;
@@ -483,7 +495,7 @@ describe("readForAssistant, for a view", () => {
       },
     });
     snapshot = snapshotOf([flow, listing], { actions: [action("metering", "metering.check", "/api/microgrids/[id]/openems-backend")] });
-    list({ kind: "view", id: "metering.flow" }, { kind: "view", id: "metering.list" });
+    list(viewEntry("metering.flow"), viewEntry("metering.list"));
 
     const pages = [await dispatchView(ctx(), `/microgrids/${MG}/setup`), await dispatchView(ctx(), DAY)];
     expect(pages.map((p) => p.ok && JSON.stringify(p.value).includes("metering.check"))).toEqual([true, true]);
@@ -515,7 +527,7 @@ describe("readForAssistant, for a view", () => {
       },
     });
     snapshot = snapshotOf([feed], { actions: [action("metering", "metering.check", "/api/microgrids/[id]/openems-backend")] });
-    list({ kind: "view", id: "metering.feed" });
+    list(viewEntry("metering.feed"));
     const page = await dispatchView(ctx(), DAY);
     expect(page.ok && page.value.kind === "feed" && [page.value.actions.length, !!page.value.body.compose, !!page.value.body.stop]).toEqual([1, true, true]);
     const out = await read(DAY);
@@ -532,7 +544,7 @@ describe("readForAssistant, for a view", () => {
       model: { title: "Leaky", actions: [], entity: { kind: "tenant", id: TENANT, label: CANARY }, body: { tiles: [] } },
     });
     snapshot = snapshotOf([leaky]);
-    list({ kind: "view", id: "metering.leaky" });
+    list(viewEntry("metering.leaky"));
     const out = await read(DAY);
     expect(out).toEqual({ ok: false, status: 500, code: "assistant_reference_refused", message: expect.any(String) });
     expect(JSON.stringify(out)).not.toContain(CANARY);
@@ -545,10 +557,239 @@ describe("readForAssistant, for a view", () => {
     const tiles = Array.from({ length: 100 }, () => ({ key: "a", label: "x".repeat(200), value: { t: "text", text: "y".repeat(2_500) } }));
     loadOf(big).mockResolvedValue({ ok: true, model: { title: "Big", actions: [], body: { tiles } } });
     snapshot = snapshotOf([big]);
-    list({ kind: "view", id: "metering.big" });
+    list(viewEntry("metering.big"));
     const page = await dispatchView(ctx(), DAY);
     expect(page.ok && JSON.stringify(page.value).length).toBeGreaterThan(ASSISTANT_READ_MAX_CHARS);
     expect(await read(DAY)).toMatchObject({ ok: false, status: 500, code: "assistant_output_too_large" });
+  });
+});
+
+describe("readForAssistant, applying a view's entry", () => {
+  const COUNTRY = "CANARY-COUNTRY-41d2";
+  const field = (path: string) => ({ what: "field", path, note: WITHHELD_NOTE });
+
+  it("keeps only the entry's links and withholds its ext paths, and the answer still parses", async () => {
+    // A UTC microgrid whose address implies another zone: the page shows the time zone notice and its link.
+    tables.microgrids = { data: [{ id: MG, name: "Kiwumu", community_id: null, timezone: "UTC", address_country: COUNTRY, lat: 0.3, lng: 32.6 }] };
+    list(siteDayEntry({ withhold: ["timezoneNotice"] }));
+    const page = await dispatchView(ctx(), `${DAY}?date=2026-11-08`);
+    expect(JSON.stringify(page)).toContain(COUNTRY);
+    expect(page.ok && page.value.links.map((l) => l.id)).toContain("metering.set-timezone");
+
+    const out = await read(`${DAY}?date=2026-11-08`);
+    if (!out.ok) throw new Error("refused");
+    expect(out.value.model.ext?.data).toMatchObject({ state: "day", timezoneNotice: null });
+    expect(out.value.model.links.map((l) => l.id)).toEqual(["metering.day-previous", "metering.day-next", "metering.day-today", "metering.microgrid-setup"]);
+    expect(out.value.withheld).toContainEqual(field("ext.data.timezoneNotice"));
+    expect(JSON.stringify(out)).not.toContain(COUNTRY);
+    expect(JSON.stringify(out)).not.toContain("metering.set-timezone");
+    // Logged by id, and not recorded in the answer.
+    expect(logged()).toContain("assistant read metering.site-day: left out the link metering.set-timezone");
+    expect(viewModelSchema.safeParse({ ...out.value.model, attached: [] }).success).toBe(true);
+    expect(SiteDayExt.safeParse(out.value.model.ext?.data).success).toBe(true);
+  });
+
+  it("names a withheld path on every read, whatever it held", async () => {
+    list(siteDayEntry({ withhold: ["timezoneNotice"] }));
+    const out = await read(`${DAY}?date=2026-11-08`);
+    if (!out.ok) throw new Error("refused");
+    expect(out.value.model.ext?.data).toMatchObject({ timezoneNotice: null });
+    expect(out.value.withheld.filter((w) => w.what === "field")).toEqual([field("ext.data.timezoneNotice")]);
+  });
+
+  it("drops every link of a view whose entry lists none, at the model and in a collection's rows", async () => {
+    // The ext's own data holds a `links` list of its own, which is data, not the model's links.
+    const Ext = z.strictObject({ links: z.array(z.strictObject({ id: z.string() })) });
+    const listing = view("metering", {
+      id: "metering.list",
+      kind: "collection",
+      path: "/microgrids/[id]/operations",
+      agent: "read",
+      declares: { keys: ["a"] },
+      ext: { schema: "metering.list@1", zod: Ext },
+    } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
+    const link = (id: string) => ({ id, label: id, href: `/microgrids/${MG}/setup/edges` });
+    const extData = { links: [{ id: "metering.in-data" }, { id: "metering.kept" }] };
+    loadOf(listing).mockResolvedValue({
+      ok: true,
+      model: {
+        title: "List",
+        actions: [],
+        links: [link("metering.kept"), link("metering.top")],
+        body: {
+          columns: [{ key: "a", label: "A", type: "text", priority: 1 }],
+          rows: [{ id: "r1", cells: { a: { t: "text", text: "x" } }, actions: [], links: [link("metering.row"), link("metering.kept")] }],
+          empty: { title: "None" },
+        },
+        ext: { schema: "metering.list@1", data: extData },
+      },
+    });
+    snapshot = snapshotOf([listing]);
+    list(viewEntry("metering.list", { links: ["metering.kept"] }));
+    const out = await read(DAY);
+    if (!out.ok || out.value.model.kind !== "collection") throw new Error("refused");
+    expect(out.value.model.links.map((l) => l.id)).toEqual(["metering.kept"]);
+    expect(out.value.model.body.rows[0].links?.map((l) => l.id)).toEqual(["metering.kept"]);
+    expect(out.value.model.ext?.data).toEqual(extData);
+    expect(out.value.withheld).toEqual([]);
+    expect(logged()).toContain("left out the link metering.top");
+    expect(logged()).toContain("left out the link metering.row");
+    expect(logged()).not.toContain("metering.in-data");
+  });
+
+  it("refuses the read when an unlisted link carries a refused reference, rather than dropping it", async () => {
+    const sharing = view("metering", { id: "metering.sharing", path: "/microgrids/[id]/operations", agent: "read" } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
+    loadOf(sharing).mockResolvedValue({
+      ok: true,
+      model: {
+        title: "Sharing",
+        actions: [],
+        links: [{ id: "metering.unlisted", label: "Share", href: `/microgrids/${MG}/setup/edges`, share: { title: "Day", text: CANARY } }],
+        body: { tiles: [] },
+      },
+    });
+    snapshot = snapshotOf([sharing]);
+    list(viewEntry("metering.sharing"));
+    const out = await read(DAY);
+    expect(out).toEqual({ ok: false, status: 500, code: "assistant_reference_refused", message: expect.any(String) });
+    expect(JSON.stringify(out)).not.toContain(CANARY);
+    expect(logged()).toContain("assistant read metering.sharing: a share reference at links.0");
+    expect(logged()).not.toContain("left out the link");
+  });
+
+  it("applies an embedded view's own entry to its model, removing an optional path", async () => {
+    const Ext = z.strictObject({ shown: z.string(), secret: z.string().optional(), rows: z.array(z.strictObject({ note: z.string().nullable() })) });
+    const feed = view("metering", { id: "metering.feed", kind: "feed", path: "/microgrids/[id]/operations", agent: "read", declares: { keys: [] } } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
+    const inner = view("metering", {
+      id: "metering.inner",
+      path: "/microgrids/[id]/setup/edges",
+      agent: "read",
+      ext: { schema: "metering.inner@1", zod: Ext },
+    } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
+    const link = (id: string) => ({ id, label: id, href: `/microgrids/${MG}/setup/edges` });
+    loadOf(feed).mockResolvedValue({
+      ok: true,
+      model: {
+        title: "Feed",
+        actions: [],
+        links: [link("metering.inner-link")],
+        body: { entries: [{ id: "e1", at: "2026-11-09T07:00:00Z", author: { kind: "system", name: "MGM" }, text: [{ p: ["x"] }], embed: { type: "view", href: `/microgrids/${MG}/setup/edges` } }] },
+      },
+    });
+    loadOf(inner).mockResolvedValue({
+      ok: true,
+      model: {
+        title: "Inner",
+        actions: [],
+        links: [link("metering.inner-link")],
+        body: { tiles: [] },
+        ext: { schema: "metering.inner@1", data: { shown: "yes", secret: CANARY, rows: [{ note: CANARY }, { note: null }] } },
+      },
+    });
+    snapshot = snapshotOf([feed, inner]);
+    list(viewEntry("metering.feed"), viewEntry("metering.inner", { links: ["metering.inner-link"], withhold: ["secret", "rows.note"] }));
+    const out = await read(DAY);
+    if (!out.ok || out.value.model.kind !== "feed") throw new Error("refused");
+    expect(out.value.model.links).toEqual([]);
+    const embed = out.value.model.body.entries[0].embed;
+    if (embed?.type !== "view") throw new Error("not embedded");
+    expect(embed.model.links.map((l) => l.id)).toEqual(["metering.inner-link"]);
+    expect(embed.model.ext?.data).toEqual({ shown: "yes", rows: [{ note: null }, { note: null }] });
+    expect(out.value.withheld).toEqual([field("body.entries.0.embed.model.ext.data.secret"), field("body.entries.0.embed.model.ext.data.rows.note")]);
+    expect(JSON.stringify(out)).not.toContain(CANARY);
+  });
+
+  it("refuses the answer, as the host's, when the ext does not parse once withheld", async () => {
+    // Registration accepts this schema (a refine adds no key), and `a` is nullable, so it can be withheld; the refine then fails.
+    const Ext = z.strictObject({ a: z.string().nullable() }).refine((d) => d.a !== null);
+    const refined = view("metering", {
+      id: "metering.refined",
+      path: "/microgrids/[id]/operations",
+      agent: "read",
+      ext: { schema: "metering.refined@1", zod: Ext },
+    } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
+    loadOf(refined).mockResolvedValue({
+      ok: true,
+      model: { title: "Refined", actions: [], body: { tiles: [] }, ext: { schema: "metering.refined@1", data: { a: CANARY } } },
+    });
+    snapshot = snapshotOf([refined]);
+    list(viewEntry("metering.refined", { withhold: ["a"] }));
+    const out = await read(DAY);
+    expect(out).toEqual({ ok: false, status: 500, code: "gui_output_invalid", message: expect.any(String) });
+    expect(JSON.stringify(out)).not.toContain(CANARY);
+    expect(logged()).toContain("assistant read metering.refined: its ext does not parse once withheld");
+  });
+
+  it("refuses the answer, as the host's, when a withheld path cannot be withheld", async () => {
+    // The contribution check refuses such an entry; the read interface does not trust that it ran.
+    list(siteDayEntry({ withhold: ["date"] }));
+    expect(await read(`${DAY}?date=2026-11-08`)).toMatchObject({ ok: false, status: 500, code: "gui_output_invalid" });
+  });
+});
+
+describe("readForAssistant, for metering.site-day as listed", () => {
+  const COUNTRY = "CANARY-COUNTRY-9c3e";
+  const NUDGE_TITLE = "Billing timezone is still UTC";
+  let listed: AssistantRead[];
+
+  beforeEach(async () => {
+    ({ ASSISTANT_READS: listed } = await vi.importActual<{ ASSISTANT_READS: AssistantRead[] }>("@/lib/gui/assistant-reads"));
+    list(...listed);
+    // The real contribution, mark included, and a UTC microgrid whose address implies another zone.
+    siteDay = { plugin: "metering", def: { ...REAL_SITE_DAY, load: vi.fn(REAL_SITE_DAY.load) } as unknown as ViewDef };
+    snapshot = snapshotOf([siteDay, savings, rates], { actions: [action("billing", "billing.edit", "/api/microgrids/[id]")] });
+    tables.microgrids = { data: [{ id: MG, name: "Kiwumu", community_id: null, timezone: "UTC", address_country: COUNTRY, lat: null, lng: 32.6 }] };
+  });
+
+  it("is marked in the real contribution", () => {
+    expect(REAL_SITE_DAY.agent).toBe("read");
+  });
+
+  // 2026-11-08 is yesterday in Kampala (NOW), so the day links are previous, next and today.
+  const DAY_LINKS = ["metering.day-previous", "metering.day-next", "metering.day-today"];
+  it.each([
+    ["a day", () => undefined, "day", [...DAY_LINKS, "metering.microgrid-setup"]],
+    ["no site devices", () => getSiteDay.mockResolvedValue({ ok: false, status: 409, code: "metering_no_site_devices", message: UPSTREAM }), "no-site-devices", ["metering.edges", ...DAY_LINKS]],
+    ["a problem", () => getSiteDay.mockResolvedValue({ ok: false, status: 503, code: "METERING_UNAVAILABLE", message: UPSTREAM }), "problem", [...DAY_LINKS, "metering.microgrid-setup"]],
+    ["a problem with a fix", () => getSiteDay.mockResolvedValue({ ok: false, status: 503, code: "METERING_CONFIGURATION", message: UPSTREAM }), "problem", ["metering.openems-backend", ...DAY_LINKS]],
+  ])("gives no text of the time zone notice and no link to it, and keeps every other link, in %s", async (_name, arrange, state, links) => {
+    arrange();
+    const page = await dispatchView(ctx(), `${DAY}?date=2026-11-08`);
+    // The page itself carries the notice, so its absence below is the interface's doing.
+    expect(JSON.stringify(page)).toContain(COUNTRY);
+    expect(JSON.stringify(page)).toContain(NUDGE_TITLE);
+
+    const out = await read(`${DAY}?date=2026-11-08`);
+    if (!out.ok || !page.ok) throw new Error("refused");
+    const pageLinks = page.value.links.map((l) => l.id);
+    expect(pageLinks).toContain("metering.set-timezone");
+    expect(out.value.model.links.map((l) => l.id)).toEqual(pageLinks.filter((id) => id !== "metering.set-timezone"));
+    expect(out.value.model.links.map((l) => l.id)).toEqual(links);
+    expect(out.value.model.ext?.data).toMatchObject({ state, timezoneNotice: null });
+    expect(out.value.withheld).toContainEqual({ what: "field", path: "ext.data.timezoneNotice", note: WITHHELD_NOTE });
+    const json = JSON.stringify(out);
+    expect(json).not.toContain(COUNTRY);
+    expect(json).not.toContain(NUDGE_TITLE);
+    expect(json).not.toContain("metering.set-timezone");
+    expect(json).not.toContain(UPSTREAM);
+    expect(logged()).not.toContain(COUNTRY);
+  });
+
+  it.each([
+    ["on", undefined],
+    ["off", { ok: false, status: 409, code: "billing_disabled", message: "Billing is disabled." }],
+  ])("withholds billing.savings with billing %s, and the model names no billing id", async (_name, decision) => {
+    if (decision) gates.set("billing", decision as GateDecision);
+    const out = await read(`${DAY}?date=2026-11-08`);
+    if (!out.ok) throw new Error("refused");
+    expect(out.value.withheld).toEqual([
+      { what: "view", view: "billing.savings", title: "billing.savings example", hint: "section", note: WITHHELD_NOTE },
+      { what: "view", view: "billing.rates", title: "Rates", hint: "tab", note: WITHHELD_NOTE },
+      { what: "field", path: "ext.data.timezoneNotice", note: WITHHELD_NOTE },
+    ]);
+    expect(out.value.attached).toEqual([]);
+    expect(JSON.stringify(out.value.model)).not.toContain("billing.");
+    expect(loadOf(savings)).not.toHaveBeenCalled();
   });
 });
 
@@ -719,7 +960,7 @@ describe("readForAssistant's context", () => {
     roles = [tenantOf(TENANT)];
     const load = vi.fn(async () => []);
     snapshot = snapshotOf([siteDay], { signals: [{ plugin: "metering", id: "metering.connection", agent: "read", load } as unknown as RegisteredSignal] });
-    list({ kind: "view", id: "metering.site-day" }, { kind: "watcher", id: "metering.connection" });
+    list(siteDayEntry(), { kind: "watcher", id: "metering.connection" });
     expect(await read(DAY)).toMatchObject({ ok: false, status: 404, code: "gui_not_found" });
     expect(await readForAssistant(ctx(), { type: "signals", org: ORG_A })).toMatchObject({ ok: false, status: 403, code: "gui_no_access" });
     // readForAssistant's own guard answers: without it, dispatchView and
