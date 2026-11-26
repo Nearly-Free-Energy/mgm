@@ -1,5 +1,6 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { vi } from "vitest";
+import type { Caller } from "@/lib/runtime/caller";
 import type { UserRoleRecord } from "@/lib/types/domain";
 import type { Fmt } from "../../../surface";
 import { hostContext, type HostContext } from "../access";
@@ -73,15 +74,20 @@ export function tenantOf(tenantId: string): UserRoleRecord {
 /** Enough of Fmt for labels: a date prints as D(<date>), so a label that skips fmt shows. */
 export const fakeFmt = { date: (d: string) => ({ t: "date", v: d, text: `D(${d})` }) } as unknown as Fmt;
 
-/** A HostContext over `newClient`, issued by hostContext as routes will. */
+/** An agent client's caller (RFC #259 § 2), for contextFor. */
+export const AGENT_CALLER: Caller = { kind: "agent", clientId: "e7100000-0000-4000-8fff-0000000000c1" };
+
+/** A HostContext over `newClient`, issued by hostContext as routes will; a browser session's unless `caller` says otherwise. */
 export function contextFor(
   roles: UserRoleRecord[],
   newClient: () => Promise<SupabaseClient> = vi.fn(async () => ({}) as SupabaseClient),
+  caller?: Caller,
 ): HostContext {
   const made = hostContext({ user: USER, roles }, new Headers({ "accept-language": "en-UG" }), {
     newClient,
     makeFmt: () => fakeFmt,
     now: new Date("2026-11-09T08:00:00Z"),
+    ...(caller ? { caller } : {}),
   });
   if (!made.ok) throw new Error("fixture context refused");
   return made.ctx;

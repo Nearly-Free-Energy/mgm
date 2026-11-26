@@ -230,7 +230,8 @@ browser bundle or the image. The decision is recorded in
 | `MGM_SMTP_ALLOW_PLAINTEXT_LOCAL` | no | no | `1` allows `MGM_SMTP_URL` to be plaintext `smtp://` to a name with no dot, such as docker compose's `smtp://mailpit:1025`. Set it only where that name is a mail catcher in the same container network, never in production: sign-in links are credentials, and a dotless name may resolve to another machine |
 | `MGM_GUI` | no | no | Which compiled-in interface (`src/gui/meta.ts`) serves this installation's pages. Unset or blank means `gridtop`, the default. The interface pages read it and link that interface's stylesheet; payment and sign-in pages do not |
 | `MGM_METERING_FIXTURES` | no | no | `on` (or `1`, `true`) lets the fixture metering provider generate synthetic site data and meter energy for edges whose id starts with `SYNTHETIC-EDGE-` ([Synthetic site data](#synthetic-site-data)). Unset, blank, `off`, `0` or `false` means off. Read when the server's runtime starts, so a change needs a restart |
-| `SUPABASE_SERVICE_ROLE_KEY` | yes | no | Privileged server key; never serialized |
+| `MGM_CLIENT_TOKENS` | no | no | Whether MGM's `/api` routes accept a client's bearer token (the CLI, the assistant bridge; [Clients that are not a browser](#clients-that-are-not-a-browser)). Unset, blank, `on`, `1` or `true` accepts them; `off`, `0` or `false` refuses every one with `403 client_tokens_off`, and so does any other value, so a mistyped value never leaves them on. Browser sessions are unaffected. Read on every request |
+| `SUPABASE_SERVICE_ROLE_KEY` | yes | no | Privileged server key; never serialized. It also keys the mark middleware puts on a client's accepted bearer token, so without it every bearer token is refused with `503 client_tokens_unavailable` |
 
 How it works: the root layout renders per request (it is never prerendered or
 served from a shared cache), validates the three `MGM_PUBLIC_*` values, and
@@ -440,10 +441,20 @@ browser or client token reads or writes it through the database API.
 **Removing a client.** `DELETE FROM public.mgm_clients WHERE client_id =
 '<id>';` refuses its next sign-in and its next refresh. It ends no session:
 tokens already issued keep working at MGM's routes and at the database
-until they expire (`jwt_expiry`, one hour by default). Deleting the client
+until they expire (`jwt_expiry`, one hour by default). A person who
+revokes the app from Connected apps ends its sessions, and MGM's routes
+refuse its token on the next request, since middleware asks Supabase Auth
+about every bearer token. Deleting the client
 in Supabase is the same. To replace a client, list the new one before
 removing the old. An installation that wants no assistant at all leaves the
 agent client out of the table.
+
+**Turning client tokens off** (ADR-008 decision 9). Set
+`MGM_CLIENT_TOKENS=off` on the server: from the next request MGM's routes
+refuse every bearer token, before any route runs. Then remove both clients
+from `public.mgm_clients`, so the token hook refuses every refresh. Tokens
+already issued keep working at the database API until they expire. The
+browser is unaffected and nothing stored is lost.
 
 ### Upgrading from v0.0.1 or v0.0.2
 

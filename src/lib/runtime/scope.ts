@@ -17,6 +17,7 @@ import { getCurrentUserRoles } from "@/lib/auth/access";
 import { ORG_MANAGER, SCOPE_ORG, SCOPE_TENANT, SUPER_ADMIN, TENANT } from "@/lib/roles";
 import type { TenantUnit } from "@/lib/tenant-app/types";
 import type { UserRoleRecord } from "@/lib/types/domain";
+import { callerOf } from "./caller";
 import { getMgmRuntime, requireActive, type MgmRuntime } from "./root";
 import type { MgmRequest, RequestAudience } from "./services";
 
@@ -204,12 +205,15 @@ export type OrganizationScope = {
  * Every capability plugin but the tenant app refuses to load into such a
  * scope (requireOrganizationAudience), and the tenant app into any other.
  *
+ * The caller (MgmRequest.caller) is read from `request.supabase`: who the
+ * client createClient made on this request acts for.
+ *
  * The audience comes from `options`, "organization" by default. A request
  * object that already carries a different one is refused rather than
  * relabelled, so a tenant's request never reopens as an organization's.
  */
 export async function openOrganizationScope(
-  request: Omit<MgmRequest, "audience"> & { audience?: RequestAudience },
+  request: Omit<MgmRequest, "audience" | "caller"> & { audience?: RequestAudience },
   options: {
     /** Extra request-level service names to isolate (tests, new plugins). */
     isolate?: readonly string[];
@@ -221,7 +225,9 @@ export async function openOrganizationScope(
   if (request.audience !== undefined && request.audience !== audience) {
     throw new Error(`A request for the ${request.audience} audience cannot open as one for the ${audience} audience`);
   }
-  const scoped: MgmRequest = { ...request, audience };
+  // The caller is always read from the client, never taken from the
+  // composer, so no composer can relabel a client's request.
+  const scoped: MgmRequest = { ...request, audience, caller: callerOf(request.supabase) };
   const runtime = await getMgmRuntime();
   let ctx = runtime.root;
   for (const name of [...REQUEST_SERVICES, ...(options.isolate ?? [])]) {
