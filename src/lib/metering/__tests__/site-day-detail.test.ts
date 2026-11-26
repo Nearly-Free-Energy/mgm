@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { addDaysToDateKey, startOfDayInZone } from "@/lib/timezone/day-key";
 import { generateSiteSamples, siteScenario, SITE_FIXTURE_SEED } from "../fixture/site-samples";
@@ -185,6 +186,49 @@ describe("computeSiteDayDetail — causes", () => {
     expect(detail.dark_after_lowbat.ranges).toEqual([]);
   });
 
+  it("rules out the previous day's last readings for a no-data gap at the day's start", () => {
+    const rows = new Map<number, Row>();
+    // An earlier cut and a battery at its floor, both overtaken by the
+    // previous day's last readings.
+    rows.set(-4, { volts: 0, soc: 8 });
+    rows.set(-1, { volts: 231, soc: 60 });
+    fill(rows, 10, 287, { volts: 230, soc: 50 });
+    const { detail } = detailOf(rows);
+    expect(detail.no_data).toEqual({
+      ranges: [[0, 50]],
+      min: 50,
+      ruledOut: [{ grid: gridV(-1, 231), soc: soc(-1, 60) }],
+    });
+    expect(detail.dark_cut.ranges).toEqual([]);
+    expect(detail.dark_lowbat.ranges).toEqual([]);
+  });
+
+  it("decides a cut by the last reading below the threshold, not an earlier one", () => {
+    const rows = new Map<number, Row>();
+    fill(rows, 0, 224, { volts: 230, soc: 60 });
+    rows.set(225, { volts: 0, soc: 60 });
+    // Online with no voltage, so the grid stays carried as off.
+    rows.set(226, { soc: 60 });
+    rows.set(227, { volts: 12, soc: 60 });
+    // 228–260 empty.
+    fill(rows, 261, 287, { volts: 230, soc: 60 });
+    const { detail } = detailOf(rows);
+    expect(detail.dark_cut).toEqual({ ranges: [[1140, 1305]], min: 165, decidedBy: [gridV(227, 12)] });
+  });
+
+  it("decides a low-battery gap by the last SoC reading, not an earlier one", () => {
+    const rows = new Map<number, Row>();
+    fill(rows, 0, 99, { volts: 230, soc: 40 });
+    rows.set(100, { volts: 230, soc: 12 });
+    // Online with no SoC.
+    rows.set(101, { volts: 230 });
+    rows.set(102, { volts: 230, soc: 10 });
+    // 103–110 empty.
+    fill(rows, 111, 287, { volts: 230, soc: 30 });
+    const { detail } = detailOf(rows);
+    expect(detail.dark_lowbat).toEqual({ ranges: [[515, 555]], min: 40, decidedBy: [soc(102, 10)] });
+  });
+
   it("rules out nothing for a no-data gap before any reading", () => {
     const rows = new Map<number, Row>();
     fill(rows, 10, 287, { volts: 230, soc: 50 });
@@ -311,7 +355,8 @@ function merged(list: MinuteRange[]): MinuteRange[] {
 /**
  * The values computeSiteDay reads for each series: at a day position, the
  * first sample in the bin; at a negative one, the previous day's last
- * non-null sample, if it is in that bin.
+ * non-null sample, if it is in that bin. `lastBefore` is the reading in
+ * force when a day bin starts.
  */
 function readingsOf(input: SiteDayInput, day: SiteDayOperations) {
   const binMs = input.resolutionMinutes * MINUTE;
@@ -330,11 +375,21 @@ function readingsOf(input: SiteDayInput, day: SiteDayOperations) {
       firstInBin.set(binOf(t), i);
     }
   });
-  return (name: "gridV" | "soc", pos: number): number | null => {
+  const readingAt = (name: "gridV" | "soc", pos: number): number | null => {
     if (pos < 0) return carried[name]?.pos === pos ? carried[name].v : null;
     const i = firstInBin.get(pos);
-    return i === undefined ? null : series[name][i];
+    return i === undefined ? null : (series[name][i] ?? null);
   };
+  /** The series' last reading before day bin `bin`, the previous day's included. */
+  const lastBefore = (name: "gridV" | "soc", bin: number): DecidingReading | null => {
+    for (let pos = bin - 1; pos >= 0; pos--) {
+      const v = readingAt(name, pos);
+      if (v !== null) return { series: name, pos, v };
+    }
+    const c = carried[name];
+    return c ? { series: name, pos: c.pos, v: c.v } : null;
+  };
+  return { readingAt, lastBefore };
 }
 
 function expectInvariants(input: SiteDayInput, day: SiteDayOperations, detail: SiteDayDetail) {
@@ -360,61 +415,62 @@ function expectInvariants(input: SiteDayInput, day: SiteDayOperations, detail: S
   expect(detail.dark_after_lowbat.decidedBy).toHaveLength(detail.dark_after_lowbat.ranges.length);
   expect(detail.no_data.ruledOut).toHaveLength(detail.no_data.ranges.length);
 
-  const readingAt = readingsOf(input, day);
-  const expectRead = (r: DecidingReading) => expect(r.v).toBe(readingAt(r.series, r.pos));
+  const { lastBefore } = readingsOf(input, day);
+  const binOf = (minute: number) => minute / day.resolutionMinutes;
+  // Each deciding reading is the series' last reading before its gap starts
+  // (the previous day's included), so no reading of that series falls
+  // between the deciding one and the gap.
   detail.dark_cut.decidedBy.forEach((r, i) => {
     expect(r.series).toBe("gridV");
     expect(r.v).toBeLessThan(GRID_PRESENT_MIN_V);
-    expect(r.pos * day.resolutionMinutes).toBeLessThan(detail.dark_cut.ranges[i][0]);
-    expectRead(r);
+    expect(r).toEqual(lastBefore("gridV", binOf(detail.dark_cut.ranges[i][0])));
   });
   detail.dark_lowbat.decidedBy.forEach((r, i) => {
     expect(r.series).toBe("soc");
     expect(r.v).toBeLessThanOrEqual(LOW_BATTERY_PCT);
-    expect(r.pos * day.resolutionMinutes).toBeLessThan(detail.dark_lowbat.ranges[i][0]);
-    expectRead(r);
+    expect(r).toEqual(lastBefore("soc", binOf(detail.dark_lowbat.ranges[i][0])));
   });
   detail.dark_after_lowbat.decidedBy.forEach(({ lowbatRange }, i) => {
-    expect(lowbatRange).toBeGreaterThanOrEqual(0);
-    expect(detail.dark_lowbat.ranges[lowbatRange][1]).toBeLessThan(detail.dark_after_lowbat.ranges[i][0]);
+    const start = detail.dark_after_lowbat.ranges[i][0];
+    // The latest low-battery gap before this one, with no voltage reading
+    // since it started.
+    expect(lowbatRange).toBe(detail.dark_lowbat.ranges.filter(([s]) => s < start).length - 1);
+    const [lowbatStart, lowbatEnd] = detail.dark_lowbat.ranges[lowbatRange];
+    expect(lowbatEnd).toBeLessThan(start);
+    const lastVolts = lastBefore("gridV", binOf(start));
+    if (lastVolts) expect(lastVolts.pos).toBeLessThan(binOf(lowbatStart));
   });
   detail.no_data.ruledOut.forEach(({ grid, soc: lastSoc }, i) => {
-    const start = detail.no_data.ranges[i][0];
-    if (grid) {
-      expect(grid.series).toBe("gridV");
-      expect(grid.v).toBeGreaterThanOrEqual(GRID_PRESENT_MIN_V);
-      expect(grid.pos * day.resolutionMinutes).toBeLessThan(start);
-      expectRead(grid);
-    }
-    if (lastSoc) {
-      expect(lastSoc.series).toBe("soc");
-      expect(lastSoc.v).toBeGreaterThan(LOW_BATTERY_PCT);
-      expect(lastSoc.pos * day.resolutionMinutes).toBeLessThan(start);
-      expectRead(lastSoc);
-    }
+    const startBin = binOf(detail.no_data.ranges[i][0]);
+    // Null only when the series has no reading before the gap.
+    expect(grid).toEqual(lastBefore("gridV", startBin));
+    expect(lastSoc).toEqual(lastBefore("soc", startBin));
+    if (grid) expect(grid.v).toBeGreaterThanOrEqual(GRID_PRESENT_MIN_V);
+    if (lastSoc) expect(lastSoc.v).toBeGreaterThan(LOW_BATTERY_PCT);
   });
   for (const series of ["gridV", "soc"] as const) {
-    const carried = detail.carry_in[series];
-    if (carried) {
-      expect(carried[0]).toBeLessThan(0);
-      expect(carried[1]).toBe(readingAt(series, carried[0]));
-    }
+    // The previous day's last reading, null only when it has none.
+    const before = lastBefore(series, 0);
+    expect(detail.carry_in[series]).toEqual(before ? [before.pos, before.v] : null);
+    if (before) expect(before.pos).toBeLessThan(0);
   }
 }
 
 /** These read hundreds of days; the default five seconds is too little on a loaded runner. */
 const LONG = 120_000;
 
+const DATES_2026 = Array.from({ length: 365 }, (_, i) => addDaysToDateKey("2026-01-01", i));
+const RANDOM_SEEDS = 400;
+
 describe("computeSiteDayDetail — invariants", () => {
-  const dates2026 = Array.from({ length: 365 }, (_, i) => addDaysToDateKey("2026-01-01", i));
 
   it("covers every scenario in the fixture days", () => {
-    expect(new Set(dates2026.map((d) => siteScenario(SITE_FIXTURE_SEED, EXAMPLE_MICROGRID, d))).size).toBe(5);
+    expect(new Set(DATES_2026.map((d) => siteScenario(SITE_FIXTURE_SEED, EXAMPLE_MICROGRID, d))).size).toBe(5);
   });
 
   it("holds on every 2026 fixture day of the examples' microgrid", () => {
     const causes = new Set<string>();
-    for (const date of dates2026) {
+    for (const date of DATES_2026) {
       const input = fixtureInput(date);
       const { day, detail } = computeSiteDayDetail(input);
       expectInvariants(input, day, detail);
@@ -428,7 +484,7 @@ describe("computeSiteDayDetail — invariants", () => {
 
   it("holds on seeded random samples", () => {
     const causes = new Set<string>();
-    for (let seed = 1; seed <= 400; seed++) {
+    for (let seed = 1; seed <= RANDOM_SEEDS; seed++) {
       const input = randomInput(seed);
       const { day, detail } = computeSiteDayDetail(input);
       expectInvariants(input, day, detail);
@@ -440,14 +496,92 @@ describe("computeSiteDayDetail — invariants", () => {
   }, LONG);
 });
 
-describe("computeSiteDayDetail — no figure moves", () => {
-  it("returns computeSiteDay's day exactly", () => {
-    const inputs = [
-      ...["2026-01-14", "2026-03-02", "2026-06-20", "2026-09-11", "2026-11-05"].map(fixtureInput),
-      ...Array.from({ length: 60 }, (_, i) => randomInput(1000 + i)),
-    ];
-    for (const input of inputs) {
-      expect(computeSiteDay(input)).toEqual(computeSiteDayDetail(input).day);
+/**
+ * A digest of a day's figures: its JSON with keys sorted, so a change that
+ * only reorders keys is not a change of figure.
+ */
+function figuresDigest(day: SiteDayOperations): string {
+  const sorted = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(sorted)
+      : v !== null && typeof v === "object"
+        ? Object.fromEntries(
+            Object.keys(v)
+              .sort()
+              .map((k) => [k, sorted((v as Record<string, unknown>)[k])])
+          )
+        : v;
+  return createHash("sha256").update(JSON.stringify(sorted(day))).digest("hex").slice(0, 16);
+}
+
+const FIGURE_DATES = Array.from({ length: 12 }, (_, m) => `2026-${String(m + 1).padStart(2, "0")}-01`);
+const FIGURE_SEEDS = Array.from({ length: 20 }, (_, i) => 1000 + i);
+
+/**
+ * computeSiteDay's figures as main computed them before computeSiteDayDetail
+ * existed (38f80d8c): for the first of each month's fixture day and the
+ * random samples of FIGURE_SEEDS one digest each, and for every input of
+ * the invariants above one digest together. They were captured by running
+ * that commit's computeSiteDay on these inputs, so they hold only while
+ * the fixture generator and randomInput give the same inputs. A change
+ * that moves a figure on purpose recaptures them (and bumps
+ * SITE_DAY_CALC_VERSION once it exists, evidence §11 change 5), and so
+ * does one that changes the inputs, such as the fixture's new scenarios
+ * (§11 change 6), from a computeSiteDay whose figures are known not to
+ * have moved.
+ */
+const MAIN_FIXTURE_DIGESTS: Record<string, string> = {
+  "2026-01-01": "4bbc5f42b3f5b389",
+  "2026-02-01": "1cc44dae75b81942",
+  "2026-03-01": "80893d2894e7b528",
+  "2026-04-01": "c706162aa886898f",
+  "2026-05-01": "07cb0e233dbaece9",
+  "2026-06-01": "431cb00d20e5e7a2",
+  "2026-07-01": "4b8e1bc9270f21b5",
+  "2026-08-01": "54a7accb392fcaf8",
+  "2026-09-01": "e5b3c72567d53117",
+  "2026-10-01": "4a2c2541c1a7c94d",
+  "2026-11-01": "4c46ea34d01dd06f",
+  "2026-12-01": "af357bf221ec2e64",
+};
+const MAIN_RANDOM_DIGESTS: Record<number, string> = {
+  1000: "d1a3c7b895faaa5a",
+  1001: "6586599af35ab586",
+  1002: "bde587eed138e728",
+  1003: "ef0dea35b924554d",
+  1004: "fce499ce86251585",
+  1005: "f530bb1b3056f289",
+  1006: "6fcc04102d3d0af8",
+  1007: "db35187d75f59ecb",
+  1008: "8f5fbe087da44af8",
+  1009: "923eac59b003d675",
+  1010: "1c03e52642c28a5e",
+  1011: "e0f509f9cc14d632",
+  1012: "5f3a4975af76a842",
+  1013: "ee3406ee0ed93f6e",
+  1014: "2ed22155c4b145a2",
+  1015: "3ed84430c93dc34c",
+  1016: "dd1765a0338b1fd8",
+  1017: "7082553b5046c9f6",
+  1018: "a1691e4453033245",
+  1019: "da16f805bdeb5905",
+};
+const MAIN_ALL_DIGEST = "905135412b63b0a2";
+
+describe("computeSiteDay — no figure moves", () => {
+  it("gives main's figures for each named input", () => {
+    for (const date of FIGURE_DATES) {
+      expect(figuresDigest(computeSiteDay(fixtureInput(date))), date).toBe(MAIN_FIXTURE_DIGESTS[date]);
     }
+    for (const seed of FIGURE_SEEDS) {
+      expect(figuresDigest(computeSiteDay(randomInput(seed))), `seed ${seed}`).toBe(MAIN_RANDOM_DIGESTS[seed]);
+    }
+  }, LONG);
+
+  it("gives main's figures for every input of the invariants", () => {
+    const all = createHash("sha256");
+    for (const date of DATES_2026) all.update(figuresDigest(computeSiteDay(fixtureInput(date))));
+    for (let seed = 1; seed <= RANDOM_SEEDS; seed++) all.update(figuresDigest(computeSiteDay(randomInput(seed))));
+    expect(all.digest("hex").slice(0, 16)).toBe(MAIN_ALL_DIGEST);
   }, LONG);
 });
