@@ -65,10 +65,10 @@ export async function loadNotBilled(req: SurfaceRequest): Promise<Loaded<LoadedM
   const microgridId = req.params.id;
   const { data: period, error } = await req.supabase
     .from("billing_periods")
-    .select("id, start_date, end_date, status, timezone")
+    .select("id, start_date, end_date, status, timezone, closed_at")
     .eq("id", req.params.periodId)
     .eq("microgrid_id", microgridId)
-    .maybeSingle<{ id: string; start_date: string; end_date: string; status: "draft" | "closed"; timezone: string }>();
+    .maybeSingle<{ id: string; start_date: string; end_date: string; status: "draft" | "closed"; timezone: string; closed_at: string | null }>();
   if (error) return NOT_BILLED_REFUSALS.unavailable;
   if (!period) return NOT_BILLED_REFUSALS.notFound;
 
@@ -77,7 +77,7 @@ export async function loadNotBilled(req: SurfaceRequest): Promise<Loaded<LoadedM
       pageAfter(req.supabase.from("billing_line_items").select("id, tenant_id", { count: "exact" }).eq("billing_period_id", period.id), after),
     ),
     // In name order, as the review lists tenants; only listed, never summed.
-    // created_at, so a closed period can leave out the tenants who joined after it.
+    // created_at, so a closed period can leave out the tenants who joined after it closed.
     readAllPagesInOrder<TenantRow & { created_at: string }>((from, to) =>
       req.supabase
         .from("tenants")

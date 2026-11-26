@@ -27,9 +27,9 @@
  * meter gave them no bill for it.
  *
  * A closed period leaves out the tenants who came onto the microgrid only
- * after it (joinedAfterPeriod): they were not its tenants, and nothing can
- * bill them in it. A draft lists them, since a draft can still bill them
- * from readings, as when a tenant is recorded late.
+ * after it closed (joinedAfterPeriod): they were not its tenants, and
+ * nothing can bill them in it. A draft lists them, since a draft can still
+ * bill them from readings, as when a tenant is recorded late.
  */
 import type { ActionLink, Fmt, LoadedModel } from "@/lib/gui/surface";
 import { dayKeyInZone } from "@/lib/timezone/day-key";
@@ -96,30 +96,59 @@ export type NotBilledTenant = {
   created_at: string;
 };
 
-export type NotBilledPeriod = { id: string; start_date: string; end_date: string; status: "draft" | "closed"; timezone: string };
+export type NotBilledPeriod = {
+  id: string;
+  start_date: string;
+  end_date: string;
+  status: "draft" | "closed";
+  timezone: string;
+  /** When the period was closed (billing_periods.closed_at); null for a draft. */
+  closed_at: string | null;
+};
 
 /**
- * Whether a tenant came onto the microgrid only after the period: their
- * record was created after its last day, in the period's time zone, and
- * every primary meter link starts after that day too (or there is none). A
- * link with no start date, or a creation time that cannot be placed in the
+ * Whether a tenant came onto the microgrid only after a closed period: their
+ * record was created after the period was closed, and every primary meter
+ * link starts after its last day (or there is none).
+ *
+ * The cutoff is the close, not the period's end, so the section keeps every
+ * tenant the close itself counted: fn_billing_period_close_review lists
+ * every tenant of the microgrid with no bill, whenever recorded, the person
+ * closing acknowledges them (tenants_without_bills), and the close records
+ * them as unresolved. A tenant recorded after the period ended but before
+ * it closed stays listed. If the close review comes to leave out tenants by
+ * date, use its rule here. A period with no closed_at falls back to its last
+ * day in its time zone.
+ *
+ * A link with no start date, or a time that cannot be read or placed in the
  * zone, counts as within the period, so the tenant is kept.
  */
-export function joinedAfterPeriod(tenant: NotBilledTenant, period: Pick<NotBilledPeriod, "end_date" | "timezone">): boolean {
-  let createdOn: string;
+export function joinedAfterPeriod(
+  tenant: NotBilledTenant,
+  period: Pick<NotBilledPeriod, "end_date" | "timezone" | "closed_at">,
+): boolean {
+  if (!recordedAfter(tenant.created_at, period)) return false;
+  return tenant.primaryLinks.every((l) => typeof l.effective_from === "string" && l.effective_from > period.end_date);
+}
+
+/** Whether a record created at `createdAt` was created after the period closed, or after its last day if it has no closed_at. */
+function recordedAfter(createdAt: string, period: Pick<NotBilledPeriod, "end_date" | "timezone" | "closed_at">): boolean {
+  if (period.closed_at !== null) {
+    const created = Date.parse(createdAt);
+    const closed = Date.parse(period.closed_at);
+    return !Number.isNaN(created) && !Number.isNaN(closed) && created > closed;
+  }
   try {
-    createdOn = dayKeyInZone(new Date(tenant.created_at), period.timezone);
+    return dayKeyInZone(new Date(createdAt), period.timezone) > period.end_date;
   } catch {
     return false;
   }
-  if (createdOn <= period.end_date) return false;
-  return tenant.primaryLinks.every((l) => typeof l.effective_from === "string" && l.effective_from > period.end_date);
 }
 
 /**
  * The tenants the section lists, in the order given: those with no bill for
- * the period, less, in a closed period, those who joined after it. The
- * loader counts these against the most a view lists.
+ * the period, less, in a closed period, those who joined after it closed.
+ * The loader counts these against the most a view lists.
  */
 export function notBilledTenants<T extends NotBilledTenant>(
   tenants: readonly T[],

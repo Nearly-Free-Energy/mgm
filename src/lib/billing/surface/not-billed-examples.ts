@@ -29,8 +29,15 @@ const BILLING_DISABLED =
   "Billing is disabled for this organization. Enable it in Settings → Plugins; tariffs, periods, bills, and payment history are preserved.";
 
 const id = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
-const NOVEMBER = { id: id(0xb2), start_date: "2026-11-01", end_date: "2026-11-30", status: "draft" as const, timezone: "Africa/Kampala" };
-const OCTOBER = { id: id(0xb1), start_date: "2026-10-01", end_date: "2026-10-31", status: "closed" as const, timezone: "Africa/Kampala" };
+const NOVEMBER = { id: id(0xb2), start_date: "2026-11-01", end_date: "2026-11-30", status: "draft" as const, timezone: "Africa/Kampala", closed_at: null };
+const OCTOBER = {
+  id: id(0xb1),
+  start_date: "2026-10-01",
+  end_date: "2026-10-31",
+  status: "closed" as const,
+  timezone: "Africa/Kampala",
+  closed_at: "2026-11-05T09:00:00+00:00",
+};
 
 const meter = (from: string, to: string | null = null): PrimaryMeterLink => ({
   effective_from: from,
