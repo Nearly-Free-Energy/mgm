@@ -29,6 +29,7 @@ import { randomUUID } from "node:crypto";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@supabase/supabase-js";
+import { SignJWT } from "jose";
 import { addDaysToDateKey, dayKeyInZone } from "@/lib/timezone/day-key";
 import type { Operation } from "@/lib/types/domain";
 import {
@@ -39,6 +40,7 @@ import {
   createTestUser,
   runAsDatabaseOwner,
   raceAgainstHeldTransaction,
+  clientAs,
   LOCAL_SUPABASE_URL,
   testAnonKey,
   type TestUser,
@@ -173,11 +175,18 @@ function yesterdayIn(tz: string): string {
   return addDaysToDateKey(todayIn(tz), -1);
 }
 
-/** Runs `fn` with today's date in `tz`, again if the date turned while it ran. */
+/**
+ * Runs `fn` with today's date in `tz`, again if the date turned while it ran,
+ * whether the first run passed or failed: a turn makes its assertions wrong.
+ */
 async function withTodayIn<T>(tz: string, fn: (today: string) => Promise<T>): Promise<T> {
   const before = todayIn(tz);
-  const result = await fn(before);
-  if (todayIn(tz) === before) return result;
+  try {
+    const result = await fn(before);
+    if (todayIn(tz) === before) return result;
+  } catch (error) {
+    if (todayIn(tz) === before) throw error;
+  }
   return fn(todayIn(tz));
 }
 
@@ -272,6 +281,27 @@ function expectApiRoleRefused(error: { code?: string; message?: string } | null)
       error?.message?.toLowerCase().includes("permission denied") ||
       error?.code === "PGRST202",
   ).toBe(true);
+}
+
+/** A signed-in role with no user: role 'authenticated' and no sub claim. */
+async function noSubjectClient(): Promise<SupabaseClient> {
+  const now = Math.floor(Date.now() / 1000);
+  const jwt = await new SignJWT({
+    aud: "authenticated",
+    role: "authenticated",
+    iss: `${LOCAL_SUPABASE_URL}/auth/v1`,
+    iat: now,
+    exp: now + 3600,
+  })
+    .setProtectedHeader({ alg: "HS256" })
+    .sign(new TextEncoder().encode(process.env.SUPABASE_JWT_SECRET!));
+  return clientAs(jwt);
+}
+
+function expectCheckViolation(attempt: OwnerAttempt, constraint: string): void {
+  expect(attempt.ok, `expected ${constraint}`).toBe(false);
+  expect(attempt.sqlstate, constraint).toBe("23514");
+  expect(attempt.message, constraint).toContain(`"${constraint}"`);
 }
 
 function anonClient(): SupabaseClient {
@@ -906,6 +936,26 @@ desc("20261126120000_operation_records.sql", { timeout: 60_000 }, () => {
     }
   });
 
+  it("a token with no user is refused first, by both functions", async () => {
+    const op = await createOnA();
+    const before = countOperations(`microgrid_id = '${F.mgA}'`);
+    const nobody = await noSubjectClient();
+    const valid: CreateArgs = {
+      _microgrid_id: F.mgA,
+      _window_date: yesterdayIn(ZONE.mgA),
+      _window_tz: ZONE.mgA,
+      _window_zone: "microgrid",
+    };
+    const empty: CreateArgs = { _microgrid_id: null, _window_date: null, _window_tz: null, _window_zone: null };
+    for (const args of [valid, empty]) {
+      expectRefusal((await create(nobody, args)).error, "42501", "operations_unauthenticated");
+    }
+    expectRefusal((await transition(nobody, op.id, "cancelled")).error, "42501", "operations_unauthenticated");
+    expectRefusal((await transition(nobody, null, null)).error, "42501", "operations_unauthenticated");
+    expect(countOperations(`microgrid_id = '${F.mgA}'`)).toBe(before);
+    expect(operationRow(op.id)).toMatchObject({ status: "running", ended_at: null });
+  });
+
   // ── Transition (O3, O4, E1, E3) ────────────────────────────────────────
 
   it("anyone with access cancels, and the canceller is recorded", async () => {
@@ -994,6 +1044,10 @@ desc("20261126120000_operation_records.sql", { timeout: 60_000 }, () => {
     await setPlugin(F.orgA, false);
     try {
       expectRefusal((await transition(managerA.client, op.id, "cancelled")).error, "55000", "operations_disabled");
+      // Access is checked before the plugin: a caller without access, and an
+      // unknown operation, learn nothing about the organization's plugin.
+      expectRefusal((await transition(managerB.client, op.id, "cancelled")).error, "42501", "operations_forbidden");
+      expectRefusal((await transition(managerA.client, randomUUID(), "cancelled")).error, "42501", "operations_forbidden");
       expect(operationRow(op.id)?.status).toBe("running");
       const read = await managerA.client.from("operations").select("id, status").eq("id", op.id);
       expect(read.data).toEqual([{ id: op.id, status: "running" }]);
@@ -1058,6 +1112,96 @@ desc("20261126120000_operation_records.sql", { timeout: 60_000 }, () => {
       "operation_immutable",
     );
     expect(operationRow(op.id)?.status).toBe("cancelled");
+
+    // With the status kept, no outcome column changes (O3, O4), and no
+    // operation changes its id.
+    const failed = await createOnA();
+    expect((await transition(managerA.client, failed.id, "failed", "access_refused")).error).toBeNull();
+    const completed = await createOnA();
+    expect(
+      ownerAttempt(
+        `UPDATE public.operations
+            SET status = 'completed', result = '{"synthetic": true}'::jsonb, result_size = 19, ended_at = now()
+          WHERE id = '${completed.id}'`,
+      ).ok,
+    ).toBe(true);
+    const running = await createOnA();
+    const changes: [Operation, string][] = [
+      [failed, `failure_code = 'window_changed'`],
+      [op, `ended_by = '${superAdmin.userId}'`],
+      [failed, `ended_by = '${superAdmin.userId}'`],
+      [completed, `result = '{"changed": true}'::jsonb`],
+      [completed, `result_size = result_size + 1`],
+      [running, `id = '${randomUUID()}'`],
+      [op, `id = '${randomUUID()}'`],
+    ];
+    const before = new Map([op, failed, completed, running].map((o) => [o.id, operationRow(o.id)]));
+    for (const [target, change] of changes) {
+      expectOwnerRefusal(
+        ownerAttempt(`UPDATE public.operations SET ${change} WHERE id = '${target.id}'`),
+        "55000",
+        "operation_immutable",
+      );
+    }
+    for (const [id, row] of before) expect(operationRow(id)).toEqual(row);
+  });
+
+  // The CHECK constraints hold for every writer, the owner included (§ 1.3).
+  // Each case breaks exactly one constraint; the running operation is
+  // unchanged after each, since every attempt rolls back.
+  it("the operations CHECK constraints refuse an incoherent row", async () => {
+    const op = await createOnA();
+    const before = operationRow(op.id);
+    const update = (set: string) => `UPDATE public.operations SET ${set} WHERE id = '${op.id}'`;
+    const insert = (columns: string, values: string) =>
+      `INSERT INTO public.operations (microgrid_id, org_id, window_date, ${columns})
+       VALUES ('${F.mgA}', '${F.orgA}', current_date - 2, ${values})`;
+    const cases: [string, string][] = [
+      ["operations_result_when_completed", update(`status = 'completed', ended_at = now()`)],
+      ["operations_failed_has_code", update(`status = 'failed', ended_at = now()`)],
+      ["operations_ended_when_not_running", update(`status = 'cancelled'`)],
+      ["operations_ended_after_created", update(`status = 'cancelled', ended_at = created_at - interval '1 second'`)],
+      [
+        "operations_expired_has_no_actor",
+        update(`status = 'failed', failure_code = 'expired', ended_at = now(), ended_by = '${managerA.userId}'`),
+      ],
+      ["operations_result_is_object", update(`status = 'completed', ended_at = now(), result = '[]'::jsonb, result_size = 2`)],
+      ["operations_result_size_with_result", update(`status = 'completed', ended_at = now(), result = '{}'::jsonb`)],
+      [
+        "operations_result_size_positive",
+        update(`status = 'completed', ended_at = now(), result = '{}'::jsonb, result_size = 0`),
+      ],
+      [
+        "operations_no_end_actor_while_running",
+        insert("window_tz, window_zone, ended_by", `'${ZONE.mgA}', 'microgrid', '${managerA.userId}'`),
+      ],
+      ["operations_fallback_is_utc", insert("window_tz, window_zone", `'${ZONE.mgA}', 'fallback'`)],
+      ["operations_window_tz_shape", insert("window_tz, window_zone", `'', 'microgrid'`)],
+      ["operations_window_tz_shape", insert("window_tz, window_zone", `repeat('x', 65), 'microgrid'`)],
+    ];
+    const count = countOperations(`microgrid_id = '${F.mgA}'`);
+    for (const [constraint, statement] of cases) {
+      expectCheckViolation(ownerAttempt(statement), constraint);
+    }
+    expect(operationRow(op.id)).toEqual(before);
+    expect(countOperations(`microgrid_id = '${F.mgA}'`)).toBe(count);
+  });
+
+  it("the evidence CHECK constraints refuse an incoherent row", async () => {
+    const op = await createOnA();
+    const insert = (schema: string, content: string, size: number) =>
+      `INSERT INTO public.operation_evidence
+              (operation_id, microgrid_id, org_id, attempt_key, schema_name, outcome, content, size)
+       VALUES ('${op.id}', '${op.microgrid_id}', '${op.org_id}', '${randomUUID()}', '${schema}', 'refused', '${content}'::jsonb, ${size})`;
+    const cases: [string, string][] = [
+      ["operation_evidence_schema_known", insert("other/1", '{"synthetic": true}', 19)],
+      ["operation_evidence_content_is_object", insert("site-day-evidence/1", "[]", 2)],
+      ["operation_evidence_size_positive", insert("site-day-evidence/1", '{"synthetic": true}', 0)],
+    ];
+    for (const [constraint, statement] of cases) {
+      expectCheckViolation(ownerAttempt(statement), constraint);
+    }
+    expect(countEvidence(`operation_id = '${op.id}'`)).toBe(0);
   });
 
   it("evidence carries its operation's microgrid and organization (E2)", async () => {
@@ -1099,12 +1243,29 @@ desc("20261126120000_operation_records.sql", { timeout: 60_000 }, () => {
   it("evidence is immutable (E5)", async () => {
     const op = await createOnA();
     insertEvidenceOrThrow(op, { capturedBy: managerA.userId });
+    // Running operations to move the evidence to: one with the same
+    // microgrid and organization, so the foreign key alone would allow it,
+    // and one on another microgrid of the same organization.
+    const sameSite = await createOnA();
+    const { data: otherData, error: otherError } = await create(managerA.client, {
+      _microgrid_id: F.mgAUtc,
+      _window_date: yesterdayIn(ZONE.mgAUtc),
+      _window_tz: ZONE.mgAUtc,
+      _window_zone: "microgrid",
+    });
+    expect(otherError).toBeNull();
+    const otherSite = otherData as Operation;
     const changes = [
+      `id = '${randomUUID()}'`,
+      `attempt_key = '${randomUUID()}'`,
+      `schema_name = 'other/1'`,
       `content = '{"changed": true}'::jsonb`,
       `size = size + 1`,
       `outcome = 'read'`,
       `captured_at = captured_at - interval '1 day'`,
       `captured_by = '${superAdmin.userId}'`,
+      `operation_id = '${sameSite.id}'`,
+      `operation_id = '${otherSite.id}', microgrid_id = '${otherSite.microgrid_id}', org_id = '${otherSite.org_id}'`,
     ];
     for (const change of changes) {
       expectOwnerRefusal(
@@ -1116,6 +1277,7 @@ desc("20261126120000_operation_records.sql", { timeout: 60_000 }, () => {
     expect(
       ownerRows<{ captured_by: string }>(`SELECT captured_by FROM public.operation_evidence WHERE operation_id = '${op.id}'`),
     ).toEqual([{ captured_by: managerA.userId }]);
+    expect(countEvidence(`operation_id IN ('${sameSite.id}', '${otherSite.id}')`)).toBe(0);
   });
 
   // ── Users and cascade (O3, E5, § 9) ────────────────────────────────────
