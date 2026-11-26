@@ -191,9 +191,14 @@ const MODULES: Record<string, Module> = {
       "Reads the snapshot and runs contributed actions' available() from it. buildActionCatalog takes a HostContext, which hostContext issues only from a getUser()-backed access read. readCatalogQuery reads only the search parameters.",
   },
   "src/lib/gui/host/server/signals.ts": {
-    privilegedExports: ["collectSignals"],
+    privilegedExports: ["collectSignals", "assistantSignals"],
     reason:
-      "Reads the snapshot and runs contributed watchers from it. collectSignals takes a HostContext, which hostContext issues only from a getUser()-backed access read. collectStatus runs only the status entries its caller passes.",
+      "Reads the snapshot and runs contributed watchers from it. collectSignals and assistantSignals take a HostContext, which hostContext issues only from a getUser()-backed access read. collectStatus runs only the status entries its caller passes.",
+  },
+  "src/lib/gui/host/server/assistant-read.ts": {
+    privilegedExports: ["readForAssistant"],
+    reason:
+      "Reads the snapshot and dispatches views and watchers through dispatchView and assistantSignals. readForAssistant takes a HostContext, which hostContext issues only from a getUser()-backed access read.",
   },
   "src/lib/gui/host/server/search.ts": {
     privilegedExports: ["runSearch"],

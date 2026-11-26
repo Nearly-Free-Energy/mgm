@@ -224,9 +224,15 @@ export function strictProblems(schema: z.ZodType): { path: Path; message: string
  * view" leaves the decision to each view's or watcher's entry on
  * ASSISTANT_READS and the rules on kinds and signals: those plugins' views
  * carry neither bills nor payments. If a plugin's views come to carry
- * them, or the host's read interface gains its own refusal per model (which
- * would make these refusals a second copy of it), revisit ASSISTANT_READING
- * and those rules.
+ * them, revisit ASSISTANT_READING and those rules.
+ *
+ * The host's read interface (./assistant-read.ts) now refuses such
+ * references per model too (./assistant-references.ts, which reads
+ * ASSISTANT_REFUSED_KINDS and ASSISTANT_READING from here). These refusals
+ * stay on purpose as the earlier stop: they refuse the mark when the
+ * contribution registers, before any loader runs, where the per-model rule
+ * can only refuse an answer after it was loaded. If the two ever disagree
+ * on a kind or a plugin, change both.
  */
 export const ASSISTANT_READING: Readonly<Record<MgmPluginName, "per view" | "refused">> = {
   "organization-directory": "per view",
