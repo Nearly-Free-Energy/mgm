@@ -26,6 +26,16 @@ import "server-only";
  * paths name; it resolves to the organization of their organization
  * manager row, through the Users page's own list (userOrganization in
  * ./surface/users.ts).
+ *
+ * Where a refusal by role goes. An action with no confirmation step
+ * (update-organization, update-profile) has nothing but available() to
+ * refuse with before its write, so it refuses there, and the catalog
+ * reports it under `state` (docs/cordis-runtime.md, "GUI surface"). An
+ * action with a step (delete-organization, change-role, remove-user)
+ * refuses in its prepare, with the route's own answer and before it reads
+ * anyone, as billing's failed and refunded transitions do
+ * (../billing/surface/period-review.ts); the catalog lists it available.
+ * A new action here follows the same rule.
  */
 import type { ActionDef, Contribution } from "@/lib/gui/surface";
 import { ORGANIZATION_DIRECTORY_PLUGIN_NAME } from "@/lib/plugins/bundled";
@@ -162,6 +172,11 @@ const ACTIONS: ActionDef[] = [
     confirm: "typed",
     repeat: "safe",
     prepare: prepareRemoveEmailSender,
+    // The route answers 409 version_conflict when the settings were saved
+    // again between its read and its delete. Preparing again shows the
+    // server now saved and asks for its name afresh, so a second Confirm
+    // cannot remove settings no one was shown (ADR-006, decision 10).
+    prepareAgainOn: ["version_conflict"],
     ...SHARED,
   },
   // Confirm, as turning a plugin off hides its pages and refuses its

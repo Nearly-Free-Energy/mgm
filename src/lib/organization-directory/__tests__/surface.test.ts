@@ -11,7 +11,7 @@ import type { ActionDef, InstallationRequest, SurfaceRequest } from "@/lib/gui/s
 import type { UserRoleRecord } from "@/lib/types/domain";
 import { ORGANIZATION_DIRECTORY_SURFACE, USER_KIND } from "../surface";
 import { prepareSaveEmailSender } from "../surface/organizations";
-import { prepareRemoveUser, userOrganization } from "../surface/users";
+import { prepareChangeRole, prepareRemoveUser, userOrganization } from "../surface/users";
 
 const ACTIONS = ORGANIZATION_DIRECTORY_SURFACE.actions as ActionDef[];
 const action = (id: string) => ACTIONS.find((a) => a.id === id)!;
@@ -37,6 +37,11 @@ describe("the organization directory's actions", () => {
 
   it("are all human-only and offered only where a view links them", () => {
     for (const a of ACTIONS) expect([a.id, a.humanOnly, a.targeted], a.id).toEqual([a.id, true, false]);
+  });
+
+  it("prepare again only when removing the mail sender meets a version conflict", () => {
+    expect(action("org.remove-email-sender").prepareAgainOn).toEqual(["version_conflict"]);
+    expect(ACTIONS.filter((a) => a.prepareAgainOn?.length).map((a) => a.id)).toEqual(["org.remove-email-sender"]);
   });
 
   it("declare the person kind the user routes' paths name", () => {
@@ -90,6 +95,15 @@ describe("prepare refusals that read nothing", () => {
       ok: false,
       status: 403,
       message: "No roles revoked (not authorized, or user has no roles).",
+    });
+  });
+
+  it("refuses changing a role to an org manager with the function's 403, before reading anyone", async () => {
+    const req = reading({ user: { id: SELF }, roles: [role("org_manager", ORG)] });
+    expect(await prepareChangeRole(req, { params: { id: OTHER }, body: { role: "org_manager", scope_id: ORG } })).toEqual({
+      ok: false,
+      status: 403,
+      message: "Only super admins can change roles.",
     });
   });
 

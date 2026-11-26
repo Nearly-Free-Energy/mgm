@@ -127,7 +127,7 @@ const VALID_UUID = "550e8400-e29b-41d4-a716-446655440000";
 const NO_BODY = Symbol("no body");
 
 /** The DELETE the organization page and the GUI host send: the name typed, as the route requires. */
-function makeRequest(body: unknown = { confirmation: { acknowledged: [], typed: "NFE" } }): NextRequest {
+function makeRequest(body: unknown = { confirmation: { acknowledged: [], typed: "Example Energy Cooperative" } }): NextRequest {
   return new NextRequest(`http://localhost/api/organizations/${VALID_UUID}`, {
     method: "DELETE",
     ...(body === NO_BODY ? {} : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
@@ -179,7 +179,7 @@ describe("DELETE /api/organizations/[id]", () => {
 
   it("returns 204 on happy path and logs entity.delete with the exact AC-LOG-1 payload shape", async () => {
     configureEntityLookup({
-      data: { id: VALID_UUID, name: "NFE" },
+      data: { id: VALID_UUID, name: "Example Energy Cooperative" },
       error: null,
     });
     mockRpcImpl.mockResolvedValueOnce({ data: 1, error: null });
@@ -202,7 +202,7 @@ describe("DELETE /api/organizations/[id]", () => {
     expect(logged.event).toBe("entity.delete");
     expect(logged.entity_kind).toBe("organization");
     expect(logged.entity_id).toBe(VALID_UUID);
-    expect(logged.entity_name).toBe("NFE");
+    expect(logged.entity_name).toBe("Example Energy Cooperative");
     expect(logged.actor_user_id).toBe("user-1");
     expect(logged.actor_role).toBe("super_admin");
     expect(logged.descendant_counts).toBeDefined();
@@ -214,7 +214,7 @@ describe("DELETE /api/organizations/[id]", () => {
 
   it("returns 409 that says why when the database keeps the organization's billing", async () => {
     configureEntityLookup({
-      data: { id: VALID_UUID, name: "NFE" },
+      data: { id: VALID_UUID, name: "Example Energy Cooperative" },
       error: null,
     });
     mockRpcImpl.mockResolvedValueOnce({
@@ -237,7 +237,7 @@ describe("DELETE /api/organizations/[id]", () => {
 
   it("returns 409 when community management is disabled — records are preserved", async () => {
     configureEntityLookup({
-      data: { id: VALID_UUID, name: "NFE" },
+      data: { id: VALID_UUID, name: "Example Energy Cooperative" },
       error: null,
     });
     pluginEnabled = false;
@@ -257,7 +257,7 @@ describe("DELETE /api/organizations/[id]", () => {
     // feet). Per AC-ROUTE-7 we map that to 404 so the UI can't blindly
     // retry a stale tab.
     configureEntityLookup({
-      data: { id: VALID_UUID, name: "NFE" },
+      data: { id: VALID_UUID, name: "Example Energy Cooperative" },
       error: null,
     });
     mockRpcImpl.mockResolvedValueOnce({ data: 0, error: null });
@@ -270,13 +270,13 @@ describe("DELETE /api/organizations/[id]", () => {
   });
 
   it("returns 428 without the name typed, naming it, and deletes nothing", async () => {
-    configureEntityLookup({ data: { id: VALID_UUID, name: " NFE " }, error: null });
+    configureEntityLookup({ data: { id: VALID_UUID, name: " Example Energy Cooperative " }, error: null });
     const { DELETE } = await import("../[id]/route");
     for (const body of [NO_BODY, {}]) {
       const res = await DELETE(makeRequest(body), { params: Promise.resolve({ id: VALID_UUID }) });
       expect(res.status).toBe(428);
       expect(await res.json()).toEqual({
-        error: "Type the organization's name, NFE, to delete it.",
+        error: "Type the organization's name, Example Energy Cooperative, to delete it.",
         code: "organization_delete_confirmation_required",
       });
     }
@@ -284,9 +284,9 @@ describe("DELETE /api/organizations/[id]", () => {
   });
 
   it("returns 428 for another name, and takes the name in another case or spacing", async () => {
-    configureEntityLookup({ data: { id: VALID_UUID, name: "NFE Uganda" }, error: null });
+    configureEntityLookup({ data: { id: VALID_UUID, name: "Example Energy Cooperative" }, error: null });
     const { DELETE } = await import("../[id]/route");
-    const wrong = await DELETE(makeRequest({ confirmation: { acknowledged: [], typed: "NFE" } }), {
+    const wrong = await DELETE(makeRequest({ confirmation: { acknowledged: [], typed: "Example Energy" } }), {
       params: Promise.resolve({ id: VALID_UUID }),
     });
     expect(wrong.status).toBe(428);
@@ -295,7 +295,7 @@ describe("DELETE /api/organizations/[id]", () => {
 
     mockRpcImpl.mockResolvedValueOnce({ data: 1, error: null });
     vi.spyOn(console, "info").mockImplementation(() => {});
-    const right = await DELETE(makeRequest({ confirmation: { acknowledged: [], typed: "  nfe   uganda " } }), {
+    const right = await DELETE(makeRequest({ confirmation: { acknowledged: [], typed: "  example   energy COOPERATIVE " } }), {
       params: Promise.resolve({ id: VALID_UUID }),
     });
     expect(right.status).toBe(204);
@@ -305,7 +305,7 @@ describe("DELETE /api/organizations/[id]", () => {
     isSuperAdminReturn = false;
     const { DELETE } = await import("../[id]/route");
     expect((await DELETE(makeRequest(NO_BODY), { params: Promise.resolve({ id: VALID_UUID }) })).status).toBe(403);
-    const bad = await DELETE(makeRequest({ name: "NFE" }), { params: Promise.resolve({ id: VALID_UUID }) });
+    const bad = await DELETE(makeRequest({ name: "Example Energy Cooperative" }), { params: Promise.resolve({ id: VALID_UUID }) });
     expect(bad.status).toBe(400);
     expect(await bad.json()).toMatchObject({ code: "invalid_body" });
   });
@@ -354,7 +354,7 @@ describe("GET /api/organizations/[id]/delete-preview", () => {
 
   it("returns 200 with the expected response shape on happy path", async () => {
     configureEntityLookup({
-      data: { id: VALID_UUID, name: "NFE" },
+      data: { id: VALID_UUID, name: "Example Energy Cooperative" },
       error: null,
     });
 
@@ -367,7 +367,7 @@ describe("GET /api/organizations/[id]/delete-preview", () => {
     );
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.entity).toEqual({ id: VALID_UUID, name: "NFE" });
+    expect(json.entity).toEqual({ id: VALID_UUID, name: "Example Energy Cooperative" });
     expect(json.descendant_counts).toBeDefined();
     expect(json.descendant_counts.kind).toBe("organization");
     expect(typeof json.as_of).toBe("string");
@@ -377,7 +377,7 @@ describe("GET /api/organizations/[id]/delete-preview", () => {
 
   it("returns 409 with the reason when the organization holds closed billing", async () => {
     configureEntityLookup(
-      { data: { id: VALID_UUID, name: "NFE" }, error: null },
+      { data: { id: VALID_UUID, name: "Example Energy Cooperative" }, error: null },
       {
         communities: [{ id: "comm-1" }],
         microgrids: [{ id: "mg-1" }],

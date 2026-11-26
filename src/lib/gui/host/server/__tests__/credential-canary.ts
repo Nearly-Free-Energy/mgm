@@ -131,9 +131,11 @@ export type CanaryIds = {
    * `orgId`, whose invitation is not yet accepted. It is the `org.user`
    * entity the user actions' paths name, so their available() and prepare
    * run against a person the caller's own list shows, and the resend's step
-   * is built in full. Removing them and changing their role are refused to
-   * an org manager before anyone is read. The test fills it in once it
-   * creates the account, since seedCanaries creates none.
+   * is built in full. Removing them and changing their role, like deleting
+   * the organization, are refused to an org manager before anyone is read,
+   * so the test prepares every action again as a super admin, which builds
+   * those steps in full. The test fills it in once it creates the account,
+   * since seedCanaries creates none.
    */
   staffUserId: string;
   /**

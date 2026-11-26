@@ -150,9 +150,12 @@ describe("SaveEmailSenderBody (PUT /api/organizations/[id]/email-sender)", () =>
   });
 
   it("refuses what parseSenderInput read as blank, or ignored, with the generic 400", async () => {
-    expect(await route(json({ ...good, password: 5 }))).toMatchObject({ status: 400, body: { code: "invalid_body", field: "password" } });
-    expect(await route(json({ ...good, fromName: 5 }))).toMatchObject({ status: 400, body: { code: "invalid_body", field: "fromName" } });
-    expect(await route(json({ ...good, replyTo: false }))).toMatchObject({ status: 400, body: { code: "invalid_body", field: "replyTo" } });
+    // Each says what is wrong, not the route's answer for a bad value of the
+    // right type ("The password is too long." for a password of 5).
+    expect(await route(json({ ...good, password: 5 }))).toEqual(generic("password must be text.", "password"));
+    expect(await route(json({ ...good, password: null }))).toEqual(generic("password must be text.", "password"));
+    expect(await route(json({ ...good, fromName: 5 }))).toEqual(generic("fromName must be text or null.", "fromName"));
+    expect(await route(json({ ...good, replyTo: false }))).toEqual(generic("replyTo must be text or null.", "replyTo"));
     expect(await route(json({ ...good, org_id: "x" }))).toEqual(generic("Unknown field: org_id"));
   });
 

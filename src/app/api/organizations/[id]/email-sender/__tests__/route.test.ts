@@ -42,7 +42,7 @@ vi.mock("@/lib/supabase/server", () => ({
     auth: { getUser: mocks.user },
     from: (table: string) =>
       builder(table, mocks.userCalls, (deleting) =>
-        table === "organizations" ? { data: { name: "Kiwumu Energy" }, error: null } : deleting ? mocks.removed() : mocks.saved()
+        table === "organizations" ? { data: { name: "Example Energy Cooperative" }, error: null } : deleting ? mocks.removed() : mocks.saved()
       ),
     rpc: mocks.encrypt,
   }),
@@ -61,7 +61,7 @@ const SAVED = {
   port: 587,
   username: "notices@example.com",
   from_address: "notices@example.com",
-  from_name: "Kiwumu Energy",
+  from_name: "Example Energy Cooperative",
   reply_to: null,
   version: 3,
   last_tested_at: "2026-11-16T10:00:00Z",
@@ -76,7 +76,7 @@ const FORM = {
   username: "notices@example.com",
   password: "",
   fromAddress: "notices@example.com",
-  fromName: "Kiwumu Energy",
+  fromName: "Example Energy Cooperative",
   replyTo: "",
   version: 3,
 };
@@ -168,7 +168,7 @@ describe("PUT /api/organizations/[id]/email-sender", () => {
   });
 
   it("keeps the saved password while the server and username are unchanged", async () => {
-    const response = await put({ ...FORM, fromName: "Kiwumu" });
+    const response = await put({ ...FORM, fromName: "Example Energy" });
     expect(response.status).toBe(200);
     expect(mocks.decrypt).toHaveBeenCalledWith("fn_organization_email_sender_password", {
       _org_id: ORG,
@@ -179,7 +179,7 @@ describe("PUT /api/organizations/[id]/email-sender", () => {
     });
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ password: "saved-password" }));
     const [update] = serviceOps("update");
-    expect(update.args[0]).toMatchObject({ from_name: "Kiwumu", version: 4 });
+    expect(update.args[0]).toMatchObject({ from_name: "Example Energy", version: 4 });
     expect(update.args[0]).not.toHaveProperty("password_encrypted");
     expect(mocks.serviceCalls).toContainEqual({ table: "organization_email_senders", op: "eq", args: ["version", 3] });
   });

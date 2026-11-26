@@ -111,7 +111,7 @@ export async function DELETE(
       { status: 500 }
     );
   }
-  const person = listed?.[0];
+  const person = listed?.find((r: { user_id: string }) => r.user_id.toLowerCase() === id.toLowerCase());
   if (!person || person.role === TENANT || !person.email) return notRevoked();
   const { confirmation } = parsed.data;
   const typeTheAddress = `Type the person's email address, ${person.email}, to remove their access.`;

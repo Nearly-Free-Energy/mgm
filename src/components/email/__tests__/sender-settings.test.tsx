@@ -16,7 +16,7 @@ const SAVED = {
   port: 587,
   username: "notices@example.com",
   from_address: "notices@example.com",
-  from_name: "Kiwumu Energy",
+  from_name: "Example Energy Cooperative",
   reply_to: null,
   version: 3,
   last_tested_at: "2026-11-16T10:00:00Z",

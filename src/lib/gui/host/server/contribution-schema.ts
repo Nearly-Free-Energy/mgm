@@ -214,8 +214,8 @@ export function strictProblems(schema: z.ZodType): { path: Path; message: string
  *   is contributed as billing), payments and Pesapal carry bills, tenants
  *   and payment references; the tenant app is about a tenant's own unit;
  *   the operations plugin contributes nothing yet;
- * - a view whose path names a tenant, a device, or a billing or payment
- *   record (ASSISTANT_REFUSED_KINDS);
+ * - a view whose path names a tenant, a device, a billing or payment
+ *   record, or a person (ASSISTANT_REFUSED_KINDS);
  * - a view that takes signals, which carries every watcher's answer;
  * - a view that declares a key prefix, whose keys the list's review cannot
  *   see.
@@ -245,14 +245,24 @@ export const ASSISTANT_READING: Readonly<Record<MgmPluginName, "per view" | "ref
   operations: "refused",
 };
 
-/** The entity kinds whose records an assistant may never read through a view's path. */
-const ASSISTANT_REFUSED_KINDS: ReadonlySet<string> = new Set<CoreEntityKind>([
-  "tenant",
-  "device",
-  "rateSchedule",
-  "billingPeriod",
-  "lineItem",
-  "paymentAttempt",
+/**
+ * The entity kinds whose records an assistant may never read through a view's
+ * path: the core kinds below, and `org.user`, the organization directory's
+ * person, whose address and role #133's data boundary keeps from any model.
+ * `org.user` is a plugin's kind, named here as ASSISTANT_READING names
+ * plugins; organization-directory/__tests__/person-boundary.test.ts reads it
+ * from the plugin (USER_KIND) and fails if the two differ.
+ */
+const ASSISTANT_REFUSED_KINDS: ReadonlySet<string> = new Set<string>([
+  ...([
+    "tenant",
+    "device",
+    "rateSchedule",
+    "billingPeriod",
+    "lineItem",
+    "paymentAttempt",
+  ] satisfies CoreEntityKind[]),
+  "org.user",
 ]);
 
 const READS_LIST = "src/lib/gui/assistant-reads.ts";

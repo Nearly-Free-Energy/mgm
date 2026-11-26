@@ -156,7 +156,7 @@ export const SaveEmailSenderBody = z.strictObject(
       .regex(LINE, { error: SENDER.username })
       .meta({ title: "Username" }),
     password: z
-      .string({ error: SENDER.password })
+      .string({ error: "password must be text." })
       .max(1024, { error: SENDER.password })
       .optional()
       .meta({ title: "Password", description: "Leave blank to keep the saved one.", writeOnly: true }),
@@ -167,7 +167,7 @@ export const SaveEmailSenderBody = z.strictObject(
       .max(320, { error: SENDER.fromAddress })
       .meta({ title: "From address" }),
     fromName: z
-      .string({ error: SENDER.fromName })
+      .string({ error: "fromName must be text or null." })
       .trim()
       .max(120, { error: SENDER.fromName })
       .regex(LINE, { error: SENDER.fromName })
@@ -175,7 +175,7 @@ export const SaveEmailSenderBody = z.strictObject(
       .optional()
       .meta({ title: "From name" }),
     replyTo: z
-      .string({ error: SENDER.replyTo })
+      .string({ error: "replyTo must be text or null." })
       .trim()
       .max(320, { error: SENDER.replyTo })
       .refine((value) => value === "" || EMAIL_RE.test(value), { error: SENDER.replyTo })
@@ -194,7 +194,11 @@ export const SaveEmailSenderBody = z.strictObject(
 export const SAVE_EMAIL_SENDER_BODY_VERSION = 1;
 /** parseSenderInput's answer for a body that is not an object, JSON or not. */
 const SENDER_NOT_AN_OBJECT: RefusedBody = { status: 422, body: { error: "Body must be an object.", field: "body" } };
-/** The keys parseSenderInput read a value of another type from as blank, keeping it. */
+/**
+ * The keys parseSenderInput read a value of another type from as blank,
+ * keeping it. Such a value gets the generic 400 with its schema's type
+ * message, not the route's answer for a bad value of the right type.
+ */
 const SENDER_LENIENT = new Set(["password", "fromName", "replyTo"]);
 export const SAVE_EMAIL_SENDER_REFUSALS: BodyRefusals = {
   json: SENDER_NOT_AN_OBJECT,

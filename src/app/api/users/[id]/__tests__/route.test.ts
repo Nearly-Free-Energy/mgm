@@ -127,6 +127,8 @@ describe("DELETE /api/users/[id]", () => {
   it.each([
     ["not listed to the caller", []],
     ["listed with a tenant role, which the function never returns", [{ user_id: TARGET, email: EMAIL, role: "tenant" }]],
+    // Only the person the path names is read from the listing, never its first row.
+    ["not listed, while someone else is", [{ user_id: "e7100000-0000-4000-8fff-0000000000aa", email: "other@example.test", role: "org_manager" }]],
   ])("answers a person %s with the same 403, whatever confirmation it carries, deleting nothing", async (_what, rows) => {
     listing = { data: rows, error: null };
     for (const body of [NO_BODY, {}, TYPED]) {

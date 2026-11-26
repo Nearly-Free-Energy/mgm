@@ -229,7 +229,12 @@ export async function prepareChangeRole(req: SurfaceRequest, input: Input): Prom
 
 // ── Editing a profile ──
 
-/** PATCH /api/users/[id]/profile's copy for a caller who may not edit the profile; if the route's changes, change this. */
+/**
+ * PATCH /api/users/[id]/profile's copy for a caller who may not edit the
+ * profile: it answers 403 with it when the update policy raises 42501, or
+ * when the update changed no row and the caller is neither the person nor
+ * a super admin. If the route's changes, change this.
+ */
 export const PROFILE_NOT_YOURS = "Not authorized to update this profile.";
 
 /**

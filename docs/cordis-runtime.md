@@ -382,6 +382,13 @@ that nothing refused it:
 | `state` | `gui_action_unavailable`, with the action's own reason | `available()` said no |
 | `configured`, `authorized` | never | always undecided: no contract field models configuration, and a route may check its own roles (the payment-status route refuses `failed` and `refunded` to anyone but a super admin) |
 
+A role check an action can make before its write is reported only in one
+of two places. An action with no confirmation step has no prepare, so it
+refuses by role in `available()`, and the catalog reports it under
+`state` (the organization directory's `org.update-organization` and
+`org.update-profile`); an action with a step refuses in its prepare, and
+the catalog leaves `authorized` undecided, as above.
+
 `state` is also undecided without entities, when a bound kind is not
 given, when the action has no `available()`, and when an earlier check
 refused it. The request itself is refused with `gui_unauthenticated` (401),

@@ -4,6 +4,8 @@
  * Supabase I/O and auth are mocked. Covers:
  *   - Case 1: self-edit PATCH with a trigger-backfilled (empty) profile row → 200
  *   - Case 2: missing profile row (trigger failure / data integrity gap) → 500
+ *   - Case 2b: 0 rows for a caller who is neither the person nor a super
+ *     admin (the UPDATE policy filtered the row out) → 403
  *   - Case 3: cross-user attempt (RLS block, code 42501) → 403
  */
 
@@ -28,6 +30,13 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ from: mockFrom }),
 }));
 
+// The caller, as the route asks for them after an UPDATE that changed no row.
+let mockAccess: { user: { id: string } | null; roles: { role: string }[] } = { user: null, roles: [] };
+vi.mock("@/lib/auth/access", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/access")>()),
+  getCurrentUserAccess: async () => mockAccess,
+}));
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const SELF_UUID = "550e8400-e29b-41d4-a716-446655440001";
@@ -50,6 +59,7 @@ describe("PATCH /api/users/[id]/profile", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUpdateReturn = { data: null, error: null };
+    mockAccess = { user: { id: SELF_UUID }, roles: [{ role: "org_manager" }] };
   });
 
   // ── Case 1: happy path ───────────────────────────────────────────────────
@@ -105,6 +115,47 @@ describe("PATCH /api/users/[id]/profile", () => {
     expect(res.status).toBe(500);
     const json = await res.json();
     expect(json.error).toMatch(/internal error/i);
+  });
+
+  // ── Case 2b: 0 rows for someone else's profile ──────────────────────────
+  // The UPDATE policy filters rather than raises, so an org manager editing
+  // a colleague's profile changes 0 rows with no error. The route asks who
+  // the caller is and answers 403, the answer org.update-profile's
+  // available() gives; only a caller the policy lets through gets the 500.
+  it("returns 403 when 0 rows change for a caller who is neither the person nor a super admin", async () => {
+    mockUpdateReturn = { data: [], error: null };
+
+    const { PATCH } = await import("../route");
+    const res = await PATCH(makePatchRequest(OTHER_UUID, { first_name: "X" }), {
+      params: Promise.resolve({ id: OTHER_UUID }),
+    });
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "Not authorized to update this profile." });
+  });
+
+  it("returns 403 when 0 rows change and there is no session", async () => {
+    mockUpdateReturn = { data: [], error: null };
+    mockAccess = { user: null, roles: [] };
+
+    const { PATCH } = await import("../route");
+    const res = await PATCH(makePatchRequest(OTHER_UUID, { first_name: "X" }), {
+      params: Promise.resolve({ id: OTHER_UUID }),
+    });
+
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 500 when 0 rows change for a super admin (no profile row)", async () => {
+    mockUpdateReturn = { data: [], error: null };
+    mockAccess = { user: { id: SELF_UUID }, roles: [{ role: "super_admin" }] };
+
+    const { PATCH } = await import("../route");
+    const res = await PATCH(makePatchRequest(OTHER_UUID, { first_name: "X" }), {
+      params: Promise.resolve({ id: OTHER_UUID }),
+    });
+
+    expect(res.status).toBe(500);
   });
 
   // ── Case 3: cross-user attempt blocked by RLS ────────────────────────────
