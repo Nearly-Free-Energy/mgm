@@ -341,6 +341,11 @@ describe("the payments signal models", () => {
       [OCT, "critical"],
       [NOV, "warn"],
     ]);
+    // Reconciliation counts attempts, not bills: two held on one bill are two payments, and link to that bill.
+    expect([out[0].title, out[0].href]).toEqual([
+      "North site: 2 payments in October 2026 need reconciliation",
+      `/microgrids/${MG}/billing/${OCT}/payments?bill=${bill(1)}`,
+    ]);
   });
 
   it(`reports a community from ${NOT_SUBMITTED_THRESHOLD} checkouts never submitted, leaving out unknown and unseen communities`, () => {
