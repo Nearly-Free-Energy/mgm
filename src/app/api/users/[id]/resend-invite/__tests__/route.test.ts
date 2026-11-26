@@ -16,6 +16,9 @@
  *     super admin's 404), for any caller.
  *   - 409: pre-check email_confirmed_at IS NOT NULL.
  *   - 429: more than 3 resends for one person in 10 minutes.
+ *   - 429: the caller's invitations and resends together passed the
+ *     per-inviter limit (invite-limit.ts), before the target is looked up;
+ *     a refused caller is not counted.
  *   - 502: the notice could not be sent.
  *   - 200: the token-free invitation notice (RFC #186 § 5), through the
  *     target's organization's sender, or the deployment's.
@@ -188,6 +191,12 @@ vi.mock("@/lib/runtime/root", () => ({
 vi.mock("@/lib/rate-limit/in-memory", () => ({
   checkRateLimit: (...args: unknown[]) => rateLimitSpy(...args),
 }));
+// The per-inviter limit shared with POST /api/users/invite; its counting is
+// tested in invite-limit.test.ts, so here only the call and its answer.
+const invitationLimitSpy = vi.fn();
+vi.mock("@/lib/organization-directory/invite-limit", () => ({
+  checkInvitation: (...args: unknown[]) => invitationLimitSpy(...args),
+}));
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -214,6 +223,8 @@ beforeEach(() => {
   sendNoticeSpy.mockResolvedValue({ ok: true, via: "organization" });
   rateLimitSpy.mockReset();
   rateLimitSpy.mockReturnValue({ ok: true });
+  invitationLimitSpy.mockReset();
+  invitationLimitSpy.mockReturnValue({ ok: true });
   inviteUserByEmailSpy.mockReset();
   getUserByIdSpy.mockReset();
   mockCaller = { id: CALLER_UUID, email: "caller@example.com" };
@@ -418,8 +429,52 @@ describe("POST /api/users/[id]/resend-invite", () => {
     const json = await res.json();
     expect(json.code).toBe("rate_limited");
     expect(json.error).toMatch(/try again/i);
+    expect(res.headers.get("Retry-After")).toBe("60");
     expect(rateLimitSpy).toHaveBeenCalledWith(`resend-invite:${TARGET_UUID}`, 3, 600_000);
     expect(sendNoticeSpy).not.toHaveBeenCalled();
+  });
+
+  // ── 429: the per-inviter limit (invite-limit.ts) ─────────────────
+  it("counts an authorized resend against the caller's invitation limit", async () => {
+    mockCallerRoles = [{ role: "super_admin", scope_type: null, scope_id: null }];
+    mockTargetRoleRow = { role: "org_manager", scope_type: "org", scope_id: ORG_A };
+    mockGetUserByIdResult = {
+      data: { user: { id: TARGET_UUID, email: "target@example.com", email_confirmed_at: null } },
+      error: null,
+    };
+
+    const { POST } = await import("../route");
+    const res = await POST(makeRequest(TARGET_UUID), makeContext(TARGET_UUID));
+    expect(res.status).toBe(200);
+    expect(invitationLimitSpy).toHaveBeenCalledTimes(1);
+    expect(invitationLimitSpy).toHaveBeenCalledWith(CALLER_UUID);
+  });
+
+  it("returns 429 rate_limited with Retry-After past the per-inviter limit, before the target is looked up", async () => {
+    mockCallerRoles = [{ role: "super_admin", scope_type: null, scope_id: null }];
+    mockTargetRoleRow = { role: "org_manager", scope_type: "org", scope_id: ORG_A };
+    invitationLimitSpy.mockReturnValue({ ok: false, retryAfter: 1800 });
+
+    const { POST } = await import("../route");
+    const res = await POST(makeRequest(TARGET_UUID), makeContext(TARGET_UUID));
+    expect(res.status).toBe(429);
+    const json = await res.json();
+    expect(json.code).toBe("rate_limited");
+    expect(json.error).toMatch(/try again/i);
+    expect(res.headers.get("Retry-After")).toBe("1800");
+    expect(getUserByIdSpy).not.toHaveBeenCalled();
+    expect(rateLimitSpy).not.toHaveBeenCalled();
+    expect(sendNoticeSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not count a caller the route refuses", async () => {
+    mockCallerRoles = [{ role: "org_manager", scope_type: "org", scope_id: ORG_A }];
+    mockTargetRoleRow = { role: "org_manager", scope_type: "org", scope_id: ORG_B };
+
+    const { POST } = await import("../route");
+    const res = await POST(makeRequest(TARGET_UUID), makeContext(TARGET_UUID));
+    expect(res.status).toBe(403);
+    expect(invitationLimitSpy).not.toHaveBeenCalled();
   });
 
   // ── 502: the notice could not be sent ─────────────────────────────

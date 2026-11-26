@@ -25,8 +25,11 @@
  *   - A bearer token (RFC #259 § 2, ADR-008 decision 6): never with a
  *     session cookie, never on a page, refused while MGM_CLIENT_TOKENS is
  *     off, checked with Supabase Auth on every request, a client token in
- *     the cookie counts as signed out, and an agent client reaches only
- *     AGENT_ROUTES; every /api refusal is { error, code }.
+ *     the cookie counts as signed out, an agent client reaches only
+ *     AGENT_ROUTES, and each person's client is limited to
+ *     CLIENT_REQUESTS_PER_WINDOW requests a minute (429 with Retry-After),
+ *     while a cookie session is never counted; every /api refusal is
+ *     { error, code }.
  *
  * Located in src/lib/__tests__ so it runs under the `lib` vitest
  * project (vitest.config.ts only globs src/lib, src/components, src/app
@@ -39,6 +42,7 @@ import { NextRequest } from "next/server";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { renderNotReleasedPage } from "@/lib/public-html/not-released";
 import { PUBLIC_PAGE_SECURITY_HEADERS } from "@/lib/public-html/page";
+import { CLIENT_REQUESTS_PER_WINDOW } from "@/lib/runtime/client-limits";
 import { credentialMarkMatches } from "@/lib/runtime/credential";
 import {
   USER_ID,
@@ -1340,6 +1344,57 @@ describe("middleware for a bearer token (RFC #259 § 2)", () => {
     const res = await middleware(bearerRequest("/api/communities", OPERATOR, { headers: { "x-mgm-credential": "bearer" } }));
     expect(res.status).toBe(200);
     expectMarked(res, OPERATOR);
+  });
+
+  it("limits one person's client to CLIENT_REQUESTS_PER_WINDOW requests a minute: 429 rate_limited with Retry-After, before any route runs", async () => {
+    const middleware = await loadMiddleware();
+    for (let i = 0; i < CLIENT_REQUESTS_PER_WINDOW; i++) {
+      expect((await middleware(bearerRequest("/api/communities", OPERATOR))).status).toBe(200);
+    }
+    const res = await middleware(bearerRequest("/api/communities", OPERATOR));
+    expect(res.headers.get("x-middleware-next")).toBeNull();
+    expect(res.headers.get("x-middleware-request-x-mgm-credential")).toBeNull();
+    expect(Number(res.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+    expect(Number(res.headers.get("retry-after"))).toBeLessThanOrEqual(60);
+    await refusal(res, 429, "rate_limited");
+  });
+
+  it("counts each client and each person apart", async () => {
+    const middleware = await loadMiddleware();
+    for (let i = 0; i < CLIENT_REQUESTS_PER_WINDOW; i++) await middleware(bearerRequest("/api/communities", OPERATOR));
+    expect((await middleware(bearerRequest("/api/communities", OPERATOR))).status).toBe(429);
+    const otherClient = tokenWith(operatorClaims({ client_id: "e7100000-0000-4000-8fff-0000000000c2" }));
+    expect((await middleware(bearerRequest("/api/communities", otherClient))).status).toBe(200);
+    const otherPerson = "e7100000-0000-4000-8fff-000000000002";
+    authAnswer = { ...authAnswer, body: { ...authAnswer.body, id: otherPerson } };
+    expect((await middleware(bearerRequest("/api/communities", tokenWith(operatorClaims({ sub: otherPerson }))))).status).toBe(200);
+  });
+
+  it("counts an agent client's refused routes too, once its token is accepted", async () => {
+    const middleware = await loadMiddleware();
+    for (let i = 0; i < CLIENT_REQUESTS_PER_WINDOW; i++) {
+      await refusal(await middleware(bearerRequest("/api/communities", AGENT)), 403, "agent_route_refused");
+    }
+    await refusal(await middleware(bearerRequest("/api/gui/view?href=%2F", AGENT)), 429, "rate_limited");
+  });
+
+  it("does not count a token Supabase Auth refuses", async () => {
+    const middleware = await loadMiddleware();
+    authAnswer = { status: 403, body: { code: 403, error_code: "session_not_found", msg: "Session not found" } };
+    for (let i = 0; i < CLIENT_REQUESTS_PER_WINDOW; i++) await middleware(bearerRequest("/api/communities", OPERATOR));
+    authAnswer = {
+      status: 200,
+      body: { id: USER_ID, aud: "authenticated", role: "authenticated", app_metadata: {}, user_metadata: {}, created_at: "" },
+    };
+    expect((await middleware(bearerRequest("/api/communities", OPERATOR))).status).toBe(200);
+  });
+
+  it("never counts a browser session", async () => {
+    signedIn(USER_ID);
+    const middleware = await loadMiddleware();
+    for (let i = 0; i <= CLIENT_REQUESTS_PER_WINDOW; i++) {
+      expect((await middleware(makeRequest("/api/communities"))).status).toBe(200);
+    }
   });
 
   it("leaves a browser session unaffected while MGM_CLIENT_TOKENS is off", async () => {

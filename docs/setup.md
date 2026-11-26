@@ -230,7 +230,7 @@ browser bundle or the image. The decision is recorded in
 | `MGM_SMTP_ALLOW_PLAINTEXT_LOCAL` | no | no | `1` allows `MGM_SMTP_URL` to be plaintext `smtp://` to a name with no dot, such as docker compose's `smtp://mailpit:1025`. Set it only where that name is a mail catcher in the same container network, never in production: sign-in links are credentials, and a dotless name may resolve to another machine |
 | `MGM_GUI` | no | no | Which compiled-in interface (`src/gui/meta.ts`) serves this installation's pages. Unset or blank means `gridtop`, the default. The interface pages read it and link that interface's stylesheet; payment and sign-in pages do not |
 | `MGM_METERING_FIXTURES` | no | no | `on` (or `1`, `true`) lets the fixture metering provider generate synthetic site data and meter energy for edges whose id starts with `SYNTHETIC-EDGE-` ([Synthetic site data](#synthetic-site-data)). Unset, blank, `off`, `0` or `false` means off. Read when the server's runtime starts, so a change needs a restart |
-| `MGM_CLIENT_TOKENS` | no | no | Whether MGM's `/api` routes accept a client's bearer token (the CLI, the assistant bridge; [Clients that are not a browser](#clients-that-are-not-a-browser)). Unset, blank, `on`, `1` or `true` accepts them; `off`, `0` or `false` refuses every one with `403 client_tokens_off`, and so does any other value, so a mistyped value never leaves them on. Browser sessions are unaffected. A running server keeps the environment it started with, so a change takes effect only after a redeploy or restart, never on the next request |
+| `MGM_CLIENT_TOKENS` | no | no | Whether MGM's `/api` routes accept a client's bearer token (the CLI, the assistant bridge; [Clients that are not a browser](#clients-that-are-not-a-browser)). Unset, blank, `on`, `1` or `true` accepts them; `off`, `0` or `false` refuses every one with `403 client_tokens_off`, and so does any other value, so a mistyped value never leaves them on; such a value is also logged at server start, naming the variable and never the value. Browser sessions are unaffected. A running server keeps the environment it started with, so a change takes effect only after a redeploy or restart, never on the next request |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | no | Privileged server key; never serialized. It also keys the mark middleware puts on a client's accepted bearer token, so without it every bearer token is refused with `503 client_tokens_unavailable` |
 
 How it works: the root layout renders per request (it is never prerendered or
@@ -256,7 +256,10 @@ logged as an error naming the variable; its value is printed only when it
 looks like a GUI name. It does not stop payment pages or webhooks, which render no
 interface. An `MGM_METERING_FIXTURES` value other than on or off is logged
 as an error naming the variable, never the value, and counts as off; `on`
-is logged as a warning, so synthetic data is never on unnoticed. A
+is logged as a warning, so synthetic data is never on unnoticed. An
+`MGM_CLIENT_TOKENS` value other than on or off is logged as an error the
+same way, naming the variable and never the value; every client token is
+refused while it is set so. A
 compiled-in GUI that does not support this build's GUI contract is
 different: the runtime refuses to install it at start, which stops every
 request, payments included. The `Test` gate
@@ -503,6 +506,24 @@ likely cause; the fix is a release of MGM that checks tokens at `GET
 /oauth/userinfo` instead (ADR-008 decision 6). A `503` with
 `"code":"auth_unavailable"` is different: Supabase Auth did not answer in
 time or answered with an error of its own, and the client may try again.
+
+**A client request answers `429`.** MGM limits each person's client to 120
+requests a minute (`CLIENT_REQUESTS_PER_WINDOW`), and to 20 loads a minute
+of a view that calls an outside system, such as OpenEMS
+(`CLIENT_VENDOR_READS_PER_WINDOW`; both in
+`src/lib/runtime/client-limits.ts`, and `docs/cordis-runtime.md` § "Who is
+calling"). Middleware answers `429` with `"code":"rate_limited"`, and the
+view route with `"code":"gui_rate_limited"`; both send `Retry-After`, the
+seconds to wait. Browser sessions are not limited. The counts are per
+server process, so on Vercel each function instance counts on its own.
+Invitations have a limit of their own, 20 invitation attempts an hour per
+person who invites (`INVITATIONS_PER_WINDOW` in
+`src/lib/organization-directory/invite-limit.ts`), from a browser or a
+client alike. Every attempt at `POST /api/users/invite` the inviter is
+allowed to make counts, whether or not it ends in an email. A resend
+(`POST /api/users/[id]/resend-invite`) counts in the same limit, since it
+emails the invitation too. It also keeps its own limit of 3 per invitee in
+10 minutes. Both `429`s send `Retry-After`.
 
 ### Upgrading from v0.0.1 or v0.0.2
 

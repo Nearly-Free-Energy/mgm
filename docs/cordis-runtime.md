@@ -290,6 +290,12 @@ runs, after the release allowlist:
   or `429`), the request is `503 auth_unavailable` instead, still refused,
   so the client can tell an outage from a dead token and try again rather
   than sign in again;
+- once the token is accepted, each request counts against its person and
+  client: past 120 in a minute (`CLIENT_REQUESTS_PER_WINDOW` in
+  `src/lib/runtime/client-limits.ts`), the request is `429 rate_limited`
+  with a `Retry-After` header. Requests later refused, such as an agent
+  client's outside its routes, count too. A browser session is never
+  counted;
 - an agent client may call only `AGENT_ROUTES`
   (`src/lib/runtime/agent-routes.ts`): `GET /api/gui/catalog` and
   `GET /api/gui/view`. Every other request, whatever its method, public
@@ -347,6 +353,32 @@ agent client gets less (`src/lib/gui/host/server/agent.ts`):
   `agent.test.ts` fails when one is bundled, so that what a marked view
   gives an agent beyond its model (its actions, attached and embedded
   views) is settled first.
+
+A view whose `cost` is `vendor` calls an outside system on every load, so
+the host counts a client's loads of one again, per person and client, at a
+lower limit: past 20 in a minute (`CLIENT_VENDOR_READS_PER_WINDOW`),
+`dispatchView` and `dispatchTenantView` answer `429 gui_rate_limited` with
+`Retry-After`, before the loader runs. For an organization's view, a load
+the plugin gate refuses is not counted, since the host asks the gate first.
+A tenant view's gate is asked inside its loader (`composeTenantApp`), so
+its loads are counted even when the tenant app is off. A browser session is
+never counted, since the GUI already refreshes a vendor view at most once a
+minute.
+
+Invitations have a limit of their own, whatever the caller: past 20
+invitation attempts in an hour per person who invites
+(`INVITATIONS_PER_WINDOW` in
+`src/lib/organization-directory/invite-limit.ts`), `POST /api/users/invite`
+answers `429 rate_limited` with `Retry-After`. Every attempt the inviter is
+allowed to make counts, whether or not it ends in an email. A resend
+(`POST /api/users/[id]/resend-invite`) also emails the invitation, so it
+counts in the same limit and answers the same `429`. It also keeps its own
+limit of 3 per invitee in 10 minutes.
+
+These limits count in memory, per process, like MGM's other limiters. On
+Vercel each function instance keeps its own count, so a client whose
+requests reach several instances gets more. They stop a runaway or looping
+client; they are not a quota.
 
 An operator client holds the person's access: nothing grants or refuses
 anything by that kind. For a new `/api` route:

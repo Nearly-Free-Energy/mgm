@@ -18,6 +18,7 @@ import {
 import { isAgentRoute } from "@/lib/runtime/agent-routes";
 import { verifyBearer } from "@/lib/runtime/bearer";
 import { callerFromClaims } from "@/lib/runtime/caller";
+import { checkClientRequest } from "@/lib/runtime/client-limits";
 import {
   CREDENTIAL_HEADER,
   bearerCredential,
@@ -98,7 +99,11 @@ function apiRefusal(status: number, code: string, error: string): NextResponse {
  *    no answer within AUTH_TIMEOUT_MS, or an error of its own): 503
  *    `auth_unavailable`, still refused, so a client can tell an outage
  *    from a dead token.
- * 5. An agent client outside AGENT_ROUTES, public paths included: 403
+ * 5. More than CLIENT_REQUESTS_PER_WINDOW requests in a minute from one
+ *    person and client (checkClientRequest in @/lib/runtime/client-limits),
+ *    counted once the token is accepted, refused ones included: 429
+ *    `rate_limited` with Retry-After. A cookie session is never counted.
+ * 6. An agent client outside AGENT_ROUTES, public paths included: 403
  *    `agent_route_refused`.
  *
  * Otherwise the request goes on with CREDENTIAL_HEADER set to the token's
@@ -133,6 +138,12 @@ async function bearerRequest(
     return apiRefusal(503, "auth_unavailable", "Sign-in could not be checked right now. Try again shortly.");
   }
   if (!check.ok) return apiRefusal(401, "unauthenticated", "Authentication required");
+  const counted = checkClientRequest({ userId: check.userId, clientId: check.caller.clientId });
+  if (!counted.ok) {
+    const refused = apiRefusal(429, "rate_limited", "Too many requests from this app. Try again shortly.");
+    refused.headers.set("Retry-After", String(counted.retryAfter ?? 1));
+    return refused;
+  }
   if (check.caller.kind === "agent" && !isAgentRoute(request.method, request.nextUrl.pathname)) {
     return apiRefusal(403, "agent_route_refused", "An assistant cannot use this route.");
   }
