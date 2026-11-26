@@ -393,12 +393,13 @@ unchecked only when the organization's own database reads fail. Beside
 each status read it makes a second cached read under the same rules and
 slots: each meter's `ActivePower` history at five-minute resolution, one
 request per edge (`src/lib/metering/infrastructure/meter-activity.ts`).
-Meters (consumption, grid, PV and EV-charger devices with a component id)
+Meters (consumption, grid and PV devices with a component id)
 on an online gateway with no reading for half an hour are one signal per
 microgrid, after the offline gateways; a meter read that failed is a signal
 that the meters could not be checked, and one with no answer by the
-deadline is left for the next load. Batteries and inverters are not asked
-about, since their power channel depends on the driver. Each declares examples,
+deadline is left for the next load. Batteries, inverters and EV chargers
+are not asked about, since their power channel depends on the driver or
+the OpenEMS version. Each declares examples,
 which `contribute()` parses and `gui-surface.test.ts` holds to the plugin's
 own released pages. Severities follow fixed rules, listed in ADR-006
 decision 9; the installed app's badge counts only the `warn` and `critical`
