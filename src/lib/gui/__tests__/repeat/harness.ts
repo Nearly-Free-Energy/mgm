@@ -9,6 +9,7 @@
  * method and path name (handlerFor). A plugin that contributes its first
  * "safe" action adds a module, and the test lists it.
  */
+import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Id } from "@/lib/gui/contract";
@@ -150,6 +151,19 @@ const KEYS: Readonly<Record<string, readonly string[]>> = {
  */
 const COLUMNS: Readonly<Record<string, string>> = { microgrids: MICROGRID_PUBLIC_COLUMNS };
 
+/**
+ * Stored secrets in tables read whole, each value replaced by a fingerprint
+ * (the start of its SHA-256), so a send that rewrites one still changes the
+ * snapshot and a failing case's diff prints no secret. Today that is
+ * communities.payment_provider_secret_encrypted, the retired community-level
+ * Pesapal secret; no other table read here stores one. If a table read
+ * here gains a secret column, add it.
+ */
+const SECRETS: Readonly<Record<string, readonly string[]>> = { communities: ["payment_provider_secret_encrypted"] };
+
+const fingerprint = (value: unknown) =>
+  value === null || value === undefined ? value : `sha256:${createHash("sha256").update(String(value)).digest("hex").slice(0, 16)}`;
+
 async function rows(
   svc: SupabaseClient,
   table: string,
@@ -161,7 +175,11 @@ async function rows(
     const columns: string = COLUMNS[table] ?? "*";
     const { data, error } = await svc.from(table).select(columns).in(column, [...values]);
     if (error) throw new Error(`[repeat] ${table}: ${error.message}`);
-    for (const row of (data ?? []) as unknown as Row[]) found.set(JSON.stringify(KEYS[table].map((k) => row[k])), row);
+    for (const read of (data ?? []) as unknown as Row[]) {
+      const row = { ...read };
+      for (const column of SECRETS[table] ?? []) if (Object.hasOwn(row, column)) row[column] = fingerprint(row[column]);
+      found.set(JSON.stringify(KEYS[table].map((k) => row[k])), row);
+    }
   }
   return [...found].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, row]) => row);
 }
