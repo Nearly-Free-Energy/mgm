@@ -96,4 +96,37 @@ describe("PluginsPageClient", () => {
     expect(html).toContain("tenants cannot open the tenant app");
     expect(html).not.toContain("fail closed");
   });
+  it("says nothing uses the operations plugin yet instead of the write-refusal note", () => {
+    const html = renderToStaticMarkup(
+      (
+        <PluginsPageClient
+          orgs={[
+            {
+              id: "org-1",
+              name: "Acme Energy",
+              plugins: [
+                {
+                  name: "operations",
+                  displayName: "Investigations",
+                  description: "investigation stuff",
+                  version: "0.1.0",
+                  enabled: false,
+                  core: false,
+                  dependencies: ["community-management"],
+                  disabledDependencies: [],
+                  ready: true,
+                  provides: [],
+                },
+              ],
+              audit: [],
+            },
+          ]}
+        />
+      ) as React.ReactElement
+    );
+
+    expect(html).toContain("Nothing uses this plugin yet.");
+    expect(html).not.toContain("fail closed");
+    expect(html).not.toContain("keep existing records");
+  });
 });

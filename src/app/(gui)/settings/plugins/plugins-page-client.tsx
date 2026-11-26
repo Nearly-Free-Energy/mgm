@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { TENANT_APP_PLUGIN_NAME } from "@/lib/plugins/bundled";
+import { OPERATIONS_PLUGIN_NAME, TENANT_APP_PLUGIN_NAME } from "@/lib/plugins/bundled";
 
 type PluginView = {
   name: string;
@@ -25,6 +25,22 @@ type AuditView = {
   actor_user_id: string | null;
   created_at: string;
 };
+
+/** What turning a plugin off means, shown under a plugin that is off. */
+function offNote(name: string): string {
+  if (name === TENANT_APP_PLUGIN_NAME) {
+    return "While it is off, this organization's tenants cannot open the tenant app. The access they have been given is kept.";
+  }
+  if (name === OPERATIONS_PLUGIN_NAME) {
+    // Nothing reads this plugin's state yet (OPERATIONS_PLUGIN in
+    // bundled.ts). When investigations ship, say what turning it off does,
+    // and promise nothing about kept records: their retention deletes
+    // expired investigations whatever the plugin's state (ADR-007
+    // decision 3).
+    return "Nothing uses this plugin yet.";
+  }
+  return "Disabled plugins keep existing records; community, microgrid, and tenant writes fail closed until the plugin is re-enabled.";
+}
 
 export type PluginsOrgView = {
   id: string;
@@ -173,9 +189,7 @@ export function PluginsPageClient({ orgs }: { orgs: PluginsOrgView[] }) {
                       ) : null}
                       {!plugin.enabled ? (
                         <p className="mt-2 text-xs text-muted-foreground">
-                          {plugin.name === TENANT_APP_PLUGIN_NAME
-                            ? "While it is off, this organization's tenants cannot open the tenant app. The access they have been given is kept."
-                            : "Disabled plugins keep existing records; community, microgrid, and tenant writes fail closed until the plugin is re-enabled."}
+                          {offNote(plugin.name)}
                         </p>
                       ) : null}
                     </div>
