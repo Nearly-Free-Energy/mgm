@@ -151,7 +151,11 @@ read a stored credential, or to send data to another origin.
    - Only an action whose `METHOD /api/route` is a `PaymentExemption` in
      `UNGATED_WRITES` (`src/lib/runtime/__tests__/route-rules.ts`) may
      declare `whilePluginOff`, so the host never offers a write the route
-     would refuse; only a Payments or Pesapal view may declare
+     would refuse, and only one of the actions decided for it, which
+     `WHILE_OFF_ACTIONS` in `gui-surface.test.ts` pins to their routes
+     (verification and reconciliation: #226, narrowed by #287), so a route
+     that runs while off is not by itself a reason to offer an action then;
+     only a Payments or Pesapal view may declare
      `attach.whilePluginOff`, and only while every Payments capability
      method a surface module may call runs while the plugin is off.
      `gui-surface.test.ts` checks both. The registration check refuses

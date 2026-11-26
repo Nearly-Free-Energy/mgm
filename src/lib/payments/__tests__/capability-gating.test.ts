@@ -94,7 +94,7 @@ const ROLLOUT_RULE =
   "Plugin disablement blocks new checkout while keeping history and verification available.";
 
 /** What the `payments_disabled` message promises the manager. */
-const DISABLED_PROMISE = "history and reconciliation are preserved";
+const DISABLED_PROMISE = "history is preserved, and verification and reconciliation stay available";
 
 type Gating =
   | { gate: "refuses-when-disabled" }
@@ -138,7 +138,7 @@ const GATING = {
     gate: "available-while-disabled",
     kind: "read",
     reason:
-      "The rollout rule keeps history available, and the payments_disabled message promises reconciliation is preserved: this lists the attempts a manager still has to reconcile, recent failures, or only the recent checkouts never submitted, without contacting the provider or writing anything.",
+      "The rollout rule keeps history available, and the payments_disabled message says reconciliation stays available: this lists the attempts a manager still has to reconcile, recent failures, or only the recent checkouts never submitted, without contacting the provider or writing anything.",
     invalidatedBy:
       "the rollout rule or the payments_disabled message no longer promising history and reconciliation, or the listing contacting the provider",
     reaches: { writes: [], provider: [] },
@@ -181,7 +181,7 @@ const GATING = {
     gate: "available-while-disabled",
     kind: "reconciliation",
     reason:
-      "The payments_disabled message promises reconciliation is preserved; it records a manager's resolution of a mismatched payment and never contacts the provider.",
+      "The payments_disabled message says reconciliation stays available; it records a manager's resolution of a mismatched payment and never contacts the provider.",
     invalidatedBy:
       "the payments_disabled message no longer promising reconciliation, or reconcile contacting the provider",
     reaches: { writes: ["reconcileAttempt"], provider: [] },

@@ -37,7 +37,7 @@ const PAYMENTS_OFF = {
   ok: false,
   status: 409,
   code: "payments_disabled",
-  message: "Payments are disabled for this organization. Enable them in Settings → Plugins; history and reconciliation are preserved.",
+  message: "Payments are disabled for this organization. Enable them in Settings → Plugins; history is preserved, and verification and reconciliation stay available.",
 } as const;
 
 let gates: Map<string, GateDecision>;

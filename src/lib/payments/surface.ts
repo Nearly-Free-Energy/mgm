@@ -22,8 +22,11 @@ import "server-only";
  * their routes accept them then by design: each is a PaymentExemption in
  * src/lib/runtime/__tests__/route-rules.ts, and docs/payments-rollout.md
  * keeps history and verification available while Payments is off.
- * gui-surface.test.ts allows the fields only while that holds; if a route's
- * exemption goes, drop its actions' field (parity.ts, payments-while-off).
+ * gui-surface.test.ts allows the fields only while that holds, and only on
+ * the three actions its WHILE_OFF_ACTIONS list pins, so another payments
+ * action (a payment link, say) is never offered while Payments is off; if a
+ * route's exemption goes, drop its actions' field and their entries
+ * (parity.ts, payments-while-off).
  *
  * `payments.payment-setup` is a new page too (…/[periodId]/payment-setup),
  * served the same way. It replaces the legacy period page's banner shown

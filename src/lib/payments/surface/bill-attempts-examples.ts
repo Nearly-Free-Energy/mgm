@@ -41,7 +41,7 @@ const TZ = "Africa/Kampala";
  * Payments is off. If the gate's copy changes, so may this.
  */
 const PAYMENTS_DISABLED =
-  "Payments are disabled for this organization. Enable them in Settings → Plugins; history and reconciliation are preserved.";
+  "Payments are disabled for this organization. Enable them in Settings → Plugins; history is preserved, and verification and reconciliation stay available.";
 
 const TITLES: Record<string, string> = Object.fromEntries(
   [REFRESH_ATTEMPT_ACTION, RECORD_ADJUSTMENT_ACTION, ACCEPT_RECEIPTS_ACTION].map((a) => [a.id, a.title]),

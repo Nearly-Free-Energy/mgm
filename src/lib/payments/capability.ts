@@ -147,7 +147,7 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
         status: 409,
         code: "payments_disabled",
         message:
-          "Payments are disabled for this organization. Enable them in Settings → Plugins; history and reconciliation are preserved.",
+          "Payments are disabled for this organization. Enable them in Settings → Plugins; history is preserved, and verification and reconciliation stay available.",
       };
     }
     if (!pesapalOn) {

@@ -8,9 +8,11 @@
  * parses its body with parseJsonBody(request, S), S imported from the plugin's
  * schemas module, and S is the action's `input` itself; 3. the route is gated
  * or composes, or carries a PaymentExemption, and an action declaring
- * `whilePluginOff` is a Payments or Pesapal action whose own
- * `METHOD /api/route` carries a PaymentExemption naming a method that runs
- * while the plugin is off; 4. the route is released; 10. each code the
+ * `whilePluginOff` is one WHILE_OFF_ACTIONS pins to its own
+ * `METHOD /api/route`, on a route its Payments or Pesapal plugin owns, which
+ * carries a PaymentExemption naming a method that runs while the plugin is
+ * off, and every Payments method LOADER_READS lets its available() and
+ * prepare call runs then too; 4. the route is released; 10. each code the
  * action lists in `prepareAgainOn` is written as a string in its route file
  * or in a source file under src/lib, outside a `prepareAgainOn` list, so a
  * misspelt code is caught (the host prepares again only on an exact match).
@@ -137,6 +139,24 @@ const LOADER_READS: Readonly<Record<string, readonly string[]>> = {
 const CONTRACT = /CapabilityContract$/;
 
 type Problems = string[];
+/**
+ * The actions decided to stay enabled while their plugin is off (#226, and
+ * #287's narrowing of it), each pinned to the `METHOD /api/route` it sends
+ * to. Only these may declare `whilePluginOff`: being a PaymentExemption is
+ * not enough, because a Payments method that runs while off, such as the
+ * stable payment link, is not one a manager should be offered then. Adding
+ * an entry is a code-owned change with its reason; a test below fails while
+ * an entry names an action that is not registered with the field on that
+ * route.
+ */
+const WHILE_OFF_ACTIONS: Readonly<Record<string, string>> = {
+  // Verification: asks the provider about an attempt already submitted.
+  "payments.refresh-attempt": "POST /api/payments/attempts/[id]/refresh",
+  // Reconciliation: a manager resolves a held attempt; nothing reaches the provider.
+  "payments.record-adjustment": "POST /api/payments/attempts/[id]/reconcile",
+  "payments.accept-receipts": "POST /api/payments/attempts/[id]/reconcile",
+};
+
 type RouteFile = { route: string; text: string };
 type Binding = { module: string; name: string };
 interface Facts {
@@ -154,6 +174,8 @@ interface Facts {
   /** The actions allowed to be "unsafe" while their key is built; REPEAT_KEY_PENDING unless given. */
   repeatKeyPending?: Readonly<Record<string, RepeatKeyPending>>;
 }
+  /** The actions allowed to declare whilePluginOff, with their routes; WHILE_OFF_ACTIONS unless given. */
+  whileOffActions?: Readonly<Record<string, string>>;
 
 /** The capability whose gating decides what runs while Payments or Pesapal is off. */
 const PAYMENTS_CONTRACT = "PaymentsCapabilityContract";
@@ -245,11 +267,15 @@ function actionProblems(plugin: MgmPluginName, a: ActionDef, facts: Facts): Prob
   // route does, and route-surface.test.ts holds each of those to one method
   // capability-gating.test.ts says runs while off, on a Payments or Pesapal
   // route whose file consults no plugin gate. Checked again here so the
-  // message names the action.
+  // message names the action. Only the actions WHILE_OFF_ACTIONS pins, on
+  // their own route, may declare it, and the route must be the plugin's
+  // own. The host also runs the action's available() and prepare while the
+  // plugin is off, and check 8 holds them to LOADER_READS, so every Payments
+  // method listed there must run then, as check 9 asks of a listed view.
   if (a.whilePluginOff !== undefined) {
     if (typeof exemption !== "object") {
       problems.push("declares whilePluginOff, but its route is not a PaymentExemption in UNGATED_WRITES");
-    } else if ((facts.gating ?? paymentsGating()).get(exemption.reaches) !== WHILE_OFF) {
+    } else if (gating.get(exemption.reaches) !== WHILE_OFF) {
       problems.push(`declares whilePluginOff, but ${exemption.reaches} refuses while the plugin is off`);
     }
     if (!PAYMENT_EXEMPTION_OWNERS.has(plugin)) problems.push(`declares whilePluginOff, but ${plugin}'s routes carry no PaymentExemption`);
@@ -258,12 +284,23 @@ function actionProblems(plugin: MgmPluginName, a: ActionDef, facts: Facts): Prob
   // Check 10. The route answers the code, often from a capability module, so
   // either place counts; a prepareAgainOn list itself does not.
   for (const code of a.prepareAgainOn ?? []) {
+    const gating = facts.gating ?? paymentsGating();
+    const pinned = (facts.whileOffActions ?? WHILE_OFF_ACTIONS)[a.id];
+    if (pinned === undefined) problems.push("declares whilePluginOff, but WHILE_OFF_ACTIONS does not list it");
+    else if (pinned !== exemptionKey(a.method, a.path)) problems.push(`declares whilePluginOff, but WHILE_OFF_ACTIONS pins it to ${pinned}`);
     const literal = `"${code}"`;
     if (!withoutPrepareAgainOn(text ?? "").includes(literal) && !(facts.writes ?? libWrites)(literal)) {
       problems.push(`lists "${code}" in prepareAgainOn, which neither its route nor src/lib writes`);
     }
   }
   // Check 12. `plugin` is the contributing plugin the registry stored with
+    const owner = getRouteOwner(a.path)?.name;
+    if (owner !== plugin) problems.push(`declares whilePluginOff, but its route belongs to ${owner ?? "no plugin"}, not ${plugin}`);
+    for (const method of (facts.reads ?? LOADER_READS)[PAYMENTS_CONTRACT] ?? []) {
+      if (gating.get(method) !== WHILE_OFF) {
+        problems.push(`declares whilePluginOff, but LOADER_READS lets its available() and prepare call ${method}, which refuses while the plugin is off`);
+      }
+    }
   // the action, and registration holds an action's path to its own plugin's
   // routes (contribution-schema.ts), so an action on a billing route is a
   // billing action. If registration stops checking route ownership, revisit.
@@ -479,6 +516,17 @@ function surfaceProblems(snapshot: SurfaceSnapshot, facts: Facts): Problems {
 // ── Capability writes (check 8) ─────────────────────────────────────────────
 
 function classContract(cls: ts.ClassDeclaration): string | null {
+/** Each WHILE_OFF_ACTIONS entry that names no registered action declaring whilePluginOff on that route. */
+function staleWhileOffActions(snapshot: SurfaceSnapshot, list: Readonly<Record<string, string>> = WHILE_OFF_ACTIONS): Problems {
+  return Object.entries(list).flatMap(([id, route]) => {
+    const def = [...snapshot.actions.values()].find((a) => a.def.id === id)?.def;
+    if (!def) return [`WHILE_OFF_ACTIONS lists ${id}, which is not a registered action`];
+    if (def.whilePluginOff === undefined) return [`WHILE_OFF_ACTIONS lists ${id}, which does not declare whilePluginOff`];
+    if (exemptionKey(def.method, def.path) !== route) return [`WHILE_OFF_ACTIONS pins ${id} to ${route}, but it sends ${exemptionKey(def.method, def.path)}`];
+    return [];
+  });
+}
+
   const implemented = (cls.heritageClauses ?? []).filter((c) => c.token === ts.SyntaxKind.ImplementsKeyword);
   return implemented.flatMap((c) => c.types.map((t) => t.expression.getText())).find((n) => CONTRACT.test(n)) ?? null;
 }
@@ -683,6 +731,7 @@ describe("GUI surface contributions", () => {
     const { program, host, roots } = projectProgram(listed.map(([, module]) => module));
     expect(capabilityWrites(program, host, roots)).toEqual([]);
     const untied = await Promise.all(listed.map(async ([plugin], i) => untiedFunctions(s, plugin, await import(/* @vite-ignore */ roots[i]))));
+    expect(staleWhileOffActions(snapshot)).toEqual([]);
     expect(untied.flat()).toEqual([]);
   }, 120_000);
 
@@ -785,14 +834,21 @@ describe("the GUI surface guard", () => {
       .toEqual(["parses with several schemas: @/lib/billing/schemas Body, @/lib/billing/schemas Other"]);
   });
 
-  it("allows whilePluginOff only on a Payments action whose own method and route carry a PaymentExemption", () => {
+  it("allows whilePluginOff only on an action WHILE_OFF_ACTIONS pins to its own Payments route, which carries a PaymentExemption", () => {
     const REFRESH = "/api/payments/attempts/[id]/refresh";
     const RECONCILE = "/api/payments/attempts/[id]/reconcile";
-    const check = (plugin: MgmPluginName, route: string, o: { method?: string; gating?: ReadonlyMap<string, string> } = {}) => {
+    type Options = {
+      method?: string;
+      gating?: ReadonlyMap<string, string>;
+      reads?: Readonly<Record<string, readonly string[]>>;
+      list?: Readonly<Record<string, string>>;
+    };
+    const check = (plugin: MgmPluginName, route: string, o: Options = {}) => {
       const schemas = `@/lib/${plugin}/schemas`;
       const handler = (m: string) => `export async function ${m}(request: Request) { await parseJsonBody(request, Body); }\n`;
       const text = `import { parseJsonBody } from "@/lib/validation/parse-body";\nimport { Body } from "${schemas}";\n${handler("POST")}${handler("PUT")}`;
-      const a = { ...createPeriod, path: route, method: o.method ?? "POST", whilePluginOff: "enabled" } as ActionDef;
+      const method = o.method ?? "POST";
+      const a = { ...createPeriod, path: route, method, whilePluginOff: "enabled" } as ActionDef;
       return actionProblems(plugin, a, {
         apiRoutes: [{ route, text }],
         schemas: (m) => (m === schemas ? { Body: createPeriod.input } : undefined),
@@ -805,19 +861,35 @@ describe("the GUI surface guard", () => {
     // Each names a method capability-gating.test.ts says runs while Payments is off.
     expect(check("payments", REFRESH)).toEqual([]);
     expect(check("payments", RECONCILE)).toEqual([]);
-    // A route exempt with a plain reason, and a gated route.
-    expect(check("payments", "/api/edges")).toEqual(["the route is exempt from the gate without a PaymentExemption", notExempt]);
-    expect(check("payments", "/api/billing-periods")).toEqual([notExempt]);
+    // Not in the pinned list, or pinned to another route: a PaymentExemption alone is not enough.
+    expect(check("payments", RECONCILE, { list: {} })).toEqual(["declares whilePluginOff, but WHILE_OFF_ACTIONS does not list it"]);
+    expect(check("payments", RECONCILE, { list: { [createPeriod.id]: `POST ${REFRESH}` } }))
+      .toEqual([`declares whilePluginOff, but WHILE_OFF_ACTIONS pins it to POST ${REFRESH}`]);
+    // A route exempt with a plain reason, and a gated route, each another plugin's.
+    expect(check("payments", "/api/edges")).toEqual([
+      "the route is exempt from the gate without a PaymentExemption",
+      notExempt,
+      ownedBy(getRouteOwner("/api/edges")?.name, "payments"),
+    ]);
+    expect(check("payments", "/api/billing-periods")).toEqual([notExempt, ownedBy("billing", "payments")]);
     // The exemption is keyed by method too: PUT on an exempt POST route is not exempt.
     expect(check("payments", RECONCILE, { method: "PUT" })).toEqual([notExempt]);
     // Another plugin cannot opt out of the gate by declaring it, on its own route or a payments one.
     expect(check("billing", "/api/billing-periods")).toEqual([notExempt, "declares whilePluginOff, but billing's routes carry no PaymentExemption"]);
-    expect(check("billing", RECONCILE)).toEqual(["declares whilePluginOff, but billing's routes carry no PaymentExemption"]);
+    expect(check("billing", RECONCILE)).toEqual([
+      "declares whilePluginOff, but billing's routes carry no PaymentExemption",
+      ownedBy("payments", "billing"),
+    ]);
     // An exemption whose method came to refuse while the plugin is off.
     const refusing = new Map([...paymentsGating(), ["reconcile", "refuses-when-disabled"]]);
+        reads: o.reads,
+        // Listed, on the route it sends to, unless the case says otherwise.
+        whileOffActions: o.list ?? { [createPeriod.id]: exemptionKey(method, route) },
     expect(check("payments", RECONCILE, { gating: refusing })).toEqual(["declares whilePluginOff, but reconcile refuses while the plugin is off"]);
     // Without the field, an exempt route needs nothing more.
     expect(actionProblems("billing", { ...createPeriod, path: "/api/billing-periods" } as ActionDef, facts).filter((p) => p.includes("whilePluginOff"))).toEqual([]);
+    const ownedBy = (owner: string | undefined, plugin: string) =>
+      `declares whilePluginOff, but its route belongs to ${owner ?? "no plugin"}, not ${plugin}`;
   });
 
   it("refuses repeat \"unsafe\" on a billing, payments or Pesapal action unless REPEAT_KEY_PENDING lists it", () => {
@@ -833,10 +905,32 @@ describe("the GUI surface guard", () => {
     // Another plugin may declare it: a repeat there writes twice, and says so.
     expect(check("metering", unsafe)).toEqual([]);
     // Listed with the issue building its key, while that key is built.
+    // Its available() and prepare run while off too, so LOADER_READS may not let them call a method that refuses then.
+    const reads = { ...LOADER_READS, PaymentsCapabilityContract: ["listHistory", "ensureCheckout"] };
+    expect(check("payments", RECONCILE, { reads })).toEqual([
+      "declares whilePluginOff, but LOADER_READS lets its available() and prepare call ensureCheckout, which refuses while the plugin is off",
+    ]);
     expect(check("billing", unsafe, { [unsafe.id]: { reason: "inserts a row on each send", key: "#999" } })).toEqual([]);
     expect(check("billing", unsafe, { "billing.other": { reason: "inserts a row on each send", key: "#999" } })).toEqual([refusal("billing")]);
     // "safe" and "keyed" need no entry.
     expect(check("billing", createPeriod)).toEqual([]);
+  it("refuses a WHILE_OFF_ACTIONS entry that no registered action declaring whilePluginOff on that route matches", () => {
+    const route = exemptionKey(createPeriod.method, createPeriod.path);
+    const snapshotOf = (def: ActionDef) => ({ actions: new Map([[def.id, { plugin: "billing", def }]]) }) as unknown as SurfaceSnapshot;
+    const declaring = snapshotOf({ ...createPeriod, whilePluginOff: "enabled" } as ActionDef);
+
+    expect(staleWhileOffActions(declaring, { [createPeriod.id]: route })).toEqual([]);
+    expect(staleWhileOffActions(declaring, { "payments.copy-link": "POST /api/payments/link" })).toEqual([
+      "WHILE_OFF_ACTIONS lists payments.copy-link, which is not a registered action",
+    ]);
+    expect(staleWhileOffActions(snapshotOf(createPeriod), { [createPeriod.id]: route })).toEqual([
+      `WHILE_OFF_ACTIONS lists ${createPeriod.id}, which does not declare whilePluginOff`,
+    ]);
+    expect(staleWhileOffActions(declaring, { [createPeriod.id]: "POST /api/payments/link" })).toEqual([
+      `WHILE_OFF_ACTIONS pins ${createPeriod.id} to POST /api/payments/link, but it sends ${route}`,
+    ]);
+  });
+
     expect(check("billing", { ...createPeriod, repeat: "keyed" } as ActionDef)).toEqual([]);
   });
 
