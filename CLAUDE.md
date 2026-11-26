@@ -90,7 +90,7 @@ src/
 ├── lib/
 │   ├── runtime/             ← Cordis root context, request scopes, plugin gate
 │   ├── plugins/             ← bundled plugin catalog (names, dependencies, owned routes)
-│   ├── gui/                 ← GUI contract v0: contract.ts (client-safe), surface.ts (server-only); host/{server,client,shared}/ layering enforced by gui-boundary.test.ts
+│   ├── gui/                 ← GUI contract v0: contract.ts (client-safe, no React), contract-react.ts (kit and GUI-plugin types), surface.ts (server-only); host/{server,client,shared}/ layering enforced by gui-boundary.test.ts
 │   ├── community-management/, metering/, billing/, payments/, tenant-app/  ← capability plugins
 │   ├── openems/             ← OpenEMS client, types, errors (adapter pattern)
 │   │   └── device-descriptions.ts  ← human-readable device-type labels

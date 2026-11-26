@@ -7,7 +7,8 @@
  * a chunk of its own, so this module costs the shell's first load only the
  * wrappers.
  */
-import type { GuiPlugin, ViewModel } from "@/lib/gui/contract";
+import type { ViewModel } from "@/lib/gui/contract";
+import type { GuiPlugin } from "@/lib/gui/contract-react";
 import { PeriodReviewRenderer } from "./period-review";
 import { SavingsRenderer } from "./savings";
 import { SendQueueRenderer } from "./send-queue";

@@ -8,7 +8,8 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ModelView, checkModel, loadLazyRenderers, renderInKit, renderShell, withPoke, type Recorded } from "@/lib/gui/conformance";
-import type { ActionRef, ActionResult, GuiKit, LiveState, ViewModel, ViewProps, ViewState } from "@/lib/gui/contract";
+import type { ActionRef, ActionResult, LiveState, ViewModel, ViewProps, ViewState } from "@/lib/gui/contract";
+import type { GuiKit } from "@/lib/gui/contract-react";
 import { kit } from "@/lib/gui/kit";
 import { GridtopGui } from "../../..";
 import { EAST, EAST_TRAIL, KASANA, ORG, placesFixture } from "../../../__tests__/places-fixture";

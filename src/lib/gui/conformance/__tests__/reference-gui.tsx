@@ -4,7 +4,8 @@
  * thing at a time through `referenceGui(broken)`.
  */
 import type { ReactNode } from "react";
-import type { ActionRef, GuiMeta, GuiPlugin, NavEntry, OverlayProps, PublicPage, ShellProps, Signal } from "../../contract";
+import type { ActionRef, GuiMeta, NavEntry, PublicPage, Signal } from "../../contract";
+import type { GuiPlugin, OverlayProps, ShellProps } from "../../contract-react";
 import { kit, Overlay } from "../../kit";
 
 export const REFERENCE_META = {

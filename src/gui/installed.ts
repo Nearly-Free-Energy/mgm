@@ -4,7 +4,7 @@
  * (src/lib/config/gui.ts); nothing else does, so a GUI's components reach
  * only the pages that render it (gui-boundary.test.ts, rule gui-installed).
  */
-import type { GuiPlugin } from "@/lib/gui/contract";
+import type { GuiPlugin } from "@/lib/gui/contract-react";
 import { GridtopGui } from "./gridtop";
 import type { GuiName } from "./meta";
 

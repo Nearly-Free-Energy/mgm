@@ -15,7 +15,8 @@
  * own, which costs the first load more than this chunk saves it.
  */
 import { useId, useState } from "react";
-import type { GuiKit, ModelOf, Value, ViewModel, ViewProps } from "@/lib/gui/contract";
+import type { ModelOf, Value, ViewModel, ViewProps } from "@/lib/gui/contract";
+import type { GuiKit } from "@/lib/gui/contract-react";
 
 type Props = ViewProps & { kit: GuiKit };
 const cx = (...names: (string | false | null | undefined)[]) => names.filter(Boolean).join(" ");
