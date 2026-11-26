@@ -507,8 +507,10 @@ function hostOperation(route: HostRoute, surface: DescribedSurface, gated: GateL
  *   deletes read nothing as a request for the name to type, and answer 428
  *   (src/app/api/billing-periods/[periodId]/route.ts and the community,
  *   microgrid and tenant routes).
- * - The edge delete and the connection check read nothing as `{}` through
- *   parseJsonBody's `whenEmpty`, since the pages send them bare.
+ * - The edge delete and the connection check, and the organization
+ *   directory's three typed deletes and the invitation resend, read nothing
+ *   as `{}` through parseJsonBody's `whenEmpty` (the typed deletes then
+ *   answer 428 for the name).
  * - The access removal reads nothing as a removal with no confirmation.
  * openapi.test.ts fails while this list and the action route handlers that
  * read an empty body disagree.
@@ -518,9 +520,13 @@ export const EMPTY_BODY_ROUTES: ReadonlySet<string> = new Set([
   "DELETE /api/communities/[id]",
   "DELETE /api/edges/[id]",
   "DELETE /api/microgrids/[id]",
+  "DELETE /api/organizations/[id]",
+  "DELETE /api/organizations/[id]/email-sender",
   "DELETE /api/tenants/[id]",
   "DELETE /api/tenants/[id]/access/[accessId]",
+  "DELETE /api/users/[id]",
   "POST /api/microgrids/[id]/openems-backend/discover",
+  "POST /api/users/[id]/resend-invite",
 ]);
 
 /** The body of the actions sent to one route: the same for all of them, since the route parses one schema. */

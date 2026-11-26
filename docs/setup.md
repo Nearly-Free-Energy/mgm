@@ -56,6 +56,9 @@ starts the stack. The manual commands do not copy it.
 
 - No hot reload -- runs `next start` (production build). Use the dev path for active development.
 - No Supabase Studio -- use the dev path if you need the database admin UI.
+- No sign-in for clients that are not a browser -- docker mode leaves
+  Supabase Auth's OAuth server off, so the CLI and the assistant bridge cannot
+  sign in. Use the dev path ([Clients that are not a browser](#clients-that-are-not-a-browser)).
 
 ## Dev path (developer)
 
@@ -274,11 +277,13 @@ belong to the Supabase project rather than to MGM's environment.
   / Providers › Email). The link says it works for 15 minutes.
 - **The Custom Access Token hook** (Authentication › Auth Hooks): a
   Postgres function, `public.fn_auth_access_token_hook`, which migration
-  `20261117210000` creates. It refuses a token for a session that a
-  password or a recovery started, new or refreshed, so Supabase's own
-  password endpoints sign nobody in. Push the migration before you enable
-  the hook: while the function is missing, Supabase Auth issues no tokens
-  at all.
+  `20261117210000` creates and `20261126090100` replaces. It refuses a token
+  for a session that a password or a recovery started, new or refreshed, so
+  Supabase's own password endpoints sign nobody in. For a client of the OAuth
+  server it applies the rules in
+  [Clients that are not a browser](#clients-that-are-not-a-browser). Push the
+  migration before you enable the hook: while the function is missing,
+  Supabase Auth issues no tokens at all.
 - **Recommended: "Allow new users to sign up" off** (Authentication › Sign
   In / Providers). MGM creates accounts only through the admin API, when
   someone is invited, so this changes nothing in MGM. It stops strangers
@@ -309,18 +314,130 @@ other's mailbox fails.
 **Rolling back, or changing the function.** While the hook is on, Supabase
 Auth calls the function for every sign-in and every refresh, the email link
 and the emergency link included. If the function is missing or fails,
-nobody can sign in. So, in this order:
+nobody can sign in. While it is off, Supabase Auth still issues tokens to
+clients of the OAuth server, with no kind, no approval record and no check of
+MGM's table of clients (ADR-008 decision 2). So, in this order:
 
-1. Turn the hook off (Authentication › Auth Hooks, or `PATCH
+1. If the project's OAuth server is on, turn it off first
+   ([Clients that are not a browser](#clients-that-are-not-a-browser)), and
+   check it is off: while it is off, Supabase Auth answers `404` with
+   `feature_disabled` for
+   `curl -sS <supabase-url>/auth/v1/.well-known/oauth-authorization-server -H "apikey: <anon key>"`.
+2. Turn the hook off (Authentication › Auth Hooks, or `PATCH
    /v1/projects/<ref>/config/auth` with
    `hook_custom_access_token_enabled: false`), and read the setting back
    with `GET` to check it is `false`.
-2. Only then change, replace or drop `public.fn_auth_access_token_hook`.
-3. Turn the hook back on, if it should be, once the function is in place.
+3. Only then change, replace or drop `public.fn_auth_access_token_hook`.
+   Pushing a migration that replaces it, such as `20261126090100`, counts.
+4. Turn the hook back on, if it should be, once the function is in place.
+5. If you turned the OAuth server off in step 1, turn it back on last, only
+   once the hook is on again.
 
 Turning the hook off makes Supabase Auth issue tokens again; it does not
 bring passwords back. The cutover above deleted the hashes for good, so
 after it everyone still signs in by email link.
+
+### Clients that are not a browser
+
+MGM's command line (`mgm`) and the assistant bridge sign in as the person
+through Supabase Auth's OAuth 2.1 server, which is in beta (RFC #259,
+ADR-008). Each installation registers its own two public clients with
+Supabase Auth and lists them in MGM's table, `public.mgm_clients`:
+
+| Client | Kind | Lists it when |
+|--------|------|---------------|
+| The CLI | `operator` | The installation wants the CLI |
+| The assistant bridge | `agent` | The release includes the assistant's database role (#274). Until then, register and list the operator client only: the hook refuses every sign-in and refresh of an `agent` client, listed or not |
+
+The access-token hook (above) refuses a token for a client that
+`mgm_clients` does not list, and writes the client's kind into the token as
+the `mgm_client_kind` claim. It refuses a client sign-in that asks for scope
+`openid`: MGM's clients get an access token and a refresh token, and nothing
+else. A new client sign-in counts only after MGM's own consent page has
+recorded the person's approval (`public.mgm_client_approvals`, written by
+MGM's server); the hook uses that record up, and a refresh needs none. A
+browser sign-in has no client and is unchanged.
+
+**Supabase Auth v2.198.0 or later only** (ADR-008 decision 1). Older versions
+accept a client's token on Supabase Auth's own account endpoints. Check
+the version a project runs with `curl <supabase-url>/auth/v1/health -H
+"apikey: <anon key>"`.
+
+**1. Turn the OAuth server on.**
+
+- *Local and CI:* `supabase/config.toml` does it (`[auth.oauth_server]`:
+  `enabled = true`, `authorization_url_path = "/oauth/consent"`,
+  `allow_dynamic_registration = false`). Supabase Auth sends the person to
+  the consent page at `site_url` plus that path. The CLI's built-in signing
+  key is enough; no key setup is needed.
+- *Hosted:* leave the OAuth server off until the release you run includes
+  MGM's consent and code pages (#271), the resolver's check of client tokens
+  (#272) and the CLI. Before then no client can complete a sign-in, and a
+  server that is on adds the turn-it-off-first step to every later change of
+  the hook. Once they ship: in the dashboard's Authentication settings for
+  the OAuth server, turn it on, set the authorization path to
+  `/oauth/consent`, and leave dynamic client registration off. Leave the
+  authorization lifetime at its default of 10 minutes: the hook counts an
+  approval record for 10 minutes, and a different lifetime needs a
+  migration that changes the hook to match. The project's Site URL must be
+  MGM's address (`MGM_APP_URL`). These dashboard steps have not yet been
+  checked against a hosted project (ADR-008, Consequences), so read each
+  setting back after saving. Supabase recommends an asymmetric signing key
+  (ES256) for the OAuth server.
+- *Docker mode:* the OAuth server stays off, so no client can sign in.
+
+If the access-token hook is not on, or the migrations up to
+`20261126090100` are not pushed, leave the OAuth server off.
+
+**2. Register each client** with Supabase Auth's admin endpoint, as a
+public client: no secret, the grant types `authorization_code` and
+`refresh_token`, and one return address, MGM's sign-in code page,
+`/oauth/code`. #271 serves that page; if it ships at another path, register
+the clients again with that one. Return addresses must match exactly, port
+included. Locally:
+
+```bash
+eval "$(supabase status -o env | grep '^SERVICE_ROLE_KEY=')"
+curl -sS -X POST http://127.0.0.1:54321/auth/v1/admin/oauth/clients \
+  -H "apikey: $SERVICE_ROLE_KEY" -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"client_name": "MGM CLI",
+       "redirect_uris": ["http://127.0.0.1:3000/oauth/code"],
+       "grant_types": ["authorization_code", "refresh_token"],
+       "token_endpoint_auth_method": "none"}'
+```
+
+The answer's `client_id` is the client's id, and its `client_type` must be
+`public`. For a hosted project, send the same request to
+`https://<ref>.supabase.co/auth/v1/admin/oauth/clients` with the project's
+service-role key, and `MGM_APP_URL` in place of `http://127.0.0.1:3000`; or
+add the client in the dashboard as a public client with the same return
+address. For the assistant bridge, repeat with `"client_name": "MGM
+assistant bridge"`.
+
+**3. List each client in MGM's table.** Locally with `supabase db query`,
+on a hosted project in the SQL editor:
+
+```sql
+-- The CLI:
+INSERT INTO public.mgm_clients (client_id, kind, label)
+VALUES ('<client_id>', 'operator', 'MGM CLI');
+
+-- The assistant bridge, once the release includes #274:
+INSERT INTO public.mgm_clients (client_id, kind, label)
+VALUES ('<client_id>', 'agent', 'MGM assistant bridge');
+```
+
+Only the service role and the database owner can write the table; no
+browser or client token reads or writes it through the database API.
+
+**Removing a client.** `DELETE FROM public.mgm_clients WHERE client_id =
+'<id>';` refuses its next sign-in and its next refresh. It ends no session:
+tokens already issued keep working at MGM's routes and at the database
+until they expire (`jwt_expiry`, one hour by default). Deleting the client
+in Supabase is the same. To replace a client, list the new one before
+removing the old. An installation that wants no assistant at all leaves the
+agent client out of the table.
 
 ### Upgrading from v0.0.1 or v0.0.2
 
@@ -459,6 +576,15 @@ instance** — they never run against cloud Supabase to prevent polluting shared
 - **Local Supabase CLI** running (`MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase start`, or `./setup.sh`).
 
 ### Running RLS tests
+
+A stack that was already running when you pulled a change to
+`supabase/config.toml` keeps its old settings until you restart it
+(`supabase stop`, then `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase start`; the
+database is kept). For example, a stack started before `[auth.oauth_server]`
+was turned on in `supabase/config.toml` keeps its OAuth server off until it is
+restarted, and
+`auth_access_token_hook_clients.test.ts` fails in `beforeAll` with `404`
+`feature_disabled` from `/admin/oauth/clients`.
 
 ```bash
 # 1. Start local Supabase (if not already running)

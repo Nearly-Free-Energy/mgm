@@ -5,6 +5,13 @@ import { currentUserIsSuperAdmin } from "@/lib/auth/access";
 import { isCommunityManagementEnabled } from "@/lib/plugins/state";
 import { countEntityDescendants } from "@/lib/entity-descendants";
 import {
+  DeleteOrganizationBody,
+  UPDATE_ORGANIZATION_REFUSALS,
+  UpdateOrganizationBody,
+} from "@/lib/organization-directory/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
+import { typedNameMatches } from "@/lib/validation/typed-name";
+import {
   errorBody,
   mapPgError,
   resolveActorRole,
@@ -13,11 +20,16 @@ import {
 } from "@/lib/entity-deletion/shared";
 
 /**
- * PATCH /api/organizations/[id] — update an organization (#76).
+ * PATCH /api/organizations/[id] — update an organization (#76), as
+ * `org.update-organization`.
  *
  * Dirty-fields semantics: the client sends only changed fields. Any column NOT
  * present in the body is left untouched. The handler builds an UPDATE payload
- * from body keys only; a missing `name` key will NOT set name to null.
+ * from body keys only; a missing `name` key will NOT set name to null. The
+ * body is UpdateOrganizationBody (src/lib/organization-directory/schemas.ts),
+ * refused with this route's own answers (UPDATE_ORGANIZATION_REFUSALS), so a
+ * body is checked before the caller's role, as community management's edits
+ * are.
  *
  * Authorization: super_admin only (defense-in-depth + RLS backstop).
  *
@@ -40,12 +52,9 @@ export async function PATCH(
     );
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, UpdateOrganizationBody, { refusals: UPDATE_ORGANIZATION_REFUSALS });
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
 
   const supabase = await createClient();
 
@@ -58,40 +67,21 @@ export async function PATCH(
 
   const updates: Record<string, string | null> = {};
 
-  if ("name" in body) {
-    if (typeof body.name !== "string" || !body.name.trim()) {
-      return NextResponse.json(
-        { error: "Name is required.", field: "name" },
-        { status: 422 }
-      );
-    }
-    updates.name = body.name.trim();
+  // The schema has trimmed the name, city and country, and refused them
+  // blank, so a key present here is a value to store.
+  for (const f of ["name", "address_city", "address_country"] as const) {
+    const v = body[f];
+    if (v !== undefined) updates[f] = v;
   }
 
-  // Address fields — only include keys explicitly present in the body.
-  // Required fields (city/country) cannot be cleared; optional fields may be
-  // sent as "" to clear → stored as null.
-  const REQUIRED_ADDR_FIELDS = ["address_city", "address_country"] as const;
+  // Optional address fields — only keys present in the body. "" or null
+  // clears one (stored as null).
   const OPTIONAL_ADDR_FIELDS = [
     "address_line1",
     "address_line2",
     "address_region",
     "address_postal_code",
   ] as const;
-
-  for (const f of REQUIRED_ADDR_FIELDS) {
-    if (f in body) {
-      const v = body[f];
-      if (typeof v !== "string" || !v.trim()) {
-        const label = f === "address_city" ? "City" : "Country";
-        return NextResponse.json(
-          { error: `${label} is required.`, field: f },
-          { status: 422 }
-        );
-      }
-      updates[f] = v.trim();
-    }
-  }
 
   for (const f of OPTIONAL_ADDR_FIELDS) {
     if (f in body) {
@@ -161,6 +151,18 @@ export async function PATCH(
  * Idempotency: first-delete wins, repeats 404 (AC-ROUTE-7). Document rather
  * than chase 204-on-already-gone.
  *
+ * Confirmation: `org.delete-organization` is a typed action. The body is
+ * DeleteOrganizationBody (src/lib/organization-directory/schemas.ts), and a
+ * DELETE often has none, so an empty one is read as `{}`. The route checks
+ * the confirmation on every request, after the caller, the plugin and the
+ * organization's name are checked:
+ *   - no `confirmation`: 428 `organization_delete_confirmation_required`,
+ *     naming the organization to type. Nothing is deleted.
+ *   - a name that is not the organization's, or none typed: 428
+ *     `organization_delete_name_mismatch`.
+ * The GUI host sends the name typed in its step, and the organization
+ * page's delete dialog (DeleteEntityButton) the name it asked for.
+ *
  * Cascade chain: organizations → communities → microgrids → edges → devices
  * → tenant_devices + billing_line_items (device_id SET NULL, survives);
  * microgrids → tenants → tenant_devices + user_roles (tenant role rows,
@@ -178,7 +180,7 @@ export async function PATCH(
  * so the shell's organization list reflects the removal on next navigation.
  */
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   const { id } = await params;
@@ -189,6 +191,10 @@ export async function DELETE(
       { status: 400 }
     );
   }
+
+  // A DELETE often has no body; an empty one is read as `{}`, which asks for the name.
+  const parsed = await parseJsonBody(request, DeleteOrganizationBody, { whenEmpty: {} });
+  if (!parsed.ok) return parsed.response;
 
   const supabase = await createClient();
 
@@ -232,6 +238,20 @@ export async function DELETE(
     return NextResponse.json(
       errorBody("Unnamed entity cannot be typed-to-confirm."),
       { status: 409 }
+    );
+  }
+  const { confirmation } = parsed.data;
+  const typeTheName = `Type the organization's name, ${org.name.trim()}, to delete it.`;
+  if (!confirmation) {
+    return NextResponse.json(
+      { error: typeTheName, code: "organization_delete_confirmation_required" },
+      { status: 428 }
+    );
+  }
+  if (!typedNameMatches(confirmation.typed, org.name)) {
+    return NextResponse.json(
+      { error: typeTheName, code: "organization_delete_name_mismatch", field: "confirmation" },
+      { status: 428 }
     );
   }
 

@@ -350,6 +350,25 @@ deletes a microgrid, which only the GUI host's typed step does. Community manage
 ceremony with nothing to tick or type, so its route has nothing in it to
 check.
 
+The organization directory's three typed deletes work the same way.
+`DELETE /api/organizations/[id]` asks for the organization's name (428
+`organization_delete_confirmation_required` or
+`organization_delete_name_mismatch`), and the organization page's delete
+dialog sends it. `DELETE /api/organizations/[id]/email-sender` asks for the
+saved mail server's name while one is saved (`email_sender_delete_*`), and
+the email settings page asks for it. `DELETE /api/users/[id]` asks for the
+person's email address (`user_remove_confirmation_required` or
+`user_remove_email_mismatch`), which the Users page's revoke dialog asks
+for. That route reads the person through `fn_list_visible_users` with the
+caller's own client first. Anyone that list does not show the caller gets
+the route's single 403 at once, whatever confirmation the body carries, so
+the 428 names an address only to someone who can already see it. An org
+manager's delete matches no colleague's row today (the `user_roles` SELECT
+policy shows a manager only their own rows), so `org.remove-user`'s prepare
+refuses anyone but a super admin with that same 403. A role change
+(`PATCH /api/users/[id]/role`) is a ceremony with nothing to tick or type,
+and its route has nothing in it to check.
+
 An entry's `availability` lists each check that refused it in `reasons`,
 and each check not decided in `unchecked`, so `available: true` means only
 that nothing refused it:
@@ -362,6 +381,13 @@ that nothing refused it:
 | `healthy` | `gui_availability_unchecked` | `available()` was late, threw, or gave no usable answer; `state` is then undecided |
 | `state` | `gui_action_unavailable`, with the action's own reason | `available()` said no |
 | `configured`, `authorized` | never | always undecided: no contract field models configuration, and a route may check its own roles (the payment-status route refuses `failed` and `refunded` to anyone but a super admin) |
+
+A role check an action can make before its write is reported only in one
+of two places. An action with no confirmation step has no prepare, so it
+refuses by role in `available()`, and the catalog reports it under
+`state` (the organization directory's `org.update-organization` and
+`org.update-profile`); an action with a step refuses in its prepare, and
+the catalog leaves `authorized` undecided, as above.
 
 `state` is also undecided without entities, when a bound kind is not
 given, when the action has no `available()`, and when an earlier check
@@ -474,6 +500,14 @@ Community management's `community.tenant-access`, a tenant's access to its
 unit, is the first: an org manager cannot read the role row it names, so
 it resolves only beside the tenant whose access list holds it
 (`tenantAccessOrganization`).
+The organization directory's `org.user`, a person by account id, resolves
+through `fn_list_visible_users` with the caller's own client, the list the
+Users page shows. It resolves to the organization of the person's
+organization manager row (`userOrganization`). A person the caller cannot
+see, a person whose rows are all tenant rows, a super admin and an account
+with no role row all resolve to nothing, so the host answers 404 for them.
+The user actions therefore do not reach super admins through the host; the
+Users page still does.
 
 The reverse direction is checked by
 `src/lib/runtime/__tests__/described-writes.test.ts`: every write handler

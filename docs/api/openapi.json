@@ -29,6 +29,10 @@
       "description": "The routes of the actions Metering contributes."
     },
     {
+      "name": "organization-directory",
+      "description": "The routes of the actions Organization directory contributes."
+    },
+    {
       "name": "payments",
       "description": "The routes of the actions Payments contributes."
     }
@@ -5940,6 +5944,903 @@
         ]
       }
     },
+    "/api/organizations/{id}": {
+      "patch": {
+        "operationId": "patchOrganizationsId",
+        "tags": [
+          "organization-directory"
+        ],
+        "summary": "Edit organization",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the organization the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "organization"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Name"
+                  },
+                  "address_line1": {
+                    "title": "Address line 1",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_line2": {
+                    "title": "Address line 2",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_city": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "City"
+                  },
+                  "address_region": {
+                    "title": "Region",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_country": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Country"
+                  },
+                  "address_postal_code": {
+                    "title": "Postal code",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "org.update-organization",
+            "title": "Edit organization",
+            "plugin": "organization-directory",
+            "target": "organization",
+            "method": "PATCH",
+            "path": "/api/organizations/[id]",
+            "bind": {
+              "path": {
+                "id": "organization"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "title": "Name"
+                },
+                "address_line1": {
+                  "title": "Address line 1",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_line2": {
+                  "title": "Address line 2",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_city": {
+                  "type": "string",
+                  "minLength": 1,
+                  "title": "City"
+                },
+                "address_region": {
+                  "title": "Region",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_country": {
+                  "type": "string",
+                  "minLength": 1,
+                  "title": "Country"
+                },
+                "address_postal_code": {
+                  "title": "Postal code",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "write",
+            "confirm": "none",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteOrganizationsId",
+        "tags": [
+          "organization-directory"
+        ],
+        "summary": "Delete organization",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the organization the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "organization"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "description": "The route reads an empty body as `{}`.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "confirmation": {
+                    "type": "object",
+                    "properties": {
+                      "acknowledged": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 64
+                        }
+                      },
+                      "typed": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "acknowledged"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "org.delete-organization",
+            "title": "Delete organization",
+            "plugin": "organization-directory",
+            "target": "organization",
+            "method": "DELETE",
+            "path": "/api/organizations/[id]",
+            "bind": {
+              "path": {
+                "id": "organization"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "destructive",
+            "confirm": "typed",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      }
+    },
+    "/api/organizations/{id}/email-sender": {
+      "put": {
+        "operationId": "putOrganizationsIdEmailSender",
+        "tags": [
+          "organization-directory"
+        ],
+        "summary": "Save email settings",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the organization the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "organization"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "host": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Mail server"
+                  },
+                  "port": {
+                    "type": "number",
+                    "enum": [
+                      465,
+                      587
+                    ],
+                    "title": "Port"
+                  },
+                  "username": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 320,
+                    "pattern": "^[^\\r\\n]*$",
+                    "title": "Username"
+                  },
+                  "password": {
+                    "title": "Password",
+                    "description": "Leave blank to keep the saved one.",
+                    "writeOnly": true,
+                    "type": "string",
+                    "maxLength": 1024
+                  },
+                  "fromAddress": {
+                    "type": "string",
+                    "maxLength": 320,
+                    "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+                    "title": "From address"
+                  },
+                  "fromName": {
+                    "title": "From name",
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 120,
+                        "pattern": "^[^\\r\\n]*$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "replyTo": {
+                    "title": "Reply-to address",
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 320
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "version": {
+                    "title": "Saved version",
+                    "description": "The saved settings' version you started from; null before the first save.",
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "host",
+                  "port",
+                  "username",
+                  "fromAddress"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "org.save-email-sender",
+            "title": "Save email settings",
+            "plugin": "organization-directory",
+            "target": "organization",
+            "method": "PUT",
+            "path": "/api/organizations/[id]/email-sender",
+            "bind": {
+              "path": {
+                "id": "organization"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "host": {
+                  "type": "string",
+                  "minLength": 1,
+                  "title": "Mail server"
+                },
+                "port": {
+                  "type": "number",
+                  "enum": [
+                    465,
+                    587
+                  ],
+                  "title": "Port"
+                },
+                "username": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 320,
+                  "pattern": "^[^\\r\\n]*$",
+                  "title": "Username"
+                },
+                "password": {
+                  "title": "Password",
+                  "description": "Leave blank to keep the saved one.",
+                  "writeOnly": true,
+                  "type": "string",
+                  "maxLength": 1024
+                },
+                "fromAddress": {
+                  "type": "string",
+                  "maxLength": 320,
+                  "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+                  "title": "From address"
+                },
+                "fromName": {
+                  "title": "From name",
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 120,
+                      "pattern": "^[^\\r\\n]*$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "replyTo": {
+                  "title": "Reply-to address",
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 320
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "version": {
+                  "title": "Saved version",
+                  "description": "The saved settings' version you started from; null before the first save.",
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "host",
+                "port",
+                "username",
+                "fromAddress"
+              ],
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "external",
+            "confirm": "confirm",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteOrganizationsIdEmailSender",
+        "tags": [
+          "organization-directory"
+        ],
+        "summary": "Remove email settings",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the organization the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "organization"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "description": "The route reads an empty body as `{}`.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "confirmation": {
+                    "type": "object",
+                    "properties": {
+                      "acknowledged": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 64
+                        }
+                      },
+                      "typed": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "acknowledged"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `version_conflict`: The route's own: what the person confirmed changed after prepare. Prepare the action again and confirm the new step; the route never takes the old one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "version_conflict"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "org.remove-email-sender",
+            "title": "Remove email settings",
+            "plugin": "organization-directory",
+            "target": "organization",
+            "method": "DELETE",
+            "path": "/api/organizations/[id]/email-sender",
+            "bind": {
+              "path": {
+                "id": "organization"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "destructive",
+            "confirm": "typed",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [
+              "version_conflict"
+            ],
+            "repeat": "safe"
+          }
+        ]
+      }
+    },
+    "/api/organizations/{id}/plugins": {
+      "patch": {
+        "operationId": "patchOrganizationsIdPlugins",
+        "tags": [
+          "organization-directory"
+        ],
+        "summary": "Turn a plugin on or off",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the organization the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "organization"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "plugin": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Plugin",
+                    "description": "A bundled plugin's name, such as billing."
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "title": "On"
+                  }
+                },
+                "required": [
+                  "plugin",
+                  "enabled"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "org.set-plugin",
+            "title": "Turn a plugin on or off",
+            "plugin": "organization-directory",
+            "target": "organization",
+            "method": "PATCH",
+            "path": "/api/organizations/[id]/plugins",
+            "bind": {
+              "path": {
+                "id": "organization"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "plugin": {
+                  "type": "string",
+                  "minLength": 1,
+                  "title": "Plugin",
+                  "description": "A bundled plugin's name, such as billing."
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "title": "On"
+                }
+              },
+              "required": [
+                "plugin",
+                "enabled"
+              ],
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "write",
+            "confirm": "confirm",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      }
+    },
     "/api/payments/attempts/{id}/reconcile": {
       "post": {
         "operationId": "postPaymentsAttemptsIdReconcile",
@@ -7568,6 +8469,768 @@
             "targeted": false,
             "prepareAgainOn": [],
             "repeat": "safe"
+          }
+        ]
+      }
+    },
+    "/api/users/invite": {
+      "post": {
+        "operationId": "postUsersInvite",
+        "tags": [
+          "organization-directory"
+        ],
+        "summary": "Invite user",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+                    "title": "Email address"
+                  },
+                  "first_name": {
+                    "title": "First name",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "last_name": {
+                    "title": "Last name",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "phone": {
+                    "title": "Phone",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "super_admin",
+                      "org_manager"
+                    ],
+                    "title": "Role"
+                  },
+                  "scope_id": {
+                    "title": "Organization",
+                    "description": "The organization's id, for org_manager; null for super_admin.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "email",
+                  "role"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "org.invite-user",
+            "title": "Invite user",
+            "plugin": "organization-directory",
+            "target": "organization",
+            "method": "POST",
+            "path": "/api/users/invite",
+            "bind": {
+              "path": {},
+              "body": {
+                "scope_id": "organization"
+              }
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "email": {
+                  "type": "string",
+                  "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+                  "title": "Email address"
+                },
+                "first_name": {
+                  "title": "First name",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "last_name": {
+                  "title": "Last name",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "phone": {
+                  "title": "Phone",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "super_admin",
+                    "org_manager"
+                  ],
+                  "title": "Role"
+                }
+              },
+              "required": [
+                "email",
+                "role"
+              ],
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "external",
+            "confirm": "confirm",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      }
+    },
+    "/api/users/{id}": {
+      "delete": {
+        "operationId": "deleteUsersId",
+        "tags": [
+          "organization-directory"
+        ],
+        "summary": "Revoke access",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the org.user the action is sent for.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            },
+            "x-mgm-entity-kind": "org.user"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "description": "The route reads an empty body as `{}`.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "confirmation": {
+                    "type": "object",
+                    "properties": {
+                      "acknowledged": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 64
+                        }
+                      },
+                      "typed": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "acknowledged"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "org.remove-user",
+            "title": "Revoke access",
+            "plugin": "organization-directory",
+            "target": "org.user",
+            "method": "DELETE",
+            "path": "/api/users/[id]",
+            "bind": {
+              "path": {
+                "id": "org.user"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "destructive",
+            "confirm": "typed",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      }
+    },
+    "/api/users/{id}/profile": {
+      "patch": {
+        "operationId": "patchUsersIdProfile",
+        "tags": [
+          "organization-directory"
+        ],
+        "summary": "Edit profile",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the org.user the action is sent for.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            },
+            "x-mgm-entity-kind": "org.user"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "first_name": {
+                    "title": "First name",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "last_name": {
+                    "title": "Last name",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "phone": {
+                    "title": "Phone",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "org.update-profile",
+            "title": "Edit profile",
+            "plugin": "organization-directory",
+            "target": "org.user",
+            "method": "PATCH",
+            "path": "/api/users/[id]/profile",
+            "bind": {
+              "path": {
+                "id": "org.user"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "first_name": {
+                  "title": "First name",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "last_name": {
+                  "title": "Last name",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "phone": {
+                  "title": "Phone",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "write",
+            "confirm": "none",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      }
+    },
+    "/api/users/{id}/resend-invite": {
+      "post": {
+        "operationId": "postUsersIdResendInvite",
+        "tags": [
+          "organization-directory"
+        ],
+        "summary": "Resend invitation",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the org.user the action is sent for.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            },
+            "x-mgm-entity-kind": "org.user"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "description": "The route reads an empty body as `{}`.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "org.resend-invite",
+            "title": "Resend invitation",
+            "plugin": "organization-directory",
+            "target": "org.user",
+            "method": "POST",
+            "path": "/api/users/[id]/resend-invite",
+            "bind": {
+              "path": {
+                "id": "org.user"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "external",
+            "confirm": "confirm",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "unsafe"
+          }
+        ]
+      }
+    },
+    "/api/users/{id}/role": {
+      "patch": {
+        "operationId": "patchUsersIdRole",
+        "tags": [
+          "organization-directory"
+        ],
+        "summary": "Change role",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the org.user the action is sent for.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            },
+            "x-mgm-entity-kind": "org.user"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "super_admin",
+                      "org_manager"
+                    ],
+                    "title": "Role"
+                  },
+                  "scope_id": {
+                    "title": "Organization",
+                    "description": "The organization's id, for org_manager; null for super_admin.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "confirmation": {
+                    "type": "object",
+                    "properties": {
+                      "acknowledged": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 64
+                        }
+                      }
+                    },
+                    "required": [
+                      "acknowledged"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "role"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "org.change-role",
+            "title": "Change role",
+            "plugin": "organization-directory",
+            "target": "org.user",
+            "method": "PATCH",
+            "path": "/api/users/[id]/role",
+            "bind": {
+              "path": {
+                "id": "org.user"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "super_admin",
+                    "org_manager"
+                  ],
+                  "title": "Role"
+                },
+                "scope_id": {
+                  "title": "Organization",
+                  "description": "The organization's id, for org_manager; null for super_admin.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "role"
+              ],
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "write",
+            "confirm": "ceremony",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "unsafe"
           }
         ]
       }
