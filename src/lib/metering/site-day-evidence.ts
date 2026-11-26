@@ -251,9 +251,9 @@ export type SiteDayEvidenceRead = Envelope & {
 export type SiteDayEvidenceRefused = Envelope & {
   window: { date: string; tz: string; zone: "microgrid" | "fallback"; res: number; caveat?: ["zone_fallback"] };
   /**
-   * `provider` is null on a refusal before a provider was selected, or when
-   * the selected name is not one of SITE_DAY_PROVIDERS (evidence §4 "A
-   * refused read"). If §4 comes to leave the key out instead, change
+   * `provider` is null on a refusal before a provider was selected, when
+   * the selected name could not be resolved in the registry, or when it is
+   * not one of SITE_DAY_PROVIDERS (evidence §4 "A refused read"). If §4 comes to leave the key out instead, change
    * `refusedBy` and the refused schema's `by` line together.
    */
   by: { calc: number; provider: SiteDayProvider | null };
@@ -429,8 +429,9 @@ const DEVICE_KEYED: ReadonlySet<string> = new Set(["meter_readings", "meter_outc
 /**
  * A key path with nothing from the content in it: an index is `[]`, a key
  * beside `c` and `k` in a device-keyed item is `<device>`, and any other
- * key that is not a schema key's shape is `<key>`. For defect messages and
- * the closed-schema test.
+ * key that is not a schema key's shape (letters and `_`, ending in at most
+ * one digit, as `t0`) is `<key>`. For defect messages and the closed-schema
+ * test.
  */
 export function normaliseEvidencePath(path: readonly PropertyKey[]): string {
   const out: string[] = [];
@@ -444,7 +445,7 @@ export function normaliseEvidencePath(path: readonly PropertyKey[]): string {
       segment !== "k"
     ) {
       out.push("<device>");
-    } else if (typeof segment === "string" && /^[A-Za-z_]{1,32}$/.test(segment)) out.push(segment);
+    } else if (typeof segment === "string" && /^[A-Za-z_]{1,31}\d?$/.test(segment)) out.push(segment);
     else out.push("<key>");
   });
   return `/${out.join("/")}`;

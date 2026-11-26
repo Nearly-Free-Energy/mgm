@@ -317,6 +317,40 @@ describe("buildSiteDaySnapshot — pointers", () => {
     );
   });
 
+  it.each([
+    ["position", [-2, 14.8]],
+    ["value", [-1, 14.9]],
+  ] as const)("throws a pointer defect when a carry-in reading's %s is not the carry-in's", (_label, carried) => {
+    const { input } = example();
+    expect(input.detail.dark_lowbat.decidedBy[0]).toMatchObject({ series: "soc", pos: -1, v: 14.8 });
+    (input.detail.carry_in as { soc: [number, number] | null }).soc = [carried[0], carried[1]];
+    expect(() => buildSiteDaySnapshot(input)).toThrow(
+      expect.objectContaining({ check: "pointer", path: "/items/dark_lowbat/decidedBy/[]" })
+    );
+  });
+
+  it("throws a pointer defect for an after-low-battery gap past the low-battery ranges", () => {
+    const { input } = evidenceOf(everyItemRows(), { available: ALL, meters: EXAMPLE_METERS });
+    expect(input.detail.dark_lowbat.ranges).toHaveLength(1);
+    (input.detail.dark_after_lowbat.decidedBy[0] as { lowbatRange: number }).lowbatRange = 1;
+    expect(() => buildSiteDaySnapshot(input)).toThrow(
+      expect.objectContaining({ check: "pointer", path: "/items/dark_after_lowbat/decidedBy/[]" })
+    );
+  });
+
+  it("throws a pointer defect for an after-low-battery gap with no low-battery item stored", () => {
+    const { input } = evidenceOf(everyItemRows(), { available: ALL, meters: EXAMPLE_METERS });
+    const detail = input.detail as unknown as {
+      dark_lowbat: { ranges: unknown[]; min: number; decidedBy: unknown[] };
+      dark_after_lowbat: { decidedBy: unknown[] };
+    };
+    detail.dark_lowbat = { ranges: [], min: 0, decidedBy: [] };
+    detail.dark_after_lowbat.decidedBy = [];
+    expect(() => buildSiteDaySnapshot(input)).toThrow(
+      expect.objectContaining({ check: "pointer", path: "/items/dark_after_lowbat/decidedBy/[]" })
+    );
+  });
+
   it("throws a meter_join defect for a meter reading with no requested source", () => {
     const { input } = example();
     input.houseMeters = input.houseMeters.filter((m) => m.id !== D2);
@@ -334,6 +368,42 @@ describe("buildSiteDaySnapshot — pointers", () => {
   it("throws a provider_name defect for a provider §4 does not name", () => {
     const { input } = example({ provider: "acme" });
     expect(() => buildSiteDaySnapshot(input)).toThrow(expect.objectContaining({ check: "provider_name" }));
+  });
+});
+
+describe("buildSiteDaySnapshot — a source unavailable", () => {
+  it("stores no carry-in voltage and no grid series without a grid meter, whatever the detail holds", () => {
+    const { input } = example({ available: { ...NO_PV, grid: false } });
+    const detail = input.detail as unknown as {
+      carry_in: { gridV: [number, number] | null };
+      series: { gridV: (number | null)[]; gridW: (number | null)[] };
+    };
+    detail.carry_in.gridV = [-1, 231.4];
+    detail.series.gridV = detail.series.gridV.map(() => 230);
+    detail.series.gridW = detail.series.gridW.map(() => 100);
+    const s = buildSiteDaySnapshot(input);
+    expect(s.items.carry_in.gridV).toBeNull();
+    expect(s.items.series.gridV).toBeNull();
+    expect(s.items.series.gridW).toBeNull();
+    expect(s.items.carry_in.soc).toEqual([-1, 14.8]);
+    expect(parses(s)).toBe(true);
+  });
+
+  it("stores no carry-in SoC and no battery series without a battery, whatever the detail holds", () => {
+    const { input } = example({ available: { ...NO_PV, battery: false } });
+    const detail = input.detail as unknown as {
+      carry_in: { soc: [number, number] | null };
+      series: { soc: (number | null)[]; batW: (number | null)[] };
+    };
+    detail.carry_in.soc = [-1, 14.8];
+    detail.series.soc = detail.series.soc.map(() => 50);
+    detail.series.batW = detail.series.batW.map(() => 100);
+    const s = buildSiteDaySnapshot(input);
+    expect(s.items.carry_in.soc).toBeNull();
+    expect(s.items.series.soc).toBeNull();
+    expect(s.items.series.batW).toBeNull();
+    expect(s.items.carry_in.gridV).toEqual([-1, 231.4]);
+    expect(parses(s)).toBe(true);
   });
 });
 
@@ -530,6 +600,31 @@ describe("siteDayEvidenceSchema — closed", () => {
     expect(parses(wrongValue)).toBe(false);
   });
 
+  it("refuses a pointer outside the grammar even when it resolves to its value", () => {
+    const decided = (full.items.dark_cut as { decidedBy: { ptr: string; v: number }[] }).decidedBy[0];
+    const pos = Number(decided.ptr.split("/").pop());
+    expect(decided.ptr).toBe(`/items/series/gridV/${pos}`);
+    for (const name of ["loadW", "batW", "gridW"] as const) {
+      const bad = clone(full);
+      bad.items.series[name]![pos] = decided.v;
+      expect(parses(bad), `${name} unchanged pointer`).toBe(true);
+      (bad.items.dark_cut as { decidedBy: { ptr: string }[] }).decidedBy[0].ptr = `/items/series/${name}/${pos}`;
+      expect(resolveEvidencePointer(bad, `/items/series/${name}/${pos}`)).toBe(decided.v);
+      expect(parses(bad), name).toBe(false);
+    }
+    // A range pointer at a range of another item resolves to a range, but is not one §4 allows.
+    const otherRange = clone(full);
+    (otherRange.items.dark_after_lowbat as { decidedBy: { ptr: string }[] }).decidedBy[0].ptr = "/items/dark_cut/ranges/0";
+    expect(Array.isArray(resolveEvidencePointer(otherRange, "/items/dark_cut/ranges/0"))).toBe(true);
+    expect(parses(otherRange)).toBe(false);
+  });
+
+  it("refuses an after-low-battery pointer at a low-battery range that does not exist", () => {
+    const bad = clone(full);
+    (bad.items.dark_after_lowbat as { decidedBy: { ptr: string }[] }).decidedBy[0].ptr = "/items/dark_lowbat/ranges/7";
+    expect(parses(bad)).toBe(false);
+  });
+
   it("refuses misaligned decidedBy and a min that is not the ranges' sum", () => {
     const misaligned = clone(full);
     (misaligned.items.dark_cut as { decidedBy: unknown[] }).decidedBy.push({ ptr: "/items/series/gridV/201", v: 0 });
@@ -546,6 +641,55 @@ describe("siteDayEvidenceSchema — closed", () => {
     const reason = clone(refused);
     reason.items.read.reason = "provider_invalid_data";
     expect(parses(reason)).toBe(false);
+  });
+
+  it("refuses any code §6 does not name on an unknown refusal, whose reason the code cannot contradict", () => {
+    const unknown = buildRefusedSiteDaySnapshot({
+      date: "2026-11-10",
+      zone: { tz: "UTC", zone: "fallback" },
+      provider: null,
+      sources: null,
+      refusal: siteDayRefusal(500, "some_new_code") as Extract<ReturnType<typeof siteDayRefusal>, { kind: "evidence" }>,
+    });
+    expect(unknown.items.read).toEqual({ c: "unavailable", k: "read", reason: "unknown_refusal", from: { status: 500 } });
+    expect(parses(unknown)).toBe(true);
+    for (const code of ["free text with an id 660e8400", "some_new_code"]) {
+      const bad = clone(unknown);
+      (bad.items.read.from as { code?: string }).code = code;
+      expect(parses(bad), code).toBe(false);
+    }
+  });
+
+  it("refuses each refinement's breach", () => {
+    type Mutable = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+    const breaches: [string, SiteDayEvidenceRead | typeof refused, (s: Mutable) => void][] = [
+      ["a reversed meter_window pair", full, (s) => (s.items.meter_window.start = [216, 209])],
+      ["a meter_window start without an end", full, (s) => (s.items.meter_window.end = null)],
+      ["a meter_window end without a start", full, (s) => (s.items.meter_window.start = null)],
+      ["an empty ranges list", full, (s) => Object.assign(s.items.dark_cut, { ranges: [], min: 0, decidedBy: [] })],
+      ["a zero-length range", full, (s) => {
+        const [start] = s.items.dark_cut.ranges[0];
+        s.items.dark_cut.min -= s.items.dark_cut.ranges[0][1] - start;
+        s.items.dark_cut.ranges[0] = [start, start];
+      }],
+      ["a carry-in at a position in the day", full, (s) => (s.items.carry_in.gridV = [0, s.items.carry_in.gridV[1]])],
+      ["an empty in", unavailable, (s) => (s.items.dark_cut.in = [])],
+      ["an empty devices list", full, (s) => (s.items.m_unreadable.devices = [])],
+      ["a series one shorter than bins", full, (s) => s.items.series.loadW.pop()],
+      ["a fallback without its caveat", full, (s) => (s.window.zone = "fallback")],
+      ["a caveat without a fallback", full, (s) => (s.window.caveat = ["zone_fallback"])],
+      ["a fractional metersLeftOut", full, (s) => (s.items.summary.metersLeftOut = 1.5)],
+      ["calc 0", full, (s) => (s.by.calc = 0)],
+      ["a fractional calc", full, (s) => (s.by.calc = 1.5)],
+      ["a refused by without provider", refused, (s) => delete s.by.provider],
+      ["a refused fallback without its caveat", refused, (s) => delete s.window.caveat],
+    ];
+    for (const [label, base, breach] of breaches) {
+      expect(parses(base), `${label}: base`).toBe(true);
+      const bad = clone(base) as unknown as Mutable;
+      breach(bad);
+      expect(parses(bad), label).toBe(false);
+    }
   });
 
   it("keeps values unrounded through a JSON round trip", () => {
@@ -595,6 +739,8 @@ describe("schemaDefect — no id or value in a defect", () => {
     expect(normaliseEvidencePath(["items", "meter_readings", "c"])).toBe("/items/meter_readings/c");
     expect(normaliseEvidencePath(["items", "m_unreadable", "devices", 0])).toBe("/items/m_unreadable/devices/[]");
     expect(normaliseEvidencePath(["items", D1])).toBe("/items/<key>");
+    expect(normaliseEvidencePath(["window", "t0"])).toBe("/window/t0");
+    expect(normaliseEvidencePath(["items", "12345"])).toBe("/items/<key>");
     expect(normaliseEvidencePath([])).toBe("/");
   });
 });
