@@ -259,6 +259,89 @@ id through `checkGate` on the caller's RLS-scoped client, so a period the
 caller cannot see yields no organization and a 404. A new caller must do the
 same.
 
+## Who is calling: the session resolver
+
+A request carries a browser's cookie session or a client's
+`Authorization: Bearer` token, never both (RFC #259 § 2, ADR-008 decision
+6). A client is the CLI (an *operator* client) or the assistant bridge (an
+*agent* client), each acting as the signed-in person; Supabase Auth's OAuth
+server issues their tokens, and the token hook writes the client's kind
+into them (`mgm_client_kind`).
+
+Middleware (`src/middleware.ts`) decides a bearer request before any route
+runs, after the release allowlist:
+
+- a bearer token with a session cookie is `400 credentials_conflict`, and a
+  bearer token on a page (anything outside `/api/*`) is a `400`: pages stay
+  cookie-only;
+- while `MGM_CLIENT_TOKENS` is off, every bearer token is
+  `403 client_tokens_off` (`docs/setup.md`), and without
+  `SUPABASE_SERVICE_ROLE_KEY`, which keys the mark below, `503
+  client_tokens_unavailable`;
+- the token's claims must name a client (`callerFromClaims` in
+  `src/lib/runtime/caller.ts`: a uuid `client_id`, a kind, and the role
+  that kind runs as; `client_id` with no kind was issued while the hook was
+  off and is refused), and Supabase Auth must answer `GET /user` for it
+  (`verifyBearer` in `src/lib/runtime/bearer.ts`), so a revoked client is
+  refused at once; otherwise `401 unauthenticated`;
+- an agent client may call only `AGENT_ROUTES`
+  (`src/lib/runtime/agent-routes.ts`): `GET /api/gui/catalog` and
+  `GET /api/gui/view`. Every other request, whatever its method, public
+  paths included, is `403 agent_route_refused`.
+
+An accepted bearer request goes on with `x-mgm-credential` set to the
+token's mark (`credentialMark` in `src/lib/runtime/credential.ts`): an
+HMAC-SHA256 of the token keyed with the server-only
+`SUPABASE_SERVICE_ROLE_KEY`, so only the server can make one. Middleware
+replaces any value the client sent and deletes it from every other
+request. It never builds the cookie
+client or sets a cookie for one. A client's token found in the session
+cookie counts as signed out. Every `/api` refusal middleware makes is
+`{ error, code }`, the unauthenticated `401` included
+(`code: "unauthenticated"`); only the release allowlist's `404` stays plain
+text.
+
+On the route side, `createClient` (`@/lib/supabase/server`) asks
+`bearerClientFor` (`src/lib/runtime/request-session.ts`) first. With the
+mark, it builds a client that sends the token as its global `Authorization`
+header, so PostgREST runs as the person and `auth.getUser()` asks Supabase
+Auth about the token: every `getUser()`-backed check (`getCurrentUserAccess`,
+`authorizeOrganization`, `authorizeTenant`, the composers) works unchanged
+and refuses a revoked client too. A bearer token without a matching mark
+throws, and so does any bearer token while `MGM_CLIENT_TOKENS` is off: a
+second fence for pages and for any page or route the middleware matcher
+skips, where nothing removes a mark the client set, which therefore never
+matches. Every other request gets the cookie client as before. Nothing else builds a client on a bearer token
+(`request-session.test.ts`).
+
+The client records who it acts for (`recordCaller`; `callerOf` reads it,
+and reads any client `createClient` did not make as a browser session).
+`openOrganizationScope` puts it on `mgmRequest.caller`, read from the
+client, never from the composer. The GUI host's routes open their request
+with `openHostRequest` (`src/lib/gui/host/server/http.ts`), which puts it
+on the host context (`HostContext.caller`) and refuses an agent client
+(`403 gui_agent_refused`) on every route but the two that opt in. There an
+agent client gets less (`src/lib/gui/host/server/agent.ts`):
+
+- the catalog gives it an organization's catalog only: any `entity=` is
+  refused, so no tenant, bill, payment, tenant access or person (`org.user`)
+  reaches it by id, and no action's `available()` is asked;
+- the view route gives it only an organization's view marked
+  `agent: "read"`, and answers any other view, tenant views included, as a
+  page that does not exist, before any read;
+- `prepareAction` refuses it, whatever route calls it;
+- each step first asks the assistant plugin's gate for the organization as
+  a write (ADR-007 decision 5, `assistantGate`). No `assistant` plugin is
+  bundled yet, so every agent step is refused (`409 assistant_disabled`);
+  `agent.test.ts` fails when one is bundled, so that what a marked view
+  gives an agent beyond its model (its actions, attached and embedded
+  views) is settled first.
+
+An operator client holds the person's access: nothing grants or refuses
+anything by that kind. A new `/api` route is open to operator clients, like
+a browser session, and closed to agent clients unless it is added to
+`AGENT_ROUTES`, which is a change to what an assistant can reach.
+
 ## GUI surface
 
 `mgmSurface` holds what capabilities contribute to GUIs (views, actions,
@@ -311,9 +394,17 @@ key is a 400.
 
 - `GET /api/gui/manifest?path=<page>&org=<id>` answers the manifest the
   (gui) layout renders, from the same `buildManifest`, with the interface
-  `MGM_GUI` selects and the same hints: `org`, else the `?org=` of `path`
-  (a released page on this site), then the org cookie. Views reach it as
-  navigation entries, as the page gets them.
+  `MGM_GUI` selects and the same hints, in this order: the organization of
+  the records `path` (a released page on this site) names, then `org` (or,
+  only when `org` is absent, the `?org=` of `path`), then the org cookie,
+  and failing all of them the person's first organization. As on the
+  page, a hint naming an organization the person cannot see is passed
+  over, so such an `org` answers another organization's manifest where
+  the catalog below answers 404, and a path's records outrank `org`. A person who sees no
+  organization but holds a unit gets the tenant manifest, whose `org` is a
+  unit, whatever `org` says. A client that asks for one organization, such
+  as `mgm places --org`, checks `manifest.org.id` against it. Views reach
+  it as navigation entries, as the page gets them.
 - `GET /api/gui/catalog?org=<id>`, or `?entity=<kind>:<id>` up to four
   times, each of another kind, answers an `ActionCatalog`
   (`src/lib/gui/contract.ts`): every registered action, in catalog order
@@ -342,6 +433,25 @@ deletes a microgrid, which only the GUI host's typed step does. Community manage
 ceremony with nothing to tick or type, so its route has nothing in it to
 check.
 
+The organization directory's three typed deletes work the same way.
+`DELETE /api/organizations/[id]` asks for the organization's name (428
+`organization_delete_confirmation_required` or
+`organization_delete_name_mismatch`), and the organization page's delete
+dialog sends it. `DELETE /api/organizations/[id]/email-sender` asks for the
+saved mail server's name while one is saved (`email_sender_delete_*`), and
+the email settings page asks for it. `DELETE /api/users/[id]` asks for the
+person's email address (`user_remove_confirmation_required` or
+`user_remove_email_mismatch`), which the Users page's revoke dialog asks
+for. That route reads the person through `fn_list_visible_users` with the
+caller's own client first. Anyone that list does not show the caller gets
+the route's single 403 at once, whatever confirmation the body carries, so
+the 428 names an address only to someone who can already see it. An org
+manager's delete matches no colleague's row today (the `user_roles` SELECT
+policy shows a manager only their own rows), so `org.remove-user`'s prepare
+refuses anyone but a super admin with that same 403. A role change
+(`PATCH /api/users/[id]/role`) is a ceremony with nothing to tick or type,
+and its route has nothing in it to check.
+
 An entry's `availability` lists each check that refused it in `reasons`,
 and each check not decided in `unchecked`, so `available: true` means only
 that nothing refused it:
@@ -354,6 +464,13 @@ that nothing refused it:
 | `healthy` | `gui_availability_unchecked` | `available()` was late, threw, or gave no usable answer; `state` is then undecided |
 | `state` | `gui_action_unavailable`, with the action's own reason | `available()` said no |
 | `configured`, `authorized` | never | always undecided: no contract field models configuration, and a route may check its own roles (the payment-status route refuses `failed` and `refunded` to anyone but a super admin) |
+
+A role check an action can make before its write is reported only in one
+of two places. An action with no confirmation step has no prepare, so it
+refuses by role in `available()`, and the catalog reports it under
+`state` (the organization directory's `org.update-organization` and
+`org.update-profile`); an action with a step refuses in its prepare, and
+the catalog leaves `authorized` undecided, as above.
 
 `state` is also undecided without entities, when a bound kind is not
 given, when the action has no `available()`, and when an earlier check
@@ -436,16 +553,25 @@ plugin registered.
 
 A route described after it shipped may keep the answers it gave bad bodies
 before: `parseJsonBody` (`src/lib/validation/parse-body.ts`) takes the
-route's own refusals (`BodyRefusals`), which replace its generic 400 for
-each issue the route answered itself. Community management's routes do
-(the `*_REFUSALS` in `src/lib/community-management/schemas.ts`, which its
-`schemas.test.ts` holds to the capability's own answers); a new route
-answers the generic 400. A path segment that names a plugin's own entity
+route's own refusals (`BodyRefusals`, its options' `refusals`), which
+replace its generic 400 for each issue the route answered itself.
+Community management's routes do (the `*_REFUSALS` in
+`src/lib/community-management/schemas.ts`, which its `schemas.test.ts`
+holds to the capability's own answers); a new route answers the generic
+400. A path segment that names a plugin's own entity
 kind resolves through the `organizationOf` the plugin contributes.
 Community management's `community.tenant-access`, a tenant's access to its
 unit, is the first: an org manager cannot read the role row it names, so
 it resolves only beside the tenant whose access list holds it
 (`tenantAccessOrganization`).
+The organization directory's `org.user`, a person by account id, resolves
+through `fn_list_visible_users` with the caller's own client, the list the
+Users page shows. It resolves to the organization of the person's
+organization manager row (`userOrganization`). A person the caller cannot
+see, a person whose rows are all tenant rows, a super admin and an account
+with no role row all resolve to nothing, so the host answers 404 for them.
+The user actions therefore do not reach super admins through the host; the
+Users page still does.
 
 The reverse direction is checked by
 `src/lib/runtime/__tests__/described-writes.test.ts`: every write handler
@@ -553,8 +679,9 @@ every page file without the layout, as a client-side navigation renders it,
 and fails when one opens a Supabase client or loads a view before the
 redirect. Every staff entry point of the host also
 refuses them by their roles: `surfaceRequest`, `installationRequest`, `pluginGate`,
-`visibleOrganizations` (none), `resolveSegments` and `dispatchView` for any
-view that is not a tenant view. A tenant view opened without `?unit=` by a
+`visibleOrganizations` (none), `resolveSegments`, `dispatchView` for any
+view that is not a tenant view, and `buildActionCatalog` (no actions, or a
+404 when the query names an organization or an entity, with nothing read). A tenant view opened without `?unit=` by a
 person with several units shows a choice of them, and one whose plugin is
 off for the unit's organization shows the "not in this release" page. The
 choice leaves out a unit whose organization has the tenant app, or a plugin

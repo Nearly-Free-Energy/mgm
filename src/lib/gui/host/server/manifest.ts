@@ -298,10 +298,24 @@ const MANIFEST_FAILED: HostFailure = { ok: false, status: 500, code: "gui_manife
  * GET /api/gui/manifest's query: `path`, a released page on this site with
  * its own query, and `org`, a UUID, each at most once. Any other key is a
  * 400, so a mistyped parameter fails rather than answering for something
- * else. The organization asked for is `org`, else the path's own `?org=`,
+ * else. The organization asked for is `org`, or, only when `org` is absent,
+ * the path's own `?org=`,
  * as the (gui) layout takes it from the page's path (manifestHints in
  * ../shared/manifest-hints.ts); like there, it only chooses among the
  * organizations the person sees.
+ *
+ * So `org` is a hint, never a refusal, unlike the catalog's (an `org` the
+ * person cannot see is a 404 from buildActionCatalog in ./catalog.ts).
+ * pickOrganization (./organization.ts) passes over an organization the
+ * person cannot see for the next hint (the cookie: an unseen `org` never
+ * falls back to the path's `?org=`), else their first organization, and
+ * ranks the organization of the records `path` names above `org`; a person
+ * who sees none but holds a unit gets the tenant manifest, whose `org` is a
+ * unit. Each is a 200, so a client that asks for one organization, such as
+ * `mgm places --org`, checks `manifest.org.id` against it. If
+ * pickOrganization's order changes, or the manifest comes to refuse an
+ * `org` as the catalog does, revisit this and the manifest bullet in
+ * docs/cordis-runtime.md.
  */
 export function readManifestQuery(search: URLSearchParams): HostOutcome<{ path: string | null; requested: string | null }> {
   for (const key of search.keys()) if (key !== "path" && key !== "org") return MANIFEST_BAD_REQUEST;

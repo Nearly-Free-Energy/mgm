@@ -91,7 +91,13 @@ export function SenderSettings({ orgId }: { orgId: string }) {
     setMessage("");
     setErrorMessage("");
     try {
-      const response = await fetch(url, { method: "DELETE" });
+      // The route requires the server's name, typed; the dialog enables
+      // Remove only once the input, trimmed, is that name.
+      const response = await fetch(url, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation: { acknowledged: [], typed: sender?.host ?? "" } }),
+      });
       const value = await response.json();
       if (!response.ok) throw new Error(value.error);
       setSender(null);
@@ -215,8 +221,9 @@ export function SenderSettings({ orgId }: { orgId: string }) {
         onOpenChange={setConfirmRemove}
         tone="destructive"
         title="Remove these email settings?"
-        description="Notices will go through MGM's own mail server. The saved password is deleted."
+        description="Notices will go through MGM's own mail server. The saved password is deleted. Type the mail server's name to confirm."
         confirmLabel="Remove"
+        requireTypedConfirmation={{ label: "Type the mail server's name to confirm", expected: sender?.host ?? "" }}
         onConfirm={remove}
       />
     </section>

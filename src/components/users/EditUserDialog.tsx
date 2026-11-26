@@ -12,7 +12,10 @@
  *
  * Revoke access — destructive confirm at the bottom. Only rendered
  * when `canRevoke` is true. Uses <ConfirmDialog tone="destructive">
- * and surfaces the backend trigger's error message directly on last-
+ * asking for the person's email address, typed, and sends it to
+ * DELETE /api/users/[id] as `{ confirmation: { acknowledged: [], typed } }`,
+ * which the route requires (428 without it), as the GUI host's typed step
+ * sends it. Surfaces the backend trigger's error message directly on last-
  * super_admin / self-revoke attempts.
  */
 import * as React from "react";
@@ -193,7 +196,12 @@ export function EditUserDialog(props: EditUserDialogProps) {
   }
 
   async function handleRevoke() {
-    const res = await fetch(`/api/users/${t.user_id}`, { method: "DELETE" });
+    // The dialog enables Confirm only once the input, trimmed, is the address.
+    const res = await fetch(`/api/users/${t.user_id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmation: { acknowledged: [], typed: t.email } }),
+    });
     if (!res.ok) {
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       throw new Error(data.error ?? "Failed to revoke access.");
@@ -485,9 +493,13 @@ export function EditUserDialog(props: EditUserDialogProps) {
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         title="Revoke access?"
-        description={`Remove ${t.email}'s access to MGM. They can be re-invited later.`}
+        description={`Remove ${t.email}'s access to MGM. They can be re-invited later. Type their email address to confirm.`}
         confirmLabel="Revoke access"
         tone="destructive"
+        requireTypedConfirmation={{
+          label: "Type their email address to confirm",
+          expected: t.email,
+        }}
         onConfirm={handleRevoke}
       />
     </>

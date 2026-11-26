@@ -9,6 +9,8 @@ import {
   OPENEMS_ID_FORMAT_HINT,
   isIdFormatViolation,
 } from "@/lib/openems/ids";
+import { EditDeviceBody, editDeviceRefusal } from "@/lib/metering/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 /**
  * PATCH /api/devices/[id] — reclassify a discovered device (#151).
@@ -19,7 +21,10 @@ import {
  * Discover (operationally awkward for an already-added device) or drop into
  * SQL.
  *
- * Body shape (allow-list — anything else returns 400 `unsupported_field`):
+ * Body shape (`EditDeviceBody` in `@/lib/metering/schemas`, the
+ * `metering.edit-device` action's input; an allow-list — anything else
+ * returns 400 `unsupported_field`, and each refusal of the body keeps its
+ * `reason` through `editDeviceRefusal`):
  *
  *   {
  *     device_type?: DeviceType;
@@ -64,18 +69,6 @@ import {
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const ALLOWED_FIELDS = new Set(["device_type", "name"]);
-
-const VALID_DEVICE_TYPES: ReadonlySet<DeviceType> = new Set<DeviceType>([
-  "consumption_meter",
-  "grid_meter",
-  "pv_meter",
-  "battery",
-  "inverter",
-  "ev_charger",
-  "other",
-]);
-
 type DeviceUpdate = {
   device_type?: DeviceType;
   name?: string;
@@ -94,62 +87,14 @@ export async function PATCH(
     );
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return NextResponse.json(
-      { error: "Request body must be an object" },
-      { status: 400 }
-    );
-  }
-
-  // Reject any unsupported field up front so callers get a clear pointer.
-  const bodyRec = body as Record<string, unknown>;
-  for (const key of Object.keys(bodyRec)) {
-    if (!ALLOWED_FIELDS.has(key)) {
-      return NextResponse.json(
-        { error: `Unsupported field: ${key}`, reason: "unsupported_field" },
-        { status: 400 }
-      );
-    }
-  }
-
-  // Validate device_type when present.
+  // An unsupported field (unsupported_field), an unknown device_type
+  // (invalid_device_type) or a blank name (name_required) is refused by the
+  // schema, with the reason the route always sent.
+  const parsed = await parseJsonBody(request, EditDeviceBody, { refusalKeys: editDeviceRefusal });
+  if (!parsed.ok) return parsed.response;
   const update: DeviceUpdate = {};
-  if ("device_type" in bodyRec) {
-    const dt = bodyRec.device_type;
-    if (typeof dt !== "string" || !VALID_DEVICE_TYPES.has(dt as DeviceType)) {
-      return NextResponse.json(
-        {
-          error:
-            "device_type must be one of consumption_meter, grid_meter, pv_meter, battery, inverter, ev_charger, other.",
-          reason: "invalid_device_type",
-        },
-        { status: 400 }
-      );
-    }
-    update.device_type = dt as DeviceType;
-  }
-
-  // Validate name when present (must be non-empty after trim).
-  if ("name" in bodyRec) {
-    const n = bodyRec.name;
-    if (typeof n !== "string" || n.trim().length === 0) {
-      return NextResponse.json(
-        {
-          error: "name must be a non-empty string",
-          reason: "name_required",
-        },
-        { status: 400 }
-      );
-    }
-    update.name = n.trim();
-  }
+  if (parsed.data.device_type !== undefined) update.device_type = parsed.data.device_type;
+  if (parsed.data.name !== undefined) update.name = parsed.data.name.trim();
 
   if (Object.keys(update).length === 0) {
     return NextResponse.json(

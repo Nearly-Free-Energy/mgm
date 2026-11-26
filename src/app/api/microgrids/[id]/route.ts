@@ -77,7 +77,7 @@ export async function PATCH(
     );
   }
 
-  const parsed = await parseJsonBody(request, UpdateMicrogridBody, UPDATE_MICROGRID_REFUSALS);
+  const parsed = await parseJsonBody(request, UpdateMicrogridBody, { refusals: UPDATE_MICROGRID_REFUSALS });
   if (!parsed.ok) return parsed.response;
   const body = parsed.data;
 

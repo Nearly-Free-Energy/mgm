@@ -1,9 +1,7 @@
 import type { NextRequest } from "next/server";
-import { getCurrentUserAccess } from "@/lib/auth/access";
-import { hostFailure, hostOutcome, routeHostContext } from "@/lib/gui/host/server/http";
+import { hostOutcome, openHostRequest } from "@/lib/gui/host/server/http";
 import { readManifestQuery, serveManifest } from "@/lib/gui/host/server/manifest";
 import { ORG_COOKIE } from "@/lib/gui/host/server/organization";
-import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -23,9 +21,8 @@ export const dynamic = "force-dynamic";
  * 404 for it before this runs.
  */
 export async function GET(request: NextRequest) {
-  const supabase = await createClient();
-  const host = routeHostContext(await getCurrentUserAccess(supabase), request.headers);
-  if (!host.ok) return hostFailure(host.status, host.code, host.message);
+  const host = await openHostRequest(request.headers);
+  if (!host.ok) return host.response;
   const query = readManifestQuery(request.nextUrl.searchParams);
   if (!query.ok) return hostOutcome(query);
   const preferred = request.cookies.get(ORG_COOKIE)?.value ?? null;
