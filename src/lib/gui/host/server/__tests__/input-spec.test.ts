@@ -1,11 +1,11 @@
 /**
  * describeInput, the input schema prepare and the catalog serve, and
- * unconstrainedNodes, which the contribution check refuses inputs with
- * (contribution-schema.test.ts holds the refusals).
+ * unconstrainedNodes and hasRootProperties, which the contribution check
+ * refuses inputs by (contribution-schema.test.ts holds the refusals).
  */
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { describeInput, unconstrainedNodes } from "../input-spec";
+import { describeInput, hasRootProperties, unconstrainedNodes } from "../input-spec";
 
 const nodes = (schema: z.ZodType) => unconstrainedNodes(z.toJSONSchema(schema, { io: "input" }));
 
@@ -32,6 +32,26 @@ describe("describeInput", () => {
   it("throws for an input JSON Schema cannot describe, rather than describe nothing", () => {
     expect(() => describeInput({ input: z.strictObject({ at: z.date() }), bind: {} })).toThrow();
     expect(() => describeInput({ input: z.strictObject({ c: z.custom(() => true) }), bind: {} })).toThrow();
+  });
+});
+
+describe("hasRootProperties", () => {
+  const root = (schema: z.ZodType) => hasRootProperties(z.toJSONSchema(schema, { io: "input" }));
+
+  it("holds for a strict object, with fields or without", () => {
+    expect(root(z.strictObject({ microgrid_id: z.uuid() }))).toBe(true);
+    expect(root(z.strictObject({}))).toBe(true);
+  });
+
+  it("fails for a union, whose bound fields describeInput would leave in, and for a record or a scalar", () => {
+    const union = z.union([
+      z.strictObject({ microgrid_id: z.uuid(), name: z.string() }),
+      z.strictObject({ microgrid_id: z.uuid(), copy_of: z.uuid() }),
+    ]);
+    expect(root(union)).toBe(false);
+    expect(JSON.stringify(describeInput({ input: union, bind: { body: { microgrid_id: "microgrid" } } }))).toContain("microgrid_id");
+    expect(root(z.record(z.string(), z.string()))).toBe(false);
+    expect(root(z.string())).toBe(false);
   });
 });
 

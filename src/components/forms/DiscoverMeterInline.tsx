@@ -9,7 +9,8 @@
  *   - filters discovery results to consumption_meter only
  *   - persists via POST /api/devices, then hands the saved device back to
  *     the wizard via `onDevicePersisted` so the parent can append it to
- *     `availableMeters` and auto-select it
+ *     `availableMeters` and auto-select it; the saved meter then leaves
+ *     the candidates, as it would on the next discover
  *   - errors are owned + rendered inline (no `onError` callback)
  *   - consumption meters the route skipped because MGM cannot store their id
  *     (`skipped` in the response, by its `suggestedDeviceType`) are named in a
@@ -93,6 +94,31 @@ function pickDefaultEdgeId(
   return firstWithout?.id ?? sortedEdges[0].id;
 }
 
+/**
+ * Devices discovery did not classify as consumption meters, each with its
+ * type, and how to offer one of them here.
+ */
+function UnofferedDevices({ devices }: { devices: DiscoveredDevice[] }) {
+  return (
+    <>
+      <ul className="mt-2 space-y-1">
+        {devices.map((d) => (
+          <li key={d.componentId} className="font-mono text-xs">
+            {d.alias || d.componentId}
+            <span className="ml-2 font-sans text-muted-foreground">
+              — {humanReadable(d.suggestedDeviceType)}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2">
+        If one of these meters a tenant, open it on the edge&apos;s device
+        list and change its type to Consumption meter.
+      </p>
+    </>
+  );
+}
+
 export function DiscoverMeterInline({
   edges,
   edgeIdsWithoutConsumptionMeter,
@@ -127,6 +153,13 @@ export function DiscoverMeterInline({
     };
   }, []);
 
+  // How many times the edge has been changed, for a save that returns after
+  // the operator picked another: its outcome belongs to the list of the edge
+  // it was sent for. A count rather than the edge's id, so picking another
+  // edge and then the first again still counts as a change: the list was
+  // cleared either way. Written where the edge changes, not during render.
+  const edgeChangesRef = React.useRef(0);
+
   const pickedEdge = sortedEdges.find((e) => e.id === pickedEdgeId) ?? null;
 
   // Filter discovery results to consumption_meter not yet linked.
@@ -137,6 +170,19 @@ export function DiscoverMeterInline({
     () =>
       discovered.filter(
         (d) => d.suggestedDeviceType === OFFERED_TYPE && d.alreadyAdded !== true
+      ),
+    [discovered]
+  );
+
+  // Unsaved devices discovery did not classify as consumption meters. When
+  // no new consumption meter is offered, these are named with the hint to
+  // change a device's type, since one of them may meter a tenant. A saved
+  // device is left out: its type was chosen when it was saved, while an
+  // unsaved one carries only discovery's guess.
+  const unofferedUnsaved = React.useMemo(
+    () =>
+      discovered.filter(
+        (d) => d.suggestedDeviceType !== OFFERED_TYPE && d.alreadyAdded !== true
       ),
     [discovered]
   );
@@ -202,6 +248,12 @@ export function DiscoverMeterInline({
     if (!pickedEdge) return;
     const candidate = candidates.find((d) => d.componentId === pickedComponentId);
     if (!candidate) return;
+    // The edge this save is for. The edge picker stays open while it runs,
+    // and picking another edge clears the list, so the list a save returns
+    // to may be another edge's, where the same component id can name a
+    // different device.
+    const savingEdgeChanges = edgeChangesRef.current;
+    const edgeChanged = () => edgeChangesRef.current !== savingEdgeChanges;
     setSaveError(null);
     setPhase("saving");
 
@@ -225,6 +277,9 @@ export function DiscoverMeterInline({
 
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
+        // Picking another edge discarded this pick, so its refusal has no
+        // selection left to retry.
+        if (edgeChanged()) return;
         setSaveError(
           body.error ??
             `Could not save the device (HTTP ${res.status}). Your selection is preserved — please retry.`
@@ -243,6 +298,7 @@ export function DiscoverMeterInline({
       };
       const saved = data.saved?.[0];
       if (!saved) {
+        if (edgeChanged()) return;
         setSaveError("Server did not return the saved device. Please retry.");
         setPhase("ready");
         return;
@@ -261,15 +317,29 @@ export function DiscoverMeterInline({
       };
 
       onDevicePersisted(newMeter);
-      // Reset the inline pick UI so re-discovery starts clean. Phase goes
-      // back to 'ready' rather than 'idle' because the discovery list is
-      // still relevant; the saved component will appear `alreadyAdded:true`
-      // on the next discover.
+      // The meter is saved on its edge whichever edge is picked now, so the
+      // wizard gets it above. The list here is another edge's once the
+      // operator has picked one, and marking its device with the same
+      // component id would take a meter that is not saved out of the
+      // candidates, so the list and the pick are left as they are.
+      if (edgeChanged()) return;
+      // The meter is saved now, and the wizard's own meter list holds it
+      // and selects it. Mark it `alreadyAdded`, as the next discover would,
+      // so it leaves the candidates: picking it here again would send it to
+      // POST /api/devices a second time, which refuses a saved device (409
+      // metering_devices_already_saved). Phase goes back to 'ready' rather
+      // than 'idle' because the rest of the discovery list still applies.
+      setDiscovered((prev) =>
+        prev.map((d) =>
+          d.componentId === candidate.componentId ? { ...d, alreadyAdded: true } : d
+        )
+      );
       setPickedComponentId("");
       setEditedName("");
       setPhase("ready");
     } catch (err) {
       if ((err as { name?: string } | undefined)?.name === "AbortError") return;
+      if (edgeChanged()) return;
       setSaveError(
         "Network error while saving. Your selection is preserved — please retry."
       );
@@ -319,6 +389,7 @@ export function DiscoverMeterInline({
           <Select
             value={pickedEdgeId}
             onValueChange={(v) => {
+              edgeChangesRef.current += 1;
               setPickedEdgeId(v);
               setDiscovered([]);
               setSkipped([]);
@@ -396,37 +467,45 @@ export function DiscoverMeterInline({
           meter to contain a keyword, when the device-type control has existed
           since #151. When discovery skipped components of any type, the edge
           is reachable and configured, so the first branch leaves that hint
-          out too, even when the note above names none of them. */}
+          out too, even when the note above names none of them. A consumption
+          meter that is already saved (one saved from this list included) is
+          not unclassified: when every consumption meter found is saved, there
+          is simply no new one, and the edge is reachable and configured, so
+          the hint stays out. Unsaved devices of other types found beside
+          them are still named, with the hint to change a device's type, as
+          the second branch names them. */}
       {showResults && edgeOnline && candidates.length === 0 && (
-        discovered.length === 0 ? (
-          <p className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">
-            No new consumption meters on this edge.
-            {skipped.length === 0 &&
-              " Make sure the edge is online and has components configured."}
-          </p>
+        discovered.length === 0 ||
+        discovered.some((d) => d.suggestedDeviceType === OFFERED_TYPE) ? (
+          <div className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">
+            <p>
+              No new consumption meters on this edge.
+              {discovered.length === 0 &&
+                skipped.length === 0 &&
+                " Make sure the edge is online and has components configured."}
+            </p>
+            {unofferedUnsaved.length > 0 && (
+              <>
+                <p className="mt-2 text-foreground">
+                  Also found {unofferedUnsaved.length}{" "}
+                  {unofferedUnsaved.length === 1 ? "device" : "devices"} not
+                  classified as a consumption meter:
+                </p>
+                <UnofferedDevices devices={unofferedUnsaved} />
+              </>
+            )}
+          </div>
         ) : (
           <div className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">
             <p className="text-foreground">
               Found {discovered.length}{" "}
               {discovered.length === 1 ? "device" : "devices"} on this edge, but{" "}
               {discovered.length === 1 ? "it is not" : "none are"} classified as
-              a consumption meter, so {discovered.length === 1 ? "it" : "none"}{" "}
-              can bill a tenant.
+              a consumption meter, so{" "}
+              {discovered.length === 1 ? "it cannot" : "none can"} bill a
+              tenant.
             </p>
-            <ul className="mt-2 space-y-1">
-              {discovered.map((d) => (
-                <li key={d.componentId} className="font-mono text-xs">
-                  {d.alias || d.componentId}
-                  <span className="ml-2 font-sans text-muted-foreground">
-                    — {humanReadable(d.suggestedDeviceType)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2">
-              If one of these meters a tenant, open it on the edge&apos;s
-              device list and change its type to Consumption meter.
-            </p>
+            <UnofferedDevices devices={discovered} />
           </div>
         )
       )}

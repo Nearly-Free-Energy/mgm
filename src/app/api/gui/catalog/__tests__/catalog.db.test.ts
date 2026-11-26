@@ -81,6 +81,24 @@ const ACTION_IDS = [
   "community.update-community",
   "community.update-microgrid",
   "community.update-tenant",
+  "metering.check-connection",
+  "metering.delete-edge",
+  "metering.edit-device",
+  "metering.edit-edge",
+  "metering.record-opening-register",
+  "metering.register-edges",
+  "metering.save-connection",
+  "metering.save-devices",
+  "org.change-role",
+  "org.delete-organization",
+  "org.invite-user",
+  "org.remove-email-sender",
+  "org.remove-user",
+  "org.resend-invite",
+  "org.save-email-sender",
+  "org.set-plugin",
+  "org.update-organization",
+  "org.update-profile",
   "payments.accept-receipts",
   "payments.record-adjustment",
   "payments.refresh-attempt",
@@ -214,6 +232,27 @@ describe.skipIf(shouldSkip())("GET /api/gui/catalog against the database", () =>
     }
   });
 
+  it("describes the OpenEMS connection's credentials as write-only, a schema with no value", async () => {
+    caller = manager;
+    const save = byId((await answer(`?org=${ORG}`)).body).get("metering.save-connection");
+    const properties = (save?.input as { properties: Record<string, Record<string, unknown>> }).properties;
+    for (const key of ["secretAccessKey", "basicAuthPassword", "bearerToken", "keycloakClientSecret"]) {
+      expect(properties[key], key).toEqual({ type: "string", title: expect.any(String), writeOnly: true });
+    }
+    // The host sends the ceremony's confirmation itself, so no form asks for it.
+    expect(Object.keys(properties)).not.toContain("confirmation");
+    expect(save).toMatchObject({
+      method: "PUT",
+      confirm: "ceremony",
+      humanOnly: true,
+      repeat: "unsafe",
+      bind: { path: { id: "microgrid" }, body: {} },
+      prepareAgainOn: ["metering_connection_name_required"],
+    });
+    // The page's own field is described, and marked deprecated.
+    expect(properties.confirmed_name).toMatchObject({ type: "string", deprecated: true });
+  });
+
   it("lists billing's actions unavailable with the gate's code and copy while billing is off", async () => {
     caller = manager;
     await setPlugin("billing", false);
@@ -297,6 +336,28 @@ describe.skipIf(shouldSkip())("GET /api/gui/catalog against the database", () =>
     ]);
     expect(byId(body).get("billing.bill-from-readings")).toMatchObject({ params: { periodId: DRAFT, tenantId: TENANT } });
     expect(text).not.toContain(TENANT_NAME);
+  });
+
+  it("resolves a person (org.user) of the manager's organization, asks available() and never names them", async () => {
+    caller = manager;
+    const { body, text } = await answer(`?entity=org.user:${manager.userId}`);
+    expect(body).toMatchObject({ org: ORG, entities: [{ kind: "org.user", id: manager.userId }] });
+    const actions = byId(body);
+    expect([...actions.keys()].sort()).toEqual(["org.change-role", "org.remove-user", "org.resend-invite", "org.update-profile"]);
+    // Their own profile: available() answers for them.
+    expect(actions.get("org.update-profile")!.availability).toEqual({ available: true, reasons: [], unchecked: ["configured", "authorized"] });
+    expect(text).not.toContain(EMAIL);
+  });
+
+  it("answers 404 for a person the manager's list does not show: one whose rows are all tenant rows, or no one", async () => {
+    caller = manager;
+    for (const id of [tenantUser.userId, "e8900000-0000-4000-800b-0000000000ff"]) {
+      const res = await catalog(`?entity=org.user:${id}`);
+      expect(res.status, id).toBe(404);
+      const text = await res.text();
+      expect(JSON.parse(text)).toMatchObject({ code: "gui_not_found" });
+      expect(text).not.toContain(TENANT_EMAIL);
+    }
   });
 
   it("gives a person whose rows are all tenant rows no actions, and a 404 for their own unit", async () => {
