@@ -64,7 +64,7 @@ Pending cases (§2) get microgrids `0b` onwards, in the same hexadecimal numberi
 - **Finished days only.** Every date is in the past and finished in its zone, as investigation creation requires (`window_not_closed`, evidence §3 O2).
 - **Synthetic only.** Every edge id starts with `SYNTHETIC-EDGE-`, except microgrid 09's `edge0`, which exists to be refused.
 
-Two pieces of code make the set usable, and both are tasks in the A1/A2 split, not part of this document. A **seed script** inserts the pinned rows on a disposable installation, for the manual baseline and for local runs. A **regeneration test** rebuilds each existing case from its pins, asserts the scenario and the figures in §2, and, once A2's capture method exists, the evidence keys and the expected result.
+Two pieces of code make the set usable, and both are tasks in the A1/A2 split, not part of this document. A **seed script** inserts the pinned rows on a disposable installation, for the manual baseline and for local runs. A **regeneration test** rebuilds each existing case from its pins, asserts the scenario and the figures in §2, the evidence (`CASE_EVIDENCE`) and, once A2's investigator exists, the expected result.
 
 ## 2. Cases
 
