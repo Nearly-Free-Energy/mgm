@@ -254,6 +254,9 @@ const SESSION_CHECKS = new Set([
   "composeTenantApp",
   // src/lib/auth/access.ts: getUser() and the caller's role rows.
   "getCurrentUserAccess",
+  // src/lib/gui/host/server/http.ts: getCurrentUserAccess (getUser) on the
+  // request's client before the route reads anything, then the agent check.
+  "openHostRequest",
   // The request-scoped helpers in src/lib/auth/request-access.ts, added by
   // mgm#89, which read getUser() once per render. Drop these if that file
   // does not land.
@@ -405,31 +408,31 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/api/gui/view/route.ts": {
     kind: "session",
     reason:
-      "getCurrentUserAccess (getUser) answers 401 or 403 before the snapshot is read or any loader runs.",
+      "openHostRequest (getCurrentUserAccess, getUser) answers 401 or 403 before the snapshot is read or any loader runs.",
   },
   "src/app/api/gui/prepare/route.ts": {
     kind: "session",
     reason:
-      "getCurrentUserAccess (getUser) answers 401 or 403 before the body is read, the snapshot is read or any prepare runs.",
+      "openHostRequest (getCurrentUserAccess, getUser) answers 401 or 403 before the body is read, the snapshot is read or any prepare runs.",
   },
   "src/app/api/gui/signals/route.ts": {
     kind: "session",
-    reason: "getCurrentUserAccess (getUser) answers 401 or 403 before the snapshot is read or any watcher runs.",
+    reason: "openHostRequest (getCurrentUserAccess, getUser) answers 401 or 403 before the snapshot is read or any watcher runs.",
   },
   "src/app/api/gui/search/route.ts": {
     kind: "session",
     reason:
-      "getCurrentUserAccess (getUser) answers 401 or 403 before the query is read, the snapshot is read or any search runs.",
+      "openHostRequest (getCurrentUserAccess, getUser) answers 401 or 403 before the query is read, the snapshot is read or any search runs.",
   },
   "src/app/api/gui/manifest/route.ts": {
     kind: "session",
     reason:
-      "getCurrentUserAccess (getUser) answers 401 or 403 before the query is read, the snapshot is read or any status loader runs.",
+      "openHostRequest (getCurrentUserAccess, getUser) answers 401 or 403 before the query is read, the snapshot is read or any status loader runs.",
   },
   "src/app/api/gui/catalog/route.ts": {
     kind: "session",
     reason:
-      "getCurrentUserAccess (getUser) answers 401 or 403 before the query is read, the snapshot is read or any available() runs.",
+      "openHostRequest (getCurrentUserAccess, getUser) answers 401 or 403 before the query is read, the snapshot is read or any available() runs.",
   },
   "src/app/api/billing-line-items/[lineItemId]/pay/route.ts": {
     kind: "public",

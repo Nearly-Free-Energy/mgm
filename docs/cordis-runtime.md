@@ -259,6 +259,89 @@ id through `checkGate` on the caller's RLS-scoped client, so a period the
 caller cannot see yields no organization and a 404. A new caller must do the
 same.
 
+## Who is calling: the session resolver
+
+A request carries a browser's cookie session or a client's
+`Authorization: Bearer` token, never both (RFC #259 § 2, ADR-008 decision
+6). A client is the CLI (an *operator* client) or the assistant bridge (an
+*agent* client), each acting as the signed-in person; Supabase Auth's OAuth
+server issues their tokens, and the token hook writes the client's kind
+into them (`mgm_client_kind`).
+
+Middleware (`src/middleware.ts`) decides a bearer request before any route
+runs, after the release allowlist:
+
+- a bearer token with a session cookie is `400 credentials_conflict`, and a
+  bearer token on a page (anything outside `/api/*`) is a `400`: pages stay
+  cookie-only;
+- while `MGM_CLIENT_TOKENS` is off, every bearer token is
+  `403 client_tokens_off` (`docs/setup.md`), and without
+  `SUPABASE_SERVICE_ROLE_KEY`, which keys the mark below, `503
+  client_tokens_unavailable`;
+- the token's claims must name a client (`callerFromClaims` in
+  `src/lib/runtime/caller.ts`: a uuid `client_id`, a kind, and the role
+  that kind runs as; `client_id` with no kind was issued while the hook was
+  off and is refused), and Supabase Auth must answer `GET /user` for it
+  (`verifyBearer` in `src/lib/runtime/bearer.ts`), so a revoked client is
+  refused at once; otherwise `401 unauthenticated`;
+- an agent client may call only `AGENT_ROUTES`
+  (`src/lib/runtime/agent-routes.ts`): `GET /api/gui/catalog` and
+  `GET /api/gui/view`. Every other request, whatever its method, public
+  paths included, is `403 agent_route_refused`.
+
+An accepted bearer request goes on with `x-mgm-credential` set to the
+token's mark (`credentialMark` in `src/lib/runtime/credential.ts`): an
+HMAC-SHA256 of the token keyed with the server-only
+`SUPABASE_SERVICE_ROLE_KEY`, so only the server can make one. Middleware
+replaces any value the client sent and deletes it from every other
+request. It never builds the cookie
+client or sets a cookie for one. A client's token found in the session
+cookie counts as signed out. Every `/api` refusal middleware makes is
+`{ error, code }`, the unauthenticated `401` included
+(`code: "unauthenticated"`); only the release allowlist's `404` stays plain
+text.
+
+On the route side, `createClient` (`@/lib/supabase/server`) asks
+`bearerClientFor` (`src/lib/runtime/request-session.ts`) first. With the
+mark, it builds a client that sends the token as its global `Authorization`
+header, so PostgREST runs as the person and `auth.getUser()` asks Supabase
+Auth about the token: every `getUser()`-backed check (`getCurrentUserAccess`,
+`authorizeOrganization`, `authorizeTenant`, the composers) works unchanged
+and refuses a revoked client too. A bearer token without a matching mark
+throws, and so does any bearer token while `MGM_CLIENT_TOKENS` is off: a
+second fence for pages and for any page or route the middleware matcher
+skips, where nothing removes a mark the client set, which therefore never
+matches. Every other request gets the cookie client as before. Nothing else builds a client on a bearer token
+(`request-session.test.ts`).
+
+The client records who it acts for (`recordCaller`; `callerOf` reads it,
+and reads any client `createClient` did not make as a browser session).
+`openOrganizationScope` puts it on `mgmRequest.caller`, read from the
+client, never from the composer. The GUI host's routes open their request
+with `openHostRequest` (`src/lib/gui/host/server/http.ts`), which puts it
+on the host context (`HostContext.caller`) and refuses an agent client
+(`403 gui_agent_refused`) on every route but the two that opt in. There an
+agent client gets less (`src/lib/gui/host/server/agent.ts`):
+
+- the catalog gives it an organization's catalog only: any `entity=` is
+  refused, so no tenant, bill, payment, tenant access or person (`org.user`)
+  reaches it by id, and no action's `available()` is asked;
+- the view route gives it only an organization's view marked
+  `agent: "read"`, and answers any other view, tenant views included, as a
+  page that does not exist, before any read;
+- `prepareAction` refuses it, whatever route calls it;
+- each step first asks the assistant plugin's gate for the organization as
+  a write (ADR-007 decision 5, `assistantGate`). No `assistant` plugin is
+  bundled yet, so every agent step is refused (`409 assistant_disabled`);
+  `agent.test.ts` fails when one is bundled, so that what a marked view
+  gives an agent beyond its model (its actions, attached and embedded
+  views) is settled first.
+
+An operator client holds the person's access: nothing grants or refuses
+anything by that kind. A new `/api` route is open to operator clients, like
+a browser session, and closed to agent clients unless it is added to
+`AGENT_ROUTES`, which is a change to what an assistant can reach.
+
 ## GUI surface
 
 `mgmSurface` holds what capabilities contribute to GUIs (views, actions,

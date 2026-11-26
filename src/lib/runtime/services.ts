@@ -18,6 +18,7 @@ import type { MeteringProviderName } from "@/lib/metering/registry";
 import type { ProviderFactory } from "@/lib/payments/repository";
 import type { MailSenderSettings, MailTransport, MailTransportFactory } from "@/lib/email/types";
 import type { UserRoleRecord } from "@/lib/types/domain";
+import type { Caller } from "./caller";
 import type { MgmGate } from "./gate";
 
 /**
@@ -49,6 +50,26 @@ export type MgmRequest = {
   supabase: SupabaseClient;
   /** Set by openOrganizationScope from its options; "organization" unless the composer says otherwise. */
   audience: RequestAudience;
+  /**
+   * Who is calling (RFC #259 § 2): the person's browser session, or a
+   * client acting as them, the CLI (operator) or the assistant bridge
+   * (agent). Set by openOrganizationScope from the client createClient made
+   * on this request (callerOf in ./caller.ts), so it comes from the token's
+   * claims, which the composer's getUser() check has accepted. A client
+   * createClient did not make, such as the public payment surfaces' service
+   * client, reads as a browser session. Nothing grants anything by it: an
+   * operator client holds the person's access. An agent client reaches a
+   * scope only through the view route (GET /api/gui/view, one of
+   * AGENT_ROUTES in ./agent-routes.ts), whose loader opens one for a view
+   * marked `agent: "read"`, and only after assistantGate
+   * (src/lib/gui/host/server/agent.ts), which refuses every agent step
+   * while no assistant plugin is bundled. So today no scope carries an
+   * agent caller. If assistantGate starts letting steps through (an
+   * assistant plugin is bundled) or AGENT_ROUTES gains a route, capability
+   * plugins in the scope see caller.kind === "agent"; revisit whether
+   * scopes or plugins must read it.
+   */
+  caller: Caller;
 };
 
 /**

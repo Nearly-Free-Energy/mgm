@@ -2,7 +2,8 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { getServerSupabaseSettings } from "@/lib/config/public-runtime-config";
-import { cookieOptionsFor } from "@/lib/config/cookie-options";
+import { cookieOptionsFor, sessionCookieKey } from "@/lib/config/cookie-options";
+import { clientTokensAccepted } from "@/lib/config/client-tokens";
 import { notReleasedResponse } from "@/lib/public-html/not-released";
 import {
   buildContentSecurityPolicy,
@@ -14,6 +15,15 @@ import {
   returnPathFor,
   safeReturnPath,
 } from "@/lib/auth/return-path";
+import { isAgentRoute } from "@/lib/runtime/agent-routes";
+import { verifyBearer } from "@/lib/runtime/bearer";
+import { callerFromClaims } from "@/lib/runtime/caller";
+import {
+  CREDENTIAL_HEADER,
+  bearerCredential,
+  credentialMark,
+  sessionCookiePresent,
+} from "@/lib/runtime/credential";
 
 // Only authentication pages are public in the first MGM release. Inherited
 // legacy payment links, customer APIs, and webhooks are blocked by the route
@@ -57,6 +67,76 @@ const PUBLIC_PATHS = [
  */
 const MGM_PATH_HEADER = "x-mgm-path";
 const MGM_PATH_MAX_LENGTH = 2048;
+
+/**
+ * An `/api` refusal: `{ error, code }`, the shape the plugin gate and the
+ * GUI host answer with (gateResponse in src/lib/runtime/gate.ts,
+ * hostFailure in src/lib/gui/host/server/http.ts), so a client other than
+ * the browser reads one shape across MGM's routes (#275, #306). Only the
+ * release allowlist's 404 keeps its plain text.
+ */
+function apiRefusal(status: number, code: string, error: string): NextResponse {
+  return NextResponse.json({ error, code }, { status });
+}
+
+/**
+ * The request carries a bearer token (RFC #259 § 2, ADR-008 decision 6).
+ * Middleware decides everything about it here, before any route runs, and
+ * never builds the cookie client or sets a cookie for it:
+ *
+ * 1. With a session cookie as well: 400 `credentials_conflict`. A request
+ *    acts for one session, never a guess between two.
+ * 2. Outside `/api/*`: 400. Pages stay cookie-only; createClient also
+ *    refuses a bearer token without this middleware's mark.
+ * 3. While MGM_CLIENT_TOKENS is off: 403 `client_tokens_off`. Without
+ *    SUPABASE_SERVICE_ROLE_KEY, which keys the mark below: 503
+ *    `client_tokens_unavailable`.
+ * 4. A token Supabase Auth does not accept, or whose claims name no client
+ *    MGM accepts (verifyBearer, callerFromClaims): 401 `unauthenticated`.
+ *    That includes a revoked client, at once, and a token with `client_id`
+ *    and no kind.
+ * 5. An agent client outside AGENT_ROUTES, public paths included: 403
+ *    `agent_route_refused`.
+ *
+ * Otherwise the request goes on with CREDENTIAL_HEADER set to the token's
+ * mark (credentialMark), which the client cannot make, and the route's
+ * createClient builds a client on the token only when the mark matches.
+ * The release allowlist has already answered 404 for a path outside the
+ * release.
+ */
+async function bearerRequest(
+  request: NextRequest,
+  token: string | null,
+  settings: ReturnType<typeof getServerSupabaseSettings>,
+): Promise<NextResponse> {
+  const isApi = request.nextUrl.pathname.startsWith("/api/");
+  if (sessionCookiePresent(request.cookies.getAll(), sessionCookieKey(settings))) {
+    const error = "Send either a session cookie or a bearer token, not both.";
+    return isApi ? apiRefusal(400, "credentials_conflict", error) : new NextResponse(error, { status: 400 });
+  }
+  if (!isApi) {
+    return new NextResponse("Pages accept a browser session only, not a bearer token.", { status: 400 });
+  }
+  if (!clientTokensAccepted()) {
+    return apiRefusal(403, "client_tokens_off", "This installation does not accept app tokens right now. Use MGM in a browser.");
+  }
+  if (token === null) return apiRefusal(401, "unauthenticated", "Authentication required");
+  const mark = credentialMark(token);
+  if (mark === null) {
+    return apiRefusal(503, "client_tokens_unavailable", "This installation cannot accept app tokens right now. Use MGM in a browser.");
+  }
+  const check = await verifyBearer(token, settings);
+  if (!check.ok) return apiRefusal(401, "unauthenticated", "Authentication required");
+  if (check.caller.kind === "agent" && !isAgentRoute(request.method, request.nextUrl.pathname)) {
+    return apiRefusal(403, "agent_route_refused", "An assistant cannot use this route.");
+  }
+  const headers = new Headers(request.headers);
+  headers.delete(MGM_PATH_HEADER);
+  headers.delete("content-security-policy");
+  headers.delete("content-security-policy-report-only");
+  headers.set(CREDENTIAL_HEADER, mark);
+  return NextResponse.next({ request: { headers } });
+}
 
 /**
  * Release 4 public payment surfaces (no MGM session). The line-item id /
@@ -104,6 +184,9 @@ export async function middleware(request: NextRequest) {
   // the variable, never its value, and the request fails closed.
   const settings = getServerSupabaseSettings();
 
+  const bearer = bearerCredential(request.headers.get("authorization"));
+  if (bearer !== null) return bearerRequest(request, bearer.ok ? bearer.token : null, settings);
+
   // Pages get the request path and a content security policy with a fresh
   // nonce; API requests get neither.
   const isApi = request.nextUrl.pathname.startsWith("/api/");
@@ -136,6 +219,8 @@ export async function middleware(request: NextRequest) {
   const forward = () => {
     const headers = new Headers(request.headers);
     headers.delete(MGM_PATH_HEADER);
+    // Set only on a request whose bearer token was accepted (bearerRequest).
+    headers.delete(CREDENTIAL_HEADER);
     headers.delete("content-security-policy");
     headers.delete("content-security-policy-report-only");
     if (!isApi) headers.set(MGM_PATH_HEADER, pathWithQuery);
@@ -182,10 +267,14 @@ export async function middleware(request: NextRequest) {
   // this. Local verification needs an asymmetric signing key (the project's
   // is ES256); with a shared-secret key getClaims() falls back to getUser()
   // and saves nothing. If the project's key type changes, revisit.
+  //
+  // A client's token in the session cookie counts as signed out
+  // (callerFromClaims): the cookie is a browser's session, and a client's
+  // token belongs in the Authorization header, where the checks above apply.
   let subject: string | undefined;
   try {
     const { data } = await supabase.auth.getClaims();
-    subject = data?.claims.sub;
+    subject = data && callerFromClaims(data.claims, "cookie").ok ? data.claims.sub : undefined;
   } catch {
     // getClaims() throws, rather than returning an error, on some malformed
     // tokens (no exp claim, an unsupported alg, a payload that is not JSON)
@@ -202,10 +291,7 @@ export async function middleware(request: NextRequest) {
   if (!signedIn && !isPublicPath) {
     // API routes return 401 JSON instead of redirecting to login
     if (request.nextUrl.pathname.startsWith("/api/")) {
-      return NextResponse.json(
-        { error: "Authentication required" },
-        { status: 401 }
-      );
+      return apiRefusal(401, "unauthenticated", "Authentication required");
     }
     // The page asked for goes along in one parameter, and the login page
     // returns there after sign-in (#126). The original query is not carried
