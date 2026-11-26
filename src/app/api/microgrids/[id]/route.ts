@@ -58,6 +58,11 @@ function mapError(error: CommunityManagementError): NextResponse {
  * Area/Location id that Intl.DateTimeFormat resolves; stored in canonical
  * form (422 otherwise, #357 — see src/lib/validation/timezone.ts).
  * Duplicate rename (same community → same name) → 409 with exact copy.
+ * A currency change once any of the microgrid's billing periods is closed
+ * → 409 `microgrid_currency_locked` on the currency field, as bills store
+ * no currency and would be relabelled; the same currency again passes
+ * (currencyChangeRefusal in src/lib/community-management/operations/
+ * microgrids.ts says why, and what would move it into the database).
  */
 export async function PATCH(
   request: NextRequest,

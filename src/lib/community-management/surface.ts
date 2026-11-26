@@ -141,13 +141,14 @@ const ACTIONS: ActionDef[] = [
   },
   // Write, with no confirmation, as the microgrid's edit page (EntityForm)
   // sends it. Its currency and time zone reach billing differently. Bills
-  // store no currency: every bill and invoice of the microgrid, closed ones
-  // included, is shown in the microgrid's, so a currency change relabels
-  // them. A period stamps its own time zone when it is made
-  // (billing_periods.timezone), so a time zone change moves only periods
-  // made after it. If bills come to store their currency, the relabelling
-  // goes; if a currency change is to be confirmed, this becomes money, with
-  // a step that names the closed periods it relabels.
+  // store no currency: every bill and invoice of the microgrid is shown in
+  // the microgrid's, so the route refuses a currency change once any of its
+  // periods is closed (409 microgrid_currency_locked); a change before
+  // then relabels draft bills only. A period stamps its own time zone when
+  // it is made (billing_periods.timezone), so a time zone change moves only
+  // periods made after it. If the route stops refusing that change, it
+  // relabels closed bills again, and this becomes money, with a step that
+  // names the closed periods it relabels.
   {
     id: "community.update-microgrid",
     title: "Edit microgrid",

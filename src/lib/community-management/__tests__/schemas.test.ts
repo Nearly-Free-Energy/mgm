@@ -113,6 +113,7 @@ function fakeRepository(writes: Write[]): CommunityManagementRepository {
     getOpenDeviceLink: async () => null,
     refetchTenant: async () => ({ data: { id: TENANT }, error: null }),
     countBillingLineItems: async () => ({ count: 0, error: null }),
+    getMicrogridCurrencyUse: async () => ({ data: { currency: "UGX", closedPeriods: 0 }, error: null }),
     resolveHierarchyLevels: async () => [],
     insertCommunity: write("insertCommunity", { data: { id: COMMUNITY }, error: null }),
     updateCommunity: write("updateCommunity", { data: { id: COMMUNITY }, error: null }),

@@ -12,6 +12,9 @@
  *   - POST: 409 when community management is disabled
  *   - PATCH: dirty-fields — sending {address_city} does NOT clobber name/currency
  *   - PATCH: 422 invalid currency on update
+ *   - PATCH: 409 microgrid_currency_locked for a currency change once a
+ *     billing period is closed; the same currency again, or a change with
+ *     no closed period, goes through
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -31,6 +34,9 @@ const mockUpdate = vi.fn();
 const mockSingleAfterInsertSelect = vi.fn();
 const mockMaybeSingleAfterUpdateSelect = vi.fn();
 const mockParentMaybeSingle = vi.fn();
+/** The currency read before a currency change: the microgrid's stored currency. */
+const mockCurrencyMaybeSingle = vi.fn();
+let closedPeriodCount = 0;
 
 const mockFrom = vi.fn((table: string) => {
   if (table === "communities") {
@@ -62,9 +68,22 @@ const mockFrom = vi.fn((table: string) => {
           }),
         };
       },
+      select: (columns: string) => ({
+        eq: () => ({
+          maybeSingle: () =>
+            columns === "id, currency" ? mockCurrencyMaybeSingle() : mockParentMaybeSingle(),
+        }),
+      }),
+    };
+  }
+  if (table === "billing_periods") {
+    return {
       select: () => ({
         eq: () => ({
-          maybeSingle: () => mockParentMaybeSingle(),
+          eq: async (column: string, value: string) => {
+            expect([column, value]).toEqual(["status", "closed"]);
+            return { count: closedPeriodCount, error: null };
+          },
         }),
       }),
     };
@@ -263,6 +282,8 @@ describe("PATCH /api/microgrids/[id]", () => {
     seedRole();
     pluginEnabled = true;
     mockMaybeSingleAfterUpdateSelect.mockReset();
+    mockCurrencyMaybeSingle.mockReset();
+    closedPeriodCount = 0;
     // Route prefetch and operation resolution share this mock. Calls in
     // order: route parent prefetch, operation microgrid fetch, operation
     // community-org fetch.
@@ -316,6 +337,38 @@ describe("PATCH /api/microgrids/[id]", () => {
     expect(res.status).toBe(422);
     const json = await res.json();
     expect(json.field).toBe("currency");
+  });
+
+  it("returns 409 microgrid_currency_locked for a currency change once a billing period is closed", async () => {
+    mockCurrencyMaybeSingle.mockResolvedValueOnce({ data: { id: VALID_MICROGRID, currency: "UGX" }, error: null });
+    closedPeriodCount = 2;
+    const { PATCH } = await import("../[id]/route");
+    const res = await PATCH(makePatch(VALID_MICROGRID, { currency: "USD", address_city: "Entebbe" }), {
+      params: Promise.resolve({ id: VALID_MICROGRID }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error:
+        "The currency cannot change once a billing period is closed: this microgrid has 2 closed billing periods, and its bills are shown in UGX.",
+      code: "microgrid_currency_locked",
+      field: "currency",
+    });
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["the same currency again, with closed periods", "UGX", 2],
+    ["a new currency, with no closed period", "USD", 0],
+  ])("goes through for %s", async (_label, currency, closed) => {
+    mockCurrencyMaybeSingle.mockResolvedValueOnce({ data: { id: VALID_MICROGRID, currency: "UGX" }, error: null });
+    closedPeriodCount = closed;
+    mockMaybeSingleAfterUpdateSelect.mockResolvedValueOnce({ data: { id: VALID_MICROGRID, currency }, error: null });
+    const { PATCH } = await import("../[id]/route");
+    const res = await PATCH(makePatch(VALID_MICROGRID, { currency }), {
+      params: Promise.resolve({ id: VALID_MICROGRID }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockUpdate).toHaveBeenCalledWith({ currency });
   });
 
   it("returns 403 when the caller has no role for the parent org", async () => {
