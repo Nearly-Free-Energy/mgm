@@ -8,6 +8,7 @@
  */
 import "server-only";
 
+import { OPENEMS_ID_PATTERN } from "@/lib/validation/stored-id";
 import { validateTimezone } from "@/lib/validation/timezone";
 import { MeteringError } from "./errors";
 import { computeAssignmentGaps } from "./assignment-gaps";
@@ -70,6 +71,32 @@ function isReadable(device: ManagedDevice): boolean {
 }
 
 /**
+ * Whether a readable device's ids may be stored in investigation evidence:
+ * both match OPENEMS_ID_PATTERN exactly, untrimmed, since the provider
+ * reads by the exact string and evidence never stores an id unchecked
+ * (docs/investigation-evidence.md §4 "Closed schema"). Rows written before
+ * migration 20261124160100's NOT VALID CHECKs can hold an id outside it.
+ * Once a migration validates both CHECKs no stored row can fail this; the
+ * check stays, as the capture's own guarantee.
+ */
+function isStorable(device: ManagedDevice): boolean {
+  return OPENEMS_ID_PATTERN.test(device.edgeOpenemsId) && OPENEMS_ID_PATTERN.test(device.componentId);
+}
+
+/**
+ * How a read selects devices. `requireStorableIds` (the capture's) also
+ * leaves out a device whose ids fall outside the stored format; the page's
+ * reads (getSiteDay, getSiteDays) do not set it, so they still read such a
+ * device. If getSiteDay comes to apply the format check, revisit the
+ * comments that say only a capture does (pickSiteSources,
+ * unreadableHouseMeters, SiteSources and SiteSourceAvailability).
+ */
+export type SiteDeviceFilter = { requireStorableIds?: boolean };
+
+const usableFor = (filter: SiteDeviceFilter) => (device: ManagedDevice) =>
+  isReadable(device) && (!filter.requireStorableIds || isStorable(device));
+
+/**
  * The house meters among `devices`: the consumption meters in
  * `houseMeterIds`. The site sources are other types, so no device is read
  * both as a site source and as a house. A linked device of another type (a
@@ -82,22 +109,30 @@ function linkedHouseMeters(devices: ManagedDevice[], houseMeterIds: readonly str
 }
 
 /** A linked tenant meter that cannot be read, by MGM device id. */
-export type UnreadableHouseMeter = { id: string; reason: "tenant_meter_unreadable" };
+export type UnreadableHouseMeter = { id: string; reason: "tenant_meter_unreadable" | "id_not_storable" };
 
 /**
- * The linked tenant meters that cannot be read, because they have no edge
- * or component id, in device-id order: the meters pickSiteSources counts as
- * `houseMetersUnreadable` and leaves out of `houseMeters`.
+ * The linked tenant meters that cannot be read, in device-id order: the
+ * meters pickSiteSources counts as `houseMetersUnreadable` and leaves out of
+ * `houseMeters` under the same filter. A meter without an edge or component
+ * id is `tenant_meter_unreadable`, whatever the other id holds; in a capture
+ * (`requireStorableIds`), a meter with both ids and either outside
+ * OPENEMS_ID_PATTERN is `id_not_storable`. The page's reads apply no format
+ * check, so they list only the first.
  */
 export function unreadableHouseMeters(
   devices: ManagedDevice[],
-  houseMeterIds: readonly string[]
+  houseMeterIds: readonly string[],
+  filter: SiteDeviceFilter = {}
 ): UnreadableHouseMeter[] {
+  const usable = usableFor(filter);
   return linkedHouseMeters(devices, houseMeterIds)
-    .filter((d) => !isReadable(d))
-    .map((d) => d.id)
-    .sort()
-    .map((id) => ({ id, reason: "tenant_meter_unreadable" as const }));
+    .filter((d) => !usable(d))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map((d) => ({
+      id: d.id,
+      reason: isReadable(d) ? ("id_not_storable" as const) : ("tenant_meter_unreadable" as const),
+    }));
 }
 
 /**
@@ -115,15 +150,21 @@ export function unreadableHouseMeters(
  * houses used is their sum (linkedHouseMeters). Linked meters without an
  * edge or component id cannot be read; they are counted, not dropped, and
  * unreadableHouseMeters lists them.
+ *
+ * A capture passes `{ requireStorableIds: true }`: a device whose ids fall
+ * outside OPENEMS_ID_PATTERN is then not read either, so a second device of
+ * its type with valid ids is chosen instead, and such a tenant meter is
+ * counted as unreadable. The page's reads pass no filter and read it.
  */
 export function pickSiteSources(
   devices: ManagedDevice[],
-  houseMeterIds: string[] = []
+  houseMeterIds: string[] = [],
+  filter: SiteDeviceFilter = {}
 ): SiteSources {
   const sorted = [...devices].sort(
     (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
   );
-  const usable = sorted.filter(isReadable);
+  const usable = sorted.filter(usableFor(filter));
   const config = (device: ManagedDevice) => ({
     id: device.id,
     edgeOpenemsId: device.edgeOpenemsId,
@@ -138,8 +179,35 @@ export function pickSiteSources(
     gridMeter: first("grid_meter"),
     load: first("inverter"),
     pv: first("pv_meter"),
-    houseMeters: linkedHouseMeters(sorted, houseMeterIds).filter(isReadable).map(config),
-    houseMetersUnreadable: unreadableHouseMeters(devices, houseMeterIds).length,
+    houseMeters: linkedHouseMeters(sorted, houseMeterIds).filter(usableFor(filter)).map(config),
+    houseMetersUnreadable: unreadableHouseMeters(devices, houseMeterIds, filter).length,
+  };
+}
+
+/** The four site source types, as evidence §4's `src_*` items name them. */
+export type SiteSourceType = "battery" | "grid_meter" | "inverter" | "pv_meter";
+export type SiteSourceEvidence = Record<
+  SiteSourceType,
+  { device: string; edge: string; component: string } | { reason: "source_not_readable" | "id_not_storable" }
+>;
+
+/**
+ * Each site source as a capture records it: the device pickSiteSources
+ * chose, or why none of that type could be read. `id_not_storable` when a
+ * device of the type has both ids and the format check alone excluded it;
+ * else `source_not_readable` (none registered, or none with both ids).
+ */
+export function siteSourceEvidence(devices: ManagedDevice[], sources: SiteSources): SiteSourceEvidence {
+  const of = (type: SiteSourceType, chosen: SiteSources["battery"]): SiteSourceEvidence[SiteSourceType] => {
+    if (chosen) return { device: chosen.id, edge: chosen.edgeOpenemsId, component: chosen.componentId };
+    const excluded = devices.some((d) => d.deviceType === type && isReadable(d));
+    return { reason: excluded ? "id_not_storable" : "source_not_readable" };
+  };
+  return {
+    battery: of("battery", sources.battery),
+    grid_meter: of("grid_meter", sources.gridMeter),
+    inverter: of("inverter", sources.load),
+    pv_meter: of("pv_meter", sources.pv),
   };
 }
 
@@ -698,7 +766,8 @@ export class MeteringCapability implements MeteringCapabilityContract {
    * The provider's site-sample reader and the site devices to read, once the
    * dates are valid. `houseDate` picks the house meters assigned on that day;
    * null reads no house meters (a range read, whose days can have different
-   * house meters and whose savings figures do not use them).
+   * house meters and whose savings figures do not use them). The page's
+   * reads; captureSiteDay runs the same three steps with the format check.
    */
   private async openSiteReader(
     microgridId: string,
@@ -710,6 +779,30 @@ export class MeteringCapability implements MeteringCapabilityContract {
         getSiteSamples: NonNullable<MeteringProvider["getSiteSamples"]>;
         sources: SiteSources;
         availability: SiteSourceAvailability;
+        synthetic: boolean;
+      }
+  > {
+    const provider = await this.resolveSiteProvider(microgridId);
+    if (!provider.ok) return provider;
+    const read = await this.readSiteDevices(microgridId, houseDate, {});
+    if (!read.ok) return read;
+    if (!read.availability.battery && !read.availability.gridMeter) return this.noSiteDevices();
+    return {
+      ok: true,
+      getSiteSamples: provider.getSiteSamples,
+      sources: read.sources,
+      availability: read.availability,
+      synthetic: provider.synthetic,
+    };
+  }
+
+  /** The microgrid's site-sample provider: selected, resolved and able to read site samples. */
+  private async resolveSiteProvider(microgridId: string): Promise<
+    | Extract<MeteringResult<never>, { ok: false }>
+    | {
+        ok: true;
+        name: MeteringProviderName;
+        getSiteSamples: NonNullable<MeteringProvider["getSiteSamples"]>;
         synthetic: boolean;
       }
   > {
@@ -748,7 +841,32 @@ export class MeteringCapability implements MeteringCapabilityContract {
         message: "This metering source does not provide site samples.",
       };
     }
+    return {
+      ok: true,
+      name: providerName,
+      getSiteSamples: provider.getSiteSamples.bind(provider),
+      synthetic: provider.synthetic === true,
+    };
+  }
 
+  /**
+   * The microgrid's devices, the tenant meters linked on `houseDate` (none
+   * when null), and the site sources picked from them under `filter`.
+   */
+  private async readSiteDevices(
+    microgridId: string,
+    houseDate: string | null,
+    filter: SiteDeviceFilter
+  ): Promise<
+    | Extract<MeteringResult<never>, { ok: false }>
+    | {
+        ok: true;
+        devices: ManagedDevice[];
+        houseMeterIds: string[];
+        sources: SiteSources;
+        availability: SiteSourceAvailability;
+      }
+  > {
     let devices: ManagedDevice[];
     let houseMeterIds: string[];
     try {
@@ -764,7 +882,7 @@ export class MeteringCapability implements MeteringCapabilityContract {
         "This microgrid's meters could not be read. Try again shortly."
       );
     }
-    const sources = pickSiteSources(devices, houseMeterIds);
+    const sources = pickSiteSources(devices, houseMeterIds, filter);
     const availability = {
       battery: sources.battery !== null,
       gridMeter: sources.gridMeter !== null,
@@ -773,21 +891,17 @@ export class MeteringCapability implements MeteringCapabilityContract {
       houses: sources.houseMeters.length + sources.houseMetersUnreadable > 0,
       houseMetersUnreadable: sources.houseMetersUnreadable,
     };
-    if (!availability.battery && !availability.gridMeter) {
-      return {
-        ok: false as const,
-        status: 404 as const,
-        code: "metering_no_site_devices",
-        message:
-          "No battery or grid meter is registered on this microgrid. Add them under Setup → Edges.",
-      };
-    }
+    return { ok: true, devices, houseMeterIds, sources, availability };
+  }
+
+  /** The refusal of a site read with neither a battery nor a grid meter to read. */
+  private noSiteDevices(): Extract<MeteringResult<never>, { ok: false }> {
     return {
-      ok: true,
-      getSiteSamples: provider.getSiteSamples.bind(provider),
-      sources,
-      availability,
-      synthetic: provider.synthetic === true,
+      ok: false as const,
+      status: 404 as const,
+      code: "metering_no_site_devices",
+      message:
+        "No battery or grid meter is registered on this microgrid. Add them under Setup → Edges.",
     };
   }
 

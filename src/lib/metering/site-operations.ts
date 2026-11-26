@@ -37,7 +37,10 @@
  *   before; an end, later than the start, from up to half an hour before
  *   the last bin. A meter without both, whose counter went backwards (reset
  *   or replaced), or without the identifiers to be read at all, is counted
- *   as missing and left out of the sum rather than read as zero.
+ *   as missing and left out of the sum rather than read as zero. A capture
+ *   also leaves out, as unreadable, a meter whose ids fall outside the
+ *   stored format (`requireStorableIds` in capability.ts); the page's reads
+ *   do not, and if getSiteDay comes to apply the format check, revisit.
  * - Battery supplied, evening: the battery's discharge over the same
  *   window. It differs from what the houses used by the grid's share,
  *   conversion losses and the site's own use.
@@ -122,7 +125,12 @@ export type SiteSourceAvailability = {
   pv: boolean;
   /** At least one tenant meter is linked, readable or not. */
   houses: boolean;
-  /** Linked tenant meters without the identifiers to read them. */
+  /**
+   * Linked tenant meters that cannot be read: without the identifiers, or,
+   * in a capture, with ids outside the stored format (`requireStorableIds`
+   * in capability.ts; the page's reads apply no format check, and if
+   * getSiteDay comes to apply it, revisit).
+   */
   houseMetersUnreadable: number;
 };
 
