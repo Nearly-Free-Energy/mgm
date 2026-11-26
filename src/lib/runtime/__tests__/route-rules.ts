@@ -124,10 +124,11 @@ export const DESCRIBING_ISSUES = {
 } as const satisfies Record<`#${number}`, readonly MgmPluginName[]>;
 
 /**
- * Why no action names a write route. `permanent`: no issue will describe
- * it, because the route is not a person's action or writes nothing; its
- * reason says why and what would make that wrong ("Wrong once …",
- * which described-writes.test.ts requires).
+ * Why no action names a write route. `permanent`: the route is not a
+ * person's action (no person sends it, or it writes nothing: an action is a
+ * write a person confirms, and RFC #259 § 3 serves reads as views), and its
+ * reason says why and what would make that wrong ("Wrong once …", which
+ * described-writes.test.ts requires).
  * `not-yet-described`: the issue that will describe it.
  */
 export type UndescribedWrite =
@@ -154,10 +155,23 @@ export type UndescribedWrite =
  */
 export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
   // ── Permanent: not a person's action ──
+  // A POST that writes nothing is here rather than an action: what it
+  // answers is a read, and the twice-sent test (repeat.db.test.ts) can show
+  // no action "safe" whose first send writes nothing.
   "POST /api/auth/sign-in-link": {
     kind: "permanent",
     reason:
       "Emails a sign-in link to someone who has no session yet (RFC #186), while an action is offered to a signed-in person. Wrong once it reads the caller's session.",
+  },
+  "POST /api/communities/[id]/invoice-preview": {
+    kind: "permanent",
+    reason:
+      "A preview that writes nothing: it renders the invoice settings form's unsaved state to a PDF for the person to look at, stores nothing and is answered while billing is off (its UNGATED_WRITES reason). Wrong once it stores anything.",
+  },
+  "PUT /api/communities/[id]/payment": {
+    kind: "permanent",
+    reason:
+      "A stub that refuses every request (400 for a malformed id, 404 for a community the caller cannot see, else 409 use_organization_payment_settings) and writes nothing; no page calls it. Wrong once it does anything but refuse.",
   },
   "POST /api/gui/prepare": {
     kind: "permanent",
@@ -178,26 +192,6 @@ export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
     kind: "permanent",
     reason:
       "The scheduled worker that retries stored provider notifications, authenticated by its header secret with no session. Wrong once a signed-in person can run it.",
-  },
-
-  // ── Permanent: writes nothing (#280, ACM B6) ──
-  // Two previews and a stub. A person may call them, but none writes, so
-  // nothing a repeat or a confirmation guards is lost by leaving them off
-  // the catalog.
-  "POST /api/billing-review/preview": {
-    kind: "permanent",
-    reason:
-      "A deployment reviewer's comparison of a period's bills, refused to everyone but the one account MGM_REVIEW_ALLOWED_USER_ID or MGM_REVIEW_ALLOWED_EMAIL names, and called by no page; offered to organization staff, it would only answer 403. Wrong once organization staff may run it.",
-  },
-  "POST /api/communities/[id]/invoice-preview": {
-    kind: "permanent",
-    reason:
-      "A preview that writes nothing: it renders the invoice settings form's unsaved state to a PDF for the person to look at, stores nothing and is answered while billing is off (its UNGATED_WRITES reason). Wrong once it stores anything.",
-  },
-  "PUT /api/communities/[id]/payment": {
-    kind: "permanent",
-    reason:
-      "A stub that always answers 409 use_organization_payment_settings and writes nothing; no page calls it. Wrong once it writes.",
   },
 
   // ── Not yet described: #278 (ACM B4), community management ──
@@ -256,6 +250,7 @@ export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
   // refuses an action on such a route (check 3), so describing one means
   // giving it a PaymentExemption first. If check 3 stops refusing a
   // plain-string exemption, revisit this note.
+  "POST /api/billing-review/preview": { kind: "not-yet-described", issue: "#310" },
   "PATCH /api/communities/[id]/invoice-config": { kind: "not-yet-described", issue: "#310" },
   "POST /api/communities/[id]/invoice-logo": { kind: "not-yet-described", issue: "#310" },
   "PUT /api/communities/[id]/payment/override": { kind: "not-yet-described", issue: "#310" },
