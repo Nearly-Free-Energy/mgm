@@ -210,7 +210,7 @@ describe("MGM bundled plugins", () => {
     ).toEqual({ ok: true });
   });
 
-  it("the operations plugin depends on community management only and owns nothing yet", () => {
+  it("the operations plugin depends on community management only and owns its two tables", () => {
     expect(OPERATIONS_PLUGIN).toMatchObject({
       core: false,
       defaultEnabled: false,
@@ -222,7 +222,7 @@ describe("MGM bundled plugins", () => {
       provides: ["investigations"],
       routes: [],
       pages: [],
-      tables: [],
+      tables: ["operations", "operation_evidence"],
     });
     // On with metering off: an investigation records metering's refusal as
     // evidence (docs/investigation-cases.md, case C14).
