@@ -1,9 +1,12 @@
 -- Re-creates the objects MGM's migrations attach to tables in schemas that
--- Supabase manages (auth, storage). A logical restore loses them: the
--- Supabase CLI's schema dump leaves those schemas out, and pg_dump writes a
--- table's triggers and policies only together with the table. Restoring the
--- migration history afterwards marks the defining migrations as applied, so
--- nothing would bring them back.
+-- Supabase manages (auth, storage), and MGM's one grant of a role to a role
+-- Supabase manages. A logical restore loses them: the Supabase CLI's schema
+-- dump leaves those schemas out, pg_dump writes a table's triggers and
+-- policies only together with the table, and roles.sql comments out every
+-- grant to a role Supabase manages (filter_roles in
+-- scripts/backup/export-database.sh). Restoring the migration history
+-- afterwards marks the defining migrations as applied, so nothing would
+-- bring them back.
 --
 -- Run it after data.sql, in the same transaction, from a checkout of the MGM
 -- release being restored (docs/runbooks/backup-and-restore.md, the logical
@@ -82,5 +85,11 @@ CREATE POLICY "invoice_logos_delete" ON storage.objects
         AND user_can_access_org(comm.org_id)
     )
   );
+
+-- From supabase/migrations/20261126160000_mgm_agent_role.sql. roles.sql
+-- creates mgm_agent, and schema.sql its grants and policy, but without this
+-- PostgREST cannot switch an agent client's token to it. A grant that is
+-- already there is left as it is.
+GRANT mgm_agent TO authenticator;
 
 RESET search_path;

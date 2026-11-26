@@ -277,7 +277,8 @@ belong to the Supabase project rather than to MGM's environment.
   / Providers › Email). The link says it works for 15 minutes.
 - **The Custom Access Token hook** (Authentication › Auth Hooks): a
   Postgres function, `public.fn_auth_access_token_hook`, which migration
-  `20261117210000` creates and `20261126090100` replaces. It refuses a token
+  `20261117210000` creates and `20261126090100` and `20261126160100`
+  replace. It refuses a token
   for a session that a password or a recovery started, new or refreshed, so
   Supabase's own password endpoints sign nobody in. For a client of the OAuth
   server it applies the rules in
@@ -328,7 +329,8 @@ MGM's table of clients (ADR-008 decision 2). So, in this order:
    `hook_custom_access_token_enabled: false`), and read the setting back
    with `GET` to check it is `false`.
 3. Only then change, replace or drop `public.fn_auth_access_token_hook`.
-   Pushing a migration that replaces it, such as `20261126090100`, counts.
+   Pushing a migration that replaces it, such as `20261126090100` or
+   `20261126160100`, counts.
 4. Turn the hook back on, if it should be, once the function is in place.
 5. If you turned the OAuth server off in step 1, turn it back on last, only
    once the hook is on again.
@@ -347,11 +349,15 @@ Supabase Auth and lists them in MGM's table, `public.mgm_clients`:
 | Client | Kind | Lists it when |
 |--------|------|---------------|
 | The CLI | `operator` | The installation wants the CLI |
-| The assistant bridge | `agent` | The release includes the assistant's database role (#274). Until then, register and list the operator client only: the hook refuses every sign-in and refresh of an `agent` client, listed or not |
+| The assistant bridge | `agent` | The installation runs the assistant bridge, and the migrations up to `20261126160100` are pushed: the hook gives an `agent` client's token the database role `mgm_agent`, which reads only what migrations grant it (`20261126160000`). Before `20261126160100` the hook refuses every sign-in and refresh of an `agent` client, listed or not |
 
 The access-token hook (above) refuses a token for a client that
 `mgm_clients` does not list, and writes the client's kind into the token as
-the `mgm_client_kind` claim. It refuses a client sign-in that asks for scope
+the `mgm_client_kind` claim. An operator client's token runs as
+`authenticated`, as a browser session's does; an agent client's runs as
+`mgm_agent`. Nothing on Supabase's side sets up that role: the migration
+creates it and grants it to `authenticator`, the role the database API
+connects as. The hook refuses a client sign-in that asks for scope
 `openid`: MGM's clients get an access token and a refresh token, and nothing
 else. A new client sign-in counts only after MGM's own consent page has
 recorded the person's approval (`public.mgm_client_approvals`, written by
@@ -423,7 +429,7 @@ on a hosted project in the SQL editor:
 INSERT INTO public.mgm_clients (client_id, kind, label)
 VALUES ('<client_id>', 'operator', 'MGM CLI');
 
--- The assistant bridge, once the release includes #274:
+-- The assistant bridge, once 20261126160100 is pushed:
 INSERT INTO public.mgm_clients (client_id, kind, label)
 VALUES ('<client_id>', 'agent', 'MGM assistant bridge');
 ```

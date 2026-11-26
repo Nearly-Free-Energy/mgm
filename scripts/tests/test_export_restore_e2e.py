@@ -435,7 +435,9 @@ SELECT jsonb_build_object(
                WHERE c.relnamespace::regnamespace::text IN ('auth', 'storage') AND NOT t.tgisinternal),
   'policies', (SELECT coalesce(jsonb_agg(schemaname || '.' || tablename || ' ' || policyname
                                          ORDER BY schemaname, tablename, policyname), '[]')
-               FROM pg_policies WHERE schemaname IN ('auth', 'storage'))
+               FROM pg_policies WHERE schemaname IN ('auth', 'storage')),
+  'authenticator_may_be_mgm_agent', (SELECT pg_has_role('authenticator', oid, 'SET')
+                                       FROM pg_roles WHERE rolname = 'mgm_agent')
 )
 """
 
@@ -754,7 +756,11 @@ class ExportRestoreEndToEndTests(unittest.TestCase):
         )
 
     def test_objects_on_supabase_managed_tables_match_the_source(self):
-        self.assertEqual(psql_json(self.target, MANAGED_OBJECTS), psql_json(self.source, MANAGED_OBJECTS))
+        source = psql_json(self.source, MANAGED_OBJECTS)
+        # The grant roles.sql leaves out (20261126160000), so it is checked
+        # to be there, not only to match.
+        self.assertIs(source["authenticator_may_be_mgm_agent"], True)
+        self.assertEqual(psql_json(self.target, MANAGED_OBJECTS), source)
 
     def test_migration_history_matches_the_source(self):
         query = "SELECT coalesce(json_agg(version ORDER BY version), '[]') FROM supabase_migrations.schema_migrations"

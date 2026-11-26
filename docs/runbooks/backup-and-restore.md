@@ -22,7 +22,7 @@ in your private operations records, not in this repository.
 | Schema and data, including Auth users and Storage object metadata | Postgres | Yes: `schema.sql`, `data.sql`. Auth sessions and refresh tokens, MFA factors and recovery codes, pending sign-in and OAuth authorization state, WebAuthn challenges, custom OAuth providers and SCIM tokens are left out ([Run an export](#run-an-export)). | Scheduled, encrypted exports |
 | Scheduled jobs (pg_cron) and queued outbound requests (pg_net) | Postgres, in schemas Supabase manages | No | MGM's payment reconciliation job is re-created at the [cutover](#keep-restore-targets-away-from-live-payments). Record any job you add yourself. |
 | MGM's triggers and policies on tables in `auth` and `storage` | Postgres, in schemas Supabase manages | No | Re-created from the release by [`supabase/scripts/restore-managed-schema-objects.sql`](../../supabase/scripts/restore-managed-schema-objects.sql) |
-| Database roles | Postgres cluster | Yes, without passwords: `roles.sql` | Keep custom login role passwords offline |
+| Database roles | Postgres cluster | Yes, without passwords: `roles.sql`. Grants to roles Supabase manages are left out; MGM's one, `mgm_agent` to `authenticator`, is re-made by [`supabase/scripts/restore-managed-schema-objects.sql`](../../supabase/scripts/restore-managed-schema-objects.sql) | Keep custom login role passwords offline |
 | Migration history | `supabase_migrations` schema | Yes: `history_schema.sql`, `history_data.sql` | Part of the export |
 | Credential encryption key | Vault secret `mgm_ems_dek` | No | An offline copy, required in addition to any password-manager entry ([dek.md](dek.md)) |
 | Payment worker URL and secret | Vault secrets `payments_worker_url`, `payments_worker_secret`; the application's `PAYMENTS_WORKER_SECRET` | No | An offline copy of the secret, in addition to any password-manager entry; the URL in your records ([payments rollout](../payments-rollout.md)) |
@@ -523,8 +523,10 @@ export holds no Vault secrets for the key to unlock.
      then sets the source's own default privileges for objects created later.
    - `restore-managed-schema-objects.sql` re-creates the triggers and policies
      MGM's migrations put on `auth` and `storage` tables, which the export
-     cannot carry. Without it, new users get no profile and the
-     `invoice-logos` bucket has no access policies.
+     cannot carry, and grants `mgm_agent` to `authenticator`, which
+     `roles.sql` leaves out. Without it, new users get no profile, the
+     `invoice-logos` bucket has no access policies, and the database API
+     refuses every assistant token.
    - The final `--command` disables merchant accounts. Include it on every
      target, a production replacement too: the target then never commits
      with merchant accounts able to start checkouts, and a production
@@ -945,6 +947,9 @@ starts only when every other item has passed.
   WHERE c.relnamespace::regnamespace::text IN ('auth', 'storage') AND NOT t.tgisinternal;
   SELECT schemaname, tablename, policyname FROM pg_policies WHERE schemaname IN ('auth', 'storage');
   ```
+
+  And `authenticator` may switch to the assistant's role: `SELECT
+  pg_has_role('authenticator', 'mgm_agent', 'SET');` answers `true`.
 
 - [ ] **Payments inactive.** `cron.job` does not list
   `mgm-payments-reconcile`, every merchant account is disabled, and the

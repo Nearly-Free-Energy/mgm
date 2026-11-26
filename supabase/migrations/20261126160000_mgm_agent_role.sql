@@ -1,0 +1,105 @@
+-- RFC #259 § 2 and decision 12, ADR-008 decisions 7 and 8, ADR-007 decision
+-- 1 (#274): the database role an assistant's token runs as.
+--
+-- An agent client (mgm_clients.kind = 'agent') is the signed-in person, but
+-- its token must not carry that person's full authority at the database
+-- API. The access-token hook (20261126160100) therefore gives an agent
+-- client's token the role mgm_agent instead of authenticated, and PostgREST
+-- switches to it as it switches to authenticated.
+--
+-- The role:
+--   * is NOLOGIN, and granted to authenticator only, so PostgREST can switch
+--     to it. It is never made a member of authenticated or of any other
+--     role, so it holds only what is granted to mgm_agent itself (or to
+--     PUBLIC).
+--   * reads no table and no column unless a migration grants it. This one
+--     grants only what every agent call needs (ADR-008 decision 7): the
+--     caller's own role rows, which the GUI host and the composers read with
+--     the caller's client, and the plugin gate.
+--   * holds no write privilege on any table, so an invoker function it can
+--     run through PUBLIC (Postgres's default for every new function) cannot
+--     write, and reads only what the role's grants allow.
+--   * may run a definer function only when that function's EXECUTE is not
+--     revoked from PUBLIC or is granted to mgm_agent. CLAUDE.md requires
+--     every definer function to revoke EXECUTE from PUBLIC, and
+--     src/lib/supabase/__tests__/agent_role.test.ts pins the definer
+--     functions the role may run, its table and column grants, and its
+--     schemas.
+--
+-- A grant to mgm_agent comes with the pull request that needs it, and that
+-- test's lists move in the same commit (CLAUDE.md). The marked views of
+-- ADR-007's first list add their loaders' grants and policy twins one pull
+-- request at a time; the tenant data and its restrictive policies come with
+-- the tenant phase (#259 D2). Nothing here edits a helper or an existing
+-- policy.
+--
+-- Roles belong to the cluster, not to the database, so on a local database
+-- reset the role may already exist. It is then checked rather than created:
+-- the migration stops if the role can log in, has an attribute it must not
+-- have, or is a member of any role.
+
+DO $$
+DECLARE
+  _problems TEXT[] := '{}';
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mgm_agent') THEN
+    CREATE ROLE mgm_agent NOLOGIN;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM pg_roles
+     WHERE rolname = 'mgm_agent'
+       AND (rolcanlogin OR rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls)
+  ) THEN
+    _problems := array_append(_problems, 'mgm_agent can log in or has an attribute it must not have');
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM pg_auth_members m
+     WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = 'mgm_agent')
+  ) THEN
+    _problems := array_append(_problems, 'mgm_agent is a member of another role');
+  END IF;
+
+  IF cardinality(_problems) > 0 THEN
+    RAISE EXCEPTION 'mgm_agent already exists and is not the role this migration creates: %',
+      array_to_string(_problems, '; ');
+  END IF;
+END;
+$$;
+
+-- PostgREST connects as authenticator and switches to the token's role.
+GRANT mgm_agent TO authenticator;
+
+-- ── The caller's own role rows ─────────────────────────────────────────────
+--
+-- The GUI host and the composers read the caller's role rows with the
+-- caller's client. Two existing policies on user_roles name no role, so they
+-- apply to mgm_agent: "Users can view their own roles" and "Super admins can
+-- manage all user_roles" (00002), which calls is_super_admin() directly as
+-- the caller. Under them alone a super admin's assistant would read every
+-- role row, so this RESTRICTIVE policy limits the role to the caller's own.
+-- user_id is then only ever the caller's, and no loader puts it into a
+-- model, so the table is granted whole (ADR-008 decision 8). It is FOR ALL
+-- so it bounds any privilege the role is ever given here, not only SELECT;
+-- the role is given none but SELECT.
+GRANT SELECT ON public.user_roles TO mgm_agent;
+
+CREATE POLICY "Agent tokens read only the caller's own role rows"
+  ON public.user_roles
+  AS RESTRICTIVE
+  FOR ALL
+  TO mgm_agent
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+-- The super-admin policy above calls it as the caller, so a read of
+-- user_roles as mgm_agent fails without it. It answers only for the caller.
+GRANT EXECUTE ON FUNCTION public.is_super_admin() TO mgm_agent;
+
+-- ── The plugin gate ────────────────────────────────────────────────────────
+--
+-- The gate and the composers ask it with the caller's client. It answers one
+-- organization's plugin on/off state for an id the caller already has
+-- (20261125120000).
+GRANT EXECUTE ON FUNCTION public.mgm_plugin_enabled_for_org(UUID, TEXT) TO mgm_agent;
