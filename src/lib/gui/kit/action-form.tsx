@@ -323,7 +323,8 @@ export function ActionForm({ spec, initial, busy, error, submit, cancel, footer,
   const set = (key: string, raw: Raw | Row[]) => setValues((prev) => ({ ...prev, [key]: raw }));
   // The route's error shows at its field: a field's key, or a row's cell ("bands.0.rate").
   const serverField = error?.field;
-  const placed = fields.some((f) => serverField === f.key || serverField?.startsWith(`${f.key}.`));
+  // A fixed field shows nothing, so an error at it is not placed: the alert below shows it.
+  const placed = fields.some((f) => f.kind !== "fixed" && (serverField === f.key || serverField?.startsWith(`${f.key}.`)));
   const errorAt = (path: string) => errors[path] ?? (serverField === path ? error!.message : undefined);
 
   const control = (field: Flat, raw: Raw, path: string, onChange: (raw: Raw) => void) => {
@@ -398,7 +399,7 @@ export function ActionForm({ spec, initial, busy, error, submit, cancel, footer,
 
   const rows = (field: Rows) => {
     const list = values[field.key] as Row[];
-    const inCell = list.some((_, i) => field.fields.some((c) => serverField === `${field.key}.${i}.${c.key}`));
+    const inCell = list.some((_, i) => field.fields.some((c) => c.kind !== "fixed" && serverField === `${field.key}.${i}.${c.key}`));
     const problem = errors[field.key] ?? (!inCell && (serverField === field.key || serverField?.startsWith(`${field.key}.`)) ? error!.message : undefined);
     const addId = `${id}-${field.key}-add`;
     const removeId = (row: Row) => `${id}-${field.key}-remove-${row.id}`;

@@ -316,6 +316,31 @@ describe("ActionForm", () => {
     expect(fieldsOf({ type: "object", properties: { v: { const: { a: 1 } } } })).toBeNull();
   });
 
+  it("shows the route's error at a fixed field, which has no control of its own to carry it", () => {
+    const flat: Json = {
+      type: "object",
+      properties: { action: { type: "string", const: "accept_exact" }, notes: { type: "string", title: "Notes" } },
+      required: ["action"],
+    };
+    mount(flat, { error: { message: "This resolution is not offered.", field: "action" } });
+    expect(screen.getByRole("alert").textContent).toBe("This resolution is not offered.");
+    cleanup();
+
+    const rows: Json = {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          minItems: 1,
+          items: { type: "object", properties: { kind: { type: "string", const: "meter" }, label: { type: "string" } }, required: ["kind"] },
+        },
+      },
+      required: ["items"],
+    };
+    mount(rows, { error: { message: "This kind is not offered.", field: "items.0.kind" } });
+    expect(screen.getByRole("alert").textContent).toBe("This kind is not offered.");
+  });
+
   it("returns null from fieldsOf for every shape it cannot render", () => {
     expect(fieldsOf({ type: "object", properties: { a: { type: "string" } }, patternProperties: {} })).toBeNull();
     expect(fieldsOf({ type: "object", properties: { a: { anyOf: [{ type: "string" }, { type: "number" }] } } })).toBeNull();

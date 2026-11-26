@@ -208,8 +208,8 @@ export const PAYMENTS_SURFACE: Contribution = {
       whilePluginOff: "enabled",
     },
     // Accepts verified receipts that come to the bill exactly, and marks it
-    // paid. Its form shows the optional amount, reference and notes too; the
-    // capability refuses an amount.
+    // paid. Its form shows only the optional reference and notes; its input
+    // has no amount field (./schemas.ts).
     {
       ...ACCEPT_RECEIPTS_ACTION,
       target: "paymentAttempt",

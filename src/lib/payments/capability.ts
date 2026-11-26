@@ -810,8 +810,10 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
         message: RECONCILE_COPY.notNeeded,
       };
     }
-    // The route parses ReconcileAttemptBody first (./schemas.ts); these
-    // checks hold for any caller.
+    // These checks are for callers other than the reconcile route, which
+    // parses ReconcileAttemptBody first (./schemas.ts): that refuses every
+    // body they would refuse, and the route passes on only { error, reason }
+    // of a refusal, not its field.
     const rec = (input ?? {}) as Record<string, unknown>;
     const action = rec.action;
     if (action !== "accept_exact" && action !== "record_external") {
@@ -836,7 +838,7 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
       };
     }
     if (action === "record_external") {
-      // The first missing field, in the form's order, so a form marks the right one.
+      // The first missing field, in the order RecordAdjustmentBody lists them.
       const amountOk = typeof rec.externalAmount === "number" && Number.isFinite(rec.externalAmount);
       const missing = !amountOk ? "externalAmount" : !externalReference ? "externalReference" : !notes ? "notes" : null;
       if (missing) {
