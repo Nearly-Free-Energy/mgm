@@ -58,4 +58,23 @@ describe("CODEOWNERS", () => {
     expect(tracked).toContain(file);
     expect(owned(file)).toBe(true);
   });
+
+  // The session resolver (RFC #259 § 2, ADR-008 decision 6): a one-line
+  // change to any file it is made of could weaken it, so every one is owned,
+  // those outside src/lib/runtime/ by lines of their own.
+  it.each([
+    "src/middleware.ts",
+    "src/lib/runtime/request-session.ts",
+    "src/lib/runtime/bearer.ts",
+    "src/lib/runtime/caller.ts",
+    "src/lib/runtime/credential.ts",
+    "src/lib/supabase/server.ts",
+    "src/lib/config/client-tokens.ts",
+    "src/lib/config/cookie-options.ts",
+    "src/lib/security/constant-time.ts",
+    "src/lib/auth/access.ts",
+  ])("owns the session resolver's %s", (file) => {
+    expect(tracked).toContain(file);
+    expect(owned(file)).toBe(true);
+  });
 });

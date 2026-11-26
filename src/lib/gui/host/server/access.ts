@@ -16,7 +16,7 @@ import "server-only";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { rolesCanAccessOrg, rolesIncludeStaff, type CurrentUserAccess } from "@/lib/auth/access";
 import { formatLocale } from "@/lib/locale";
-import { BROWSER, type Caller } from "@/lib/runtime/caller";
+import type { Caller } from "@/lib/runtime/caller";
 import type { UserRoleRecord } from "@/lib/types/domain";
 import type { Fmt, InstallationRequest, SurfaceRequest, TenantRequest } from "../../surface";
 import { tenantUnitIds } from "../shared/tenant-units";
@@ -92,11 +92,13 @@ export function hostContext(
     now?: Date;
     /**
      * Who is calling: callerOf (@/lib/runtime/caller) of the client the
-     * session was checked on. A browser session when omitted, which only
-     * the pages (cookie-only: createClient refuses them a bearer token) and
-     * tests do; a route must pass it (openHostRequest).
+     * session was checked on (openHostRequest). Required, with no default,
+     * so a new entry point cannot get a browser session by leaving it out;
+     * only the pages pass BROWSER, since they are cookie-only (middleware
+     * answers a bearer token on a page with 400, and createClient refuses
+     * one without middleware's mark).
      */
-    caller?: Caller;
+    caller: Caller;
   },
 ): { ok: true; ctx: HostContext } | HostRefusal {
   if (!access.user) {
@@ -108,7 +110,7 @@ export function hostContext(
   const locale = localeOf(headers);
   const ctx: HostContext = {
     access: Object.freeze({ user: access.user, roles: Object.freeze([...access.roles]) }),
-    caller: deps.caller ?? BROWSER,
+    caller: deps.caller,
     newClient: deps.newClient,
     locale,
     now: deps.now ?? new Date(),

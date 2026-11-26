@@ -281,9 +281,15 @@ runs, after the release allowlist:
 - the token's claims must name a client (`callerFromClaims` in
   `src/lib/runtime/caller.ts`: a uuid `client_id`, a kind, and the role
   that kind runs as; `client_id` with no kind was issued while the hook was
-  off and is refused), and Supabase Auth must answer `GET /user` for it
-  (`verifyBearer` in `src/lib/runtime/bearer.ts`), so a revoked client is
-  refused at once; otherwise `401 unauthenticated`;
+  off and is refused; a token with no `client_id` is a browser session's,
+  sent from a script, and is refused too: ADR-008's amendment of 26 Nov
+  2026), and Supabase Auth must answer `GET /user` for it (`verifyBearer`
+  in `src/lib/runtime/bearer.ts`), so a revoked client is refused at once;
+  otherwise `401 unauthenticated`. When Auth does not answer within five
+  seconds, cannot be reached, or answers with an error of its own (a `5xx`
+  or `429`), the request is `503 auth_unavailable` instead, still refused,
+  so the client can tell an outage from a dead token and try again rather
+  than sign in again;
 - an agent client may call only `AGENT_ROUTES`
   (`src/lib/runtime/agent-routes.ts`): `GET /api/gui/catalog` and
   `GET /api/gui/view`. Every other request, whatever its method, public
@@ -307,7 +313,12 @@ mark, it builds a client that sends the token as its global `Authorization`
 header, so PostgREST runs as the person and `auth.getUser()` asks Supabase
 Auth about the token: every `getUser()`-backed check (`getCurrentUserAccess`,
 `authorizeOrganization`, `authorizeTenant`, the composers) works unchanged
-and refuses a revoked client too. A bearer token without a matching mark
+and refuses a revoked client too. That holds only while Supabase Auth's
+`GET /user` answers a client's token, which v2.198.0 marks as a temporary
+exception. When an Auth version stops answering it, every bearer request is
+refused, closed, at middleware and at these checks, until `verifyBearer` and
+these checks move to `GET /oauth/userinfo` (ADR-008 decision 6;
+`docs/setup.md` tells an operator what that looks like). A bearer token without a matching mark
 throws, and so does any bearer token while `MGM_CLIENT_TOKENS` is off: a
 second fence for pages and for any page or route the middleware matcher
 skips, where nothing removes a mark the client set, which therefore never
@@ -338,9 +349,27 @@ agent client gets less (`src/lib/gui/host/server/agent.ts`):
   views) is settled first.
 
 An operator client holds the person's access: nothing grants or refuses
-anything by that kind. A new `/api` route is open to operator clients, like
-a browser session, and closed to agent clients unless it is added to
-`AGENT_ROUTES`, which is a change to what an assistant can reach.
+anything by that kind. For a new `/api` route:
+
+- It is open to operator clients, like a browser session, and closed to
+  agent clients unless it is added to `AGENT_ROUTES`, which is a change to
+  what an assistant can reach.
+- A route that must take only a browser session refuses clients itself:
+  it builds its client with `createClient` and answers `403` unless
+  `callerOf(client).kind === "browser"`, before it reads anything, with a
+  test that an operator client's token is refused. Recording the person's
+  approval of a client (ADR-008 decision 2) is one; ending another person's
+  client (decision 5) is likely another. Middleware does not know which
+  routes these are.
+- A webhook, worker or other caller with no MGM session cannot
+  authenticate with `Authorization: Bearer <secret>`. Middleware reads any
+  bearer header on a released path as a client token, public paths
+  included, and refuses it (`401`, or `403 client_tokens_off`) before the
+  route runs; a scheduler that sends its secret that way, such as a Vercel
+  Cron job, never reaches the route. Such a route takes its secret in a
+  header of its own, as the payments worker does
+  (`x-payments-worker-secret`), and compares it with `secretMatches`
+  (`@/lib/security/constant-time`).
 
 ## GUI surface
 

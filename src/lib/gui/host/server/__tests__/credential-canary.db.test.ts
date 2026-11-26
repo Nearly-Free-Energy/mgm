@@ -73,6 +73,7 @@ import {
   type Canary,
   type CanaryIds,
 } from "./credential-canary";
+import { BROWSER } from "@/lib/runtime/caller";
 
 const IDS: CanaryIds = {
   orgId: "e7400000-0000-4000-8000-000000000001",
@@ -121,6 +122,7 @@ const contextOf = (user: TestUser, email: string, rows: UserRoleRecord[]) => {
   const made = hostContext({ user: { id: user.userId, email } as User, roles: rows }, new Headers({ "accept-language": "en" }), {
     newClient: async () => user.client,
     makeFmt: (locale) => createFmt({ locale }),
+    caller: BROWSER,
   });
   if (!made.ok) throw new Error("canary context refused");
   return made.ctx;

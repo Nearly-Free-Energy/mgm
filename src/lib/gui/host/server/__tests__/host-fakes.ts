@@ -1,6 +1,6 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { vi } from "vitest";
-import type { Caller } from "@/lib/runtime/caller";
+import { BROWSER, type Caller } from "@/lib/runtime/caller";
 import type { UserRoleRecord } from "@/lib/types/domain";
 import type { Fmt } from "../../../surface";
 import { hostContext, type HostContext } from "../access";
@@ -87,7 +87,7 @@ export function contextFor(
     newClient,
     makeFmt: () => fakeFmt,
     now: new Date("2026-11-09T08:00:00Z"),
-    ...(caller ? { caller } : {}),
+    caller: caller ?? BROWSER,
   });
   if (!made.ok) throw new Error("fixture context refused");
   return made.ctx;
