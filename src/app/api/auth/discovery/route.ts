@@ -24,17 +24,9 @@ import { appUrl } from "@/lib/config/app-url";
 import { checkRateLimit } from "@/lib/rate-limit/in-memory";
 import { requestIp } from "@/lib/auth/sign-in-link";
 import { CODE_PATH } from "@/lib/auth/client-consent";
+import type { DiscoveryAnswer } from "@/lib/auth/discovery-answer";
 
 const NO_STORE = { "Cache-Control": "no-store" };
-
-type DiscoveryAnswer = {
-  supabase_url: string;
-  supabase_anon_key: string;
-  authorize_url: string;
-  token_url: string;
-  redirect_uri: string;
-  clients: { client_id: string; kind: "operator" | "agent" }[];
-};
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const burst = checkRateLimit(`auth-discovery:${requestIp(request.headers) ?? "unknown"}`, 60, 60_000);

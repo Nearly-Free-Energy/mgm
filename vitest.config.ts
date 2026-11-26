@@ -150,6 +150,7 @@ export default defineConfig({
             "src/app/api/auth/oauth/approvals/__tests__/sign-in.db.test.ts",
             "src/app/api/auth/logout/__tests__/logout.db.test.ts",
             "src/lib/runtime/__tests__/bearer-session.db.test.ts",
+            "packages/mgm-cli/src/__tests__/cli.db.test.ts",
             "src/app/api/users/[id]/resend-invite/__tests__/rls-route.test.ts",
             "src/app/api/users/invite/__tests__/rls-route.test.ts",
             "src/app/api/gui/view/__tests__/site-day.db.test.ts",
@@ -175,6 +176,17 @@ export default defineConfig({
           ],
           environment: "node",
           fileParallelism: false,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "cli",
+          // The mgm command line (packages/mgm-cli). Its test against a real
+          // installation runs in the "rls" project.
+          include: ["packages/mgm-cli/**/*.test.ts"],
+          exclude: ["packages/mgm-cli/**/*.db.test.ts"],
+          environment: "node",
         },
       },
       {

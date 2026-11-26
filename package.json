@@ -18,6 +18,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "mgm": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON packages/mgm-cli/src/mgm.ts",
     "gui:styles:watch": "node scripts/gui/build-stylesheets.mjs --dev --watch",
     "db:types": "sh scripts/db-types.sh write",
     "db:types:linked": "sh scripts/db-types.sh print",
