@@ -39,7 +39,8 @@ import "server-only";
  * The positions are found by property name, as parse.ts finds hrefs, and
  * assistant-references.test.ts walks the model and signal schemas
  * (./model-schema.ts) and fails if an EntityRef or href sits under another
- * name, or an EntityRef under `ref` on anything but the `t: "ref"` Value.
+ * name, an EntityRef under `ref` on anything but the `t: "ref"` Value, or
+ * one under `related` anywhere but an element of the array it holds.
  * If a model shape gains one there, ASSISTANT_REFUSED_KINDS or
  * ASSISTANT_READING changes, or a view whose segments are all allowed
  * declares a `query` parameter naming a tenant, device, billing or payment
