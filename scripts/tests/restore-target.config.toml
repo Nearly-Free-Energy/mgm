@@ -35,7 +35,7 @@ enabled = false
 [studio]
 enabled = false
 
-[inbucket]
+[local_smtp]
 enabled = false
 
 [edge_runtime]

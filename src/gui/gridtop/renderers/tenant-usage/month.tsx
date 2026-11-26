@@ -15,7 +15,8 @@
  * meter" with no fill; a future day prints its number alone and links
  * nowhere.
  */
-import type { GuiKit, Value } from "@/lib/gui/contract";
+import type { Value } from "@/lib/gui/contract";
+import type { GuiKit } from "@/lib/gui/contract-react";
 import { cls, type MonthDay, type MonthExt, type Row, type UsageState } from "./ext";
 import { Figure } from "./parts";
 

@@ -98,6 +98,20 @@ else
     fi
 
     check_command "supabase" "brew install supabase/tap/supabase"
+
+    # supabase/config.toml is written for CLI 3 ([local_smtp], [auth.email]
+    # enabled), and 3.4.0, the version package-lock.json pins, runs the Auth
+    # version ADR-008 needs. An older 2.x CLI can start the stack without a
+    # word, on an older Auth. If the pin in package-lock.json moves, move
+    # this floor and docs/setup.md's with it.
+    supabase_version=$(supabase --version 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)
+    supabase_major=${supabase_version%%.*}
+    supabase_minor=${supabase_version#*.}; supabase_minor=${supabase_minor%%.*}
+    if [ -z "$supabase_version" ] || [ "$supabase_major" -lt 3 ] || { [ "$supabase_major" -eq 3 ] && [ "$supabase_minor" -lt 4 ]; }; then
+      err "Supabase CLI ${supabase_version:-of unknown version} is older than 3.4.0, which this repository needs."
+      err "  Upgrade: brew upgrade supabase (docs/setup.md, \"Upgrading to Supabase CLI 3\")"
+      exit 1
+    fi
   fi
 fi
 
@@ -278,7 +292,7 @@ ENVEOF
   log ""
   log "  App:         http://localhost:3000"
   log "  Studio:      http://127.0.0.1:54323"
-  log "  Inbucket:    http://127.0.0.1:54324"
+  log "  Mailpit:     http://127.0.0.1:54324"
   log "  Database:    postgresql://postgres:postgres@127.0.0.1:54322/postgres"
   log ""
   log "  Sign in as:  admin@example.org (email link; docs/setup.md)"

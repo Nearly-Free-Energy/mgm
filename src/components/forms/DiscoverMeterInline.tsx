@@ -11,8 +11,10 @@
  *     the wizard via `onDevicePersisted` so the parent can append it to
  *     `availableMeters` and auto-select it
  *   - errors are owned + rendered inline (no `onError` callback)
- *   - components the route skipped because MGM cannot store their id
- *     (`skipped` in the response) are named in a note, as in `<DiscoverDevices>`
+ *   - consumption meters the route skipped because MGM cannot store their id
+ *     (`skipped` in the response, by its `suggestedDeviceType`) are named in a
+ *     note; skipped components of other types are left out of it, since this
+ *     surface offers only consumption meters (`<DiscoverDevices>` names all)
  *   - both fetches are guarded by a single AbortController so that an
  *     in-flight request doesn't leak results into a re-mounted instance
  *     (the wizard re-mounts on `state.no_meter` toggle via `key={…}`)
@@ -60,6 +62,9 @@ type Props = {
 };
 
 type Phase = "idle" | "discovering" | "ready" | "saving";
+
+/** The one device type this surface offers, and names when skipped. */
+const OFFERED_TYPE = "consumption_meter";
 
 /**
  * Sort edges by (name, id) ascending — name first, id as a deterministic
@@ -131,9 +136,16 @@ export function DiscoverMeterInline({
   const candidates = React.useMemo(
     () =>
       discovered.filter(
-        (d) => d.suggestedDeviceType === "consumption_meter" && d.alreadyAdded !== true
+        (d) => d.suggestedDeviceType === OFFERED_TYPE && d.alreadyAdded !== true
       ),
     [discovered]
+  );
+
+  // Only the skipped components this surface would have offered: a skipped
+  // battery or inverter is no meter left out.
+  const skippedMeters = React.useMemo(
+    () => skipped.filter((s) => s.suggestedDeviceType === OFFERED_TYPE),
+    [skipped]
   );
 
   const handleDiscover = React.useCallback(async () => {
@@ -361,14 +373,14 @@ export function DiscoverMeterInline({
         </div>
       )}
 
-      {showResults && edgeOnline && skipped.length > 0 && (
+      {showResults && edgeOnline && skippedMeters.length > 0 && (
         <p className="rounded-md border border-border bg-muted p-3 text-caption text-muted-foreground">
-          Not listed: {skipped.length} component
-          {skipped.length !== 1 ? "s" : ""} whose OpenEMS id MGM cannot store
-          (ids are 1 to 64 letters, digits, &apos;_&apos;, &apos;.&apos;,
+          Not listed: {skippedMeters.length} consumption meter
+          {skippedMeters.length !== 1 ? "s" : ""} whose OpenEMS id MGM cannot
+          store (ids are 1 to 64 letters, digits, &apos;_&apos;, &apos;.&apos;,
           &apos;:&apos; or &apos;-&apos;):{" "}
           <span className="font-mono break-all">
-            {skipped.map((s) => s.componentId).join(", ")}
+            {skippedMeters.map((s) => s.componentId).join(", ")}
           </span>
         </p>
       )}
@@ -382,9 +394,9 @@ export function DiscoverMeterInline({
           already true in that branch (it is guarded by `edgeOnline`, and
           discovery returned devices). That sent a pilot operator to rename his
           meter to contain a keyword, when the device-type control has existed
-          since #151. When discovery skipped components (the note above), the
-          edge is reachable and configured, so the first branch leaves that
-          hint out too. */}
+          since #151. When discovery skipped components of any type, the edge
+          is reachable and configured, so the first branch leaves that hint
+          out too, even when the note above names none of them. */}
       {showResults && edgeOnline && candidates.length === 0 && (
         discovered.length === 0 ? (
           <p className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">

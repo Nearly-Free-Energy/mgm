@@ -2,7 +2,8 @@ import { act as flush, fireEvent, render, renderHook, screen } from "@testing-li
 import type { MouseEvent, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { kit } from "@/lib/gui/kit";
-import type { EntityRef, GuiKit, InitialView, Manifest, NavEntry } from "../../../contract";
+import type { EntityRef, InitialView, Manifest, NavEntry } from "../../../contract";
+import type { GuiKit } from "../../../contract-react";
 import { KitProvider, useManifest, useView } from "../kit-provider";
 import { defaultRuntime, KitRuntimeProvider } from "../kit-runtime";
 import { Link, useUiParam } from "../navigation";

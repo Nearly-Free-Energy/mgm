@@ -4,7 +4,8 @@
  */
 import { Fragment, useEffect, useLayoutEffect, useMemo, type ReactNode } from "react";
 import { describe, expect, it } from "vitest";
-import type { ActionRef, GuiMeta, GuiPlugin, OverlayProps, ViewModel, ViewProps } from "../../contract";
+import type { ActionRef, GuiMeta, ViewModel, ViewProps } from "../../contract";
+import type { GuiPlugin, OverlayProps } from "../../contract-react";
 import { kit, Overlay } from "../../kit";
 import { CHECKS, type CheckId, type CheckOptions, type Finding } from "../checks";
 import { CHECK_TIMEOUT_MS, registerConformance } from "../describe";
