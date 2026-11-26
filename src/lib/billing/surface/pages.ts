@@ -34,8 +34,11 @@ type PageRead = { data: unknown; error: unknown; count?: number | null };
 
 /**
  * Every row, in pages by id (keyset): each page starts after the last id of
- * the one before, so a row written between pages is neither skipped nor read
- * twice. Use it with pageAfter for any read that is summed, such as bills.
+ * the one before, so no row is read twice, and a row that stays put is never
+ * skipped, whatever is written between pages. A row inserted between pages
+ * is read only if its id sorts after the last one read: ids are random
+ * UUIDs, so it may be missed, as a row inserted after the read would be.
+ * Use it with pageAfter for any read that is summed, such as bills.
  */
 export async function readAllPages<T extends { id: string }>(read: (afterId: string | null) => PromiseLike<PageRead>): Promise<T[] | null> {
   const out: T[] = [];

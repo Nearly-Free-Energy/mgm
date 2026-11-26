@@ -757,6 +757,17 @@ describe("billing.generate-from-meters' prepare", () => {
     expect(await prepareGenerate(generateTables(o).client)).toEqual(refusal);
   });
 
+  it("reads the tenants in pages by id, as it counts them, and names them in name order", async () => {
+    const tenants = [genTenant(1, [link()]), genTenant(19, []), genTenant(17, []), { ...genTenant(18, []), display_name: "Akello Grace" }];
+    const { client, calls } = generateTables({ tenants, bills: [] });
+    const out = await prepareGenerate(client);
+    if (!out.ok) throw new Error(out.message);
+    const tenantRead = calls.find((c) => c.table === "tenants")!.ops;
+    expect(tenantRead).toContainEqual(["order", ["id"]]);
+    expect(tenantRead.some(([op]) => op === "range")).toBe(false);
+    expect(out.model.warnings[0]).toBe("No meter for this period, so not billed: Akello Grace, Unit 17, Unit 19.");
+  });
+
   it("names the first five tenants with no meter, then counts the rest", async () => {
     const tenants = [genTenant(1, [link()]), ...[11, 12, 13, 14, 15, 16, 17].map((n) => genTenant(n, []))];
     const out = await prepareGenerate(generateTables({ tenants, bills: [] }).client);

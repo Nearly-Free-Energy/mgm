@@ -432,25 +432,28 @@ export async function prepareGenerateFromMeters(
         after,
       ),
     ),
-    // As the engine reads them: every tenant of the microgrid, with its primary links.
-    readAllPagesInOrder<{ id: string; display_name: string; tenant_devices: PrimaryMeterLink[] | null }>((from, to) =>
-      req.supabase
-        .from("tenants")
-        .select("id, display_name, tenant_devices(role, effective_from, effective_to, devices(openems_component_id, edges(openems_edge_id)))", {
-          count: "exact",
-        })
-        .eq("microgrid_id", period.microgrid_id)
-        .eq("tenant_devices.role", "primary_consumption_meter")
-        .order("display_name")
-        .order("id")
-        .range(from, to),
+    // As the engine reads them: every tenant of the microgrid, with its
+    // primary links, in pages by id, since they are counted; put in name
+    // order below for the names the confirmation lists.
+    readAllPages<{ id: string; display_name: string; tenant_devices: PrimaryMeterLink[] | null }>((after) =>
+      pageAfter(
+        req.supabase
+          .from("tenants")
+          .select("id, display_name, tenant_devices(role, effective_from, effective_to, devices(openems_component_id, edges(openems_edge_id)))", {
+            count: "exact",
+          })
+          .eq("microgrid_id", period.microgrid_id)
+          .eq("tenant_devices.role", "primary_consumption_meter"),
+        after,
+      ),
     ),
   ]);
   if (bills === null || tenants === null) return GENERATE_REFUSALS.unavailable;
 
+  const byName = [...tenants].sort((a, b) => a.display_name.localeCompare(b.display_name, req.locale) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const r = generateReadiness(
     period,
-    tenants.map((t) => ({ id: t.id, display_name: t.display_name, primaryLinks: t.tenant_devices ?? [] })),
+    byName.map((t) => ({ id: t.id, display_name: t.display_name, primaryLinks: t.tenant_devices ?? [] })),
     bills,
   );
   if (r.fromMeters === 0) return GENERATE_REFUSALS.nothingToRead;
