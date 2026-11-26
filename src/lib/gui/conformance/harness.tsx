@@ -6,7 +6,8 @@
  */
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import type { ActionRef, GuiPlugin, Href, LinkRef, ShellProps, ViewModel } from "../contract";
+import type { ActionRef, Href, LinkRef, ViewModel } from "../contract";
+import type { GuiPlugin, ShellProps } from "../contract-react";
 import { KitProvider } from "../host/client/kit-provider";
 import { KitRuntimeProvider, type KitRuntime } from "../host/client/kit-runtime";
 import { ViewUnavailable } from "../host/client/view-boundary";

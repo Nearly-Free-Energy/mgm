@@ -6,7 +6,8 @@
  * GUI built against that version cannot know the kind. Pure: the caller
  * maps "raw" to RawView, so this module imports no client code.
  */
-import { GUI_KINDS_SINCE, type GuiPlugin, type Id, type SyncComponent, type ViewModel, type ViewProps } from "../../contract";
+import { GUI_KINDS_SINCE, type Id, type ViewModel, type ViewProps } from "../../contract";
+import { type GuiPlugin, type SyncComponent } from "../../contract-react";
 import { compareVersions, parseCaretRange } from "./contract-range";
 
 export type RendererChoice =

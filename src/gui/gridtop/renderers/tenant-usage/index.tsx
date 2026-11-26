@@ -10,7 +10,8 @@
  * ../site-day/index.tsx says.
  */
 import { lazy, Suspense } from "react";
-import type { SyncNode, ViewProps } from "@/lib/gui/contract";
+import type { ViewProps } from "@/lib/gui/contract";
+import type { SyncNode } from "@/lib/gui/contract-react";
 import { kit } from "@/lib/gui/kit";
 
 const MonthView = lazy(() => import("./renderer").then((m) => ({ default: m.UsageMonthView })));

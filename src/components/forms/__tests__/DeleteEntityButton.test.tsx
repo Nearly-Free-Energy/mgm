@@ -8,6 +8,8 @@
 //       banner renders; a new attempt first reports null.
 //   (c) A preview refused because the entity holds kept billing (409) shows
 //       the reason and opens no dialog.
+//   (d) The DELETE carries the name the dialog asked for, typed, which the
+//       community and microgrid routes require.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
@@ -94,5 +96,38 @@ describe("DeleteEntityButton preview errors", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain(reason);
     expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+});
+
+describe("DeleteEntityButton delete", () => {
+  it("(d) sends the name the dialog asked for as the typed confirmation", async () => {
+    const ID = "22222222-2222-4222-8222-222222222222";
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "GET") {
+        return new Response(
+          JSON.stringify({
+            entity: { id: ID, name: "Kiwafu" },
+            descendant_counts: { kind: "microgrid" },
+            as_of: "2026-11-25T00:00:00Z",
+            parent: { kind: "community", id: "33333333-3333-4333-8333-333333333333" },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DeleteEntityButton entity="microgrid" id={ID} name="Kiwafu" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /delete microgrid/i }));
+    const input = await screen.findByLabelText("Type microgrid name to confirm");
+    fireEvent.change(input, { target: { value: "Kiwafu" } });
+    fireEvent.click(screen.getByRole("button", { name: "Delete microgrid" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe(`/api/microgrids/${ID}`);
+    expect(init.method).toBe("DELETE");
+    expect(JSON.parse(init.body as string)).toEqual({ confirmation: { acknowledged: [], typed: "Kiwafu" } });
   });
 });

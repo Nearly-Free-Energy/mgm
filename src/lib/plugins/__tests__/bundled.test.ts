@@ -7,6 +7,8 @@ import {
   METERING_PLUGIN,
   METERING_PLUGIN_NAME,
   MGM_BUNDLED_PLUGINS,
+  OPERATIONS_PLUGIN,
+  OPERATIONS_PLUGIN_NAME,
   ORGANIZATION_DIRECTORY_PLUGIN_NAME,
   PAYMENTS_PLUGIN_NAME,
   PESAPAL_PLUGIN_NAME,
@@ -21,7 +23,7 @@ import {
 } from "../bundled";
 
 describe("MGM bundled plugins", () => {
-  it("defaults missing state rows to enabled, except the tenant app's", () => {
+  it("defaults missing state rows to enabled, except the tenant app's and the operations plugin's", () => {
     const statuses = resolvePluginStatuses();
     expect(
       statuses.map((status) => [status.plugin.name, status.enabled, status.ready])
@@ -33,11 +35,12 @@ describe("MGM bundled plugins", () => {
       [PAYMENTS_PLUGIN_NAME, true, true],
       [PESAPAL_PLUGIN_NAME, true, true],
       [TENANT_APP_PLUGIN_NAME, false, true],
+      [OPERATIONS_PLUGIN_NAME, false, true],
     ]);
   });
 
-  it("lists the tenant app as the one plugin off by default", () => {
-    expect(DEFAULT_OFF_PLUGIN_NAMES).toEqual([TENANT_APP_PLUGIN_NAME]);
+  it("lists the tenant app and the operations plugin as the plugins off by default", () => {
+    expect(DEFAULT_OFF_PLUGIN_NAMES).toEqual([TENANT_APP_PLUGIN_NAME, OPERATIONS_PLUGIN_NAME]);
   });
 
   it("turns the tenant app on only from a state row", () => {
@@ -205,6 +208,70 @@ describe("MGM bundled plugins", () => {
         },
       })
     ).toEqual({ ok: true });
+  });
+
+  it("the operations plugin depends on community management only and owns nothing yet", () => {
+    expect(OPERATIONS_PLUGIN).toMatchObject({
+      core: false,
+      defaultEnabled: false,
+      displayName: "Investigations",
+      // The description is where an operator reads that nothing uses the
+      // plugin yet; rewrite this with it when investigations ship.
+      description: expect.stringContaining("Nothing uses this plugin yet"),
+      dependencies: [COMMUNITY_MANAGEMENT_PLUGIN_NAME],
+      provides: ["investigations"],
+      routes: [],
+      pages: [],
+      tables: [],
+    });
+    // On with metering off: an investigation records metering's refusal as
+    // evidence (docs/investigation-cases.md, case C14).
+    expect(
+      validatePluginToggle({
+        pluginName: OPERATIONS_PLUGIN_NAME,
+        enabled: true,
+        states: {
+          [METERING_PLUGIN_NAME]: { enabled: false },
+          [BILLING_PLUGIN_NAME]: { enabled: false },
+          [PAYMENTS_PLUGIN_NAME]: { enabled: false },
+          [PESAPAL_PLUGIN_NAME]: { enabled: false },
+        },
+      })
+    ).toEqual({ ok: true });
+    expect(
+      validatePluginToggle({
+        pluginName: OPERATIONS_PLUGIN_NAME,
+        enabled: true,
+        states: { [COMMUNITY_MANAGEMENT_PLUGIN_NAME]: { enabled: false } },
+      })
+    ).toEqual({
+      ok: false,
+      code: "plugin_dependency_disabled",
+      message: expect.stringContaining("Community management"),
+    });
+  });
+
+  it("lets community management be turned off while the operations plugin has no row, and not while it is on", () => {
+    const othersOff = {
+      [METERING_PLUGIN_NAME]: { enabled: false },
+      [BILLING_PLUGIN_NAME]: { enabled: false },
+      [PAYMENTS_PLUGIN_NAME]: { enabled: false },
+      [PESAPAL_PLUGIN_NAME]: { enabled: false },
+    };
+    expect(
+      validatePluginToggle({ pluginName: COMMUNITY_MANAGEMENT_PLUGIN_NAME, enabled: false, states: othersOff })
+    ).toEqual({ ok: true });
+    expect(
+      validatePluginToggle({
+        pluginName: COMMUNITY_MANAGEMENT_PLUGIN_NAME,
+        enabled: false,
+        states: { ...othersOff, [OPERATIONS_PLUGIN_NAME]: { enabled: true } },
+      })
+    ).toEqual({
+      ok: false,
+      code: "plugin_dependency_required",
+      message: expect.stringContaining("Investigations"),
+    });
   });
 
   it("payments depends on billing; pesapal depends on payments", () => {
@@ -385,6 +452,7 @@ describe("plugin aliases", () => {
       [PAYMENTS_PLUGIN_NAME, "payments"],
       [PESAPAL_PLUGIN_NAME, "pesapal"],
       [TENANT_APP_PLUGIN_NAME, "tenant"],
+      [OPERATIONS_PLUGIN_NAME, "operations"],
     ]);
   });
 

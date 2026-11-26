@@ -46,8 +46,8 @@ jobs:
     # Pull the Supabase service images from GHCR, not the CLI default
     # (public.ecr.aws), which rejects anonymous pulls from shared runner
     # IPs with "toomanyrequests: Data limit exceeded". The CLI reads
-    # SUPABASE_INTERNAL_IMAGE_REGISTRY (internal/utils/docker.go,
-    # GetRegistry); see docs/adr/ADR-004-ci-supabase-image-source.md. It is
+    # SUPABASE_INTERNAL_IMAGE_REGISTRY (apps/cli/src/command-internal/
+    # docker-registry.ts); see docs/adr/ADR-004-ci-supabase-image-source.md. It is
     # set for the whole job because every CLI command that creates a
     # container resolves the image through it: `supabase start`, for the
     # export-and-restore test's restore target too, and `supabase db reset`

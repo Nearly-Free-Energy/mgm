@@ -18,7 +18,8 @@
  * added, measure the budgets again.
  */
 import { useId, useState } from "react";
-import type { ActionRef, GuiKit, Href, LinkRef, ModelOf, SyncNode, Tone, ViewModel, ViewProps } from "@/lib/gui/contract";
+import type { ActionRef, Href, LinkRef, ModelOf, Tone, ViewModel, ViewProps } from "@/lib/gui/contract";
+import type { GuiKit, SyncNode } from "@/lib/gui/contract-react";
 import { BatteryChart } from "./battery-chart";
 import { DAY_LINKS, DayPicker } from "./day-picker";
 import { EveningStrip } from "./evening-strip";

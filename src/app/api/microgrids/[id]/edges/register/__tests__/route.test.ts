@@ -5,6 +5,8 @@
  *   - 400 bad UUID / empty body / malformed entries
  *   - openems_edge_id format: trimmed and stored; outside the pattern → 400
  *     `invalid_edge_id`, naming the refused id
+ *   - the same openems_edge_id twice, after trimming → 400 `duplicate_edge_id`,
+ *     naming it, before any read
  *   - 403 on RLS violation
  *   - 401 without a signed-in user, before the synthetic-id refusal
  *   - 400 for a reserved SYNTHETIC-EDGE- id unless MGM_METERING_FIXTURES is on
@@ -325,6 +327,66 @@ describe("POST /api/microgrids/[id]/edges/register", () => {
       const json = await res.json();
       expect(json.openems_edge_id).toBe("x".repeat(100));
       expect(json.error).toContain(`'${"x".repeat(100)}'`);
+    });
+  });
+
+  describe("the same openems_edge_id twice", () => {
+    it.each([
+      ["identical", "edge0", "edge0"],
+      ["only spaces apart", "edge0", " edge0"],
+      ["both padded", "  edge0", "edge0\t"],
+    ])(
+      "refuses two entries that are %s with 400 duplicate_edge_id before any read",
+      async (_label, first, second) => {
+        const { POST } = await import("../route");
+        const res = await POST(
+          makeReq({
+            edges: [
+              { openems_edge_id: first, name: "Edge A" },
+              { openems_edge_id: "edge1", name: "Edge 1" },
+              { openems_edge_id: second, name: "Edge B" },
+            ],
+          }),
+          { params: Promise.resolve({ id: MG_ID }) }
+        );
+        expect(res.status).toBe(400);
+        const json = await res.json();
+        expect(json.reason).toBe("duplicate_edge_id");
+        expect(json.field).toBe("openems_edge_id");
+        expect(json.openems_edge_id).toBe("edge0");
+        expect(json.error).toContain("'edge0'");
+        expect(mockGetUser).not.toHaveBeenCalled();
+        expect(gateRoute).not.toHaveBeenCalled();
+        expect(mockFrom).not.toHaveBeenCalled();
+      }
+    );
+
+    it("compares ids as stored, so case apart is two edges", async () => {
+      registerFrom(() => ({
+        select: () => ({ eq: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) }),
+      }));
+      const upsert = vi.fn(() => ({
+        select: () => Promise.resolve({ data: [], error: null }),
+      }));
+      registerFrom(() => ({ upsert }));
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeReq({
+          edges: [
+            { openems_edge_id: "Edge0", name: "Upper" },
+            { openems_edge_id: "edge0", name: "Lower" },
+          ],
+        }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+      expect(res.status).toBe(200);
+      expect(upsert).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({ openems_edge_id: "Edge0" }),
+          expect.objectContaining({ openems_edge_id: "edge0" }),
+        ],
+        { onConflict: "microgrid_id,openems_edge_id" }
+      );
     });
   });
 });
