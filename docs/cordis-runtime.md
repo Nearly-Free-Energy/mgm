@@ -312,12 +312,12 @@ key is a 400.
 - `GET /api/gui/manifest?path=<page>&org=<id>` answers the manifest the
   (gui) layout renders, from the same `buildManifest`, with the interface
   `MGM_GUI` selects and the same hints, in this order: the organization of
-  the records `path` (a released page on this site) names, then `org`, else
-  the `?org=` of `path`, then the org cookie, and failing all of them the
-  person's first organization. As on the page, a hint naming an
-  organization the person cannot see is passed over, so such an `org`
-  answers another organization's manifest where the catalog below answers
-  404, and a path's records outrank `org`. A person who sees no
+  the records `path` (a released page on this site) names, then `org` (or,
+  only when `org` is absent, the `?org=` of `path`), then the org cookie,
+  and failing all of them the person's first organization. As on the
+  page, a hint naming an organization the person cannot see is passed
+  over, so such an `org` answers another organization's manifest where
+  the catalog below answers 404, and a path's records outrank `org`. A person who sees no
   organization but holds a unit gets the tenant manifest, whose `org` is a
   unit, whatever `org` says. A client that asks for one organization, such
   as `mgm places --org`, checks `manifest.org.id` against it. Views reach

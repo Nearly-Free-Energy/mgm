@@ -18,7 +18,7 @@ import "server-only";
  * ./input-spec.ts: so strict objects, and no z.json()), since the host
  * serves that schema (describeInput) and an empty one describes nothing,
  * and whose root is an object with properties (hasRootProperties there),
- * since describeInput removes bound fields and `confirmation` from there
+ * since describeInput removes bound fields and `confirmation` from the root
  * alone, each refusal naming the action's id;
  * examples against the model schemas and the declared keys, and a
  * watcher's examples against the signal schema; no
