@@ -23,6 +23,9 @@
  *   (e) a save that returns after another edge was picked hands the meter
  *       to the wizard, but leaves the other edge's list and pick alone: a
  *       device there with the same component id is not saved
+ *   (f) and so does one that returns after the operator picked another edge
+ *       and then the first again: the list was cleared, so the picker does
+ *       not say the edge has no new meter
  *
  * Devices found, none classified as a consumption meter: the message says
  * that none can bill a tenant, and in the singular that it cannot.
@@ -41,8 +44,8 @@ import type {
 } from "@/lib/openems/types";
 
 // The edge picker, drawn only for two edges or more, as a native select:
-// Radix Select opens on pointer events jsdom does not carry. Only (e) uses
-// two edges.
+// Radix Select opens on pointer events jsdom does not carry. Only (e) and
+// (f) use two edges.
 vi.mock("@/components/ui/select", async () => {
   const { createElement, Fragment } = await import("react");
   type Children = { children?: React.ReactNode };
@@ -418,5 +421,59 @@ describe("DiscoverMeterInline — a meter saved from the picker", () => {
     expect(
       (fetchMock.mock.calls as FetchCall[]).filter(([url]) => String(url).includes(OTHER_EDGE.id))
     ).toHaveLength(1);
+  });
+
+  it("(f) leaves the picker alone when a save returns after the operator picked another edge and then the first again", async () => {
+    const OTHER_EDGE = { id: "edge-2", name: "Workshop Pi", openems_edge_id: "edge2" };
+    let answerSave!: (res: Response) => void;
+    fetchMock.mockImplementation(((url: string) => {
+      if (url === "/api/devices") {
+        return new Promise<Response>((resolve) => {
+          answerSave = resolve;
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ edgeId: "edge1", online: true, devices: [meter("meter0")] }),
+      } as Response);
+    }) as never);
+    render(
+      <DiscoverMeterInline
+        edges={[EDGE, OTHER_EDGE]}
+        edgeIdsWithoutConsumptionMeter={[EDGE.id, OTHER_EDGE.id]}
+        microgridId="mg-1"
+        onDevicePersisted={onDevicePersisted}
+      />
+    );
+    const edgeSelect = screen.getByRole("combobox", { name: "Edge" }) as HTMLSelectElement;
+
+    // Save meter0 on the first edge; the save is still running...
+    fireEvent.click(screen.getByRole("button", { name: /Discover meters/i }));
+    await waitFor(() => expect(screen.getAllByRole("radio")).toHaveLength(1));
+    fireEvent.click(screen.getByRole("radio"));
+    fireEvent.click(screen.getByRole("button", { name: /Save & select/i }));
+    await waitFor(() => expect(devicePosts()).toHaveLength(1));
+
+    // ...when the operator picks the other edge, then the first again, which
+    // clears the list with no discovery since.
+    fireEvent.change(edgeSelect, { target: { value: OTHER_EDGE.id } });
+    fireEvent.change(edgeSelect, { target: { value: EDGE.id } });
+
+    answerSave({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        saved: [{ id: "dev-0", name: "House meter0", device_type: "consumption_meter", openems_component_id: "meter0" }],
+      }),
+    } as Response);
+
+    // The wizard still gets the meter...
+    await waitFor(() => expect(onDevicePersisted).toHaveBeenCalledTimes(1));
+    // ...but the picker, whose list was cleared, does not claim a discovery
+    // it never ran, and still offers one.
+    expect(screen.queryByText(/No new consumption meters on this edge/i)).toBeNull();
+    expect(screen.queryByText(/Make sure the edge is online/i)).toBeNull();
+    expect(screen.getByRole("button", { name: /Discover meters/i })).toBeDefined();
   });
 });

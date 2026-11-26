@@ -153,10 +153,12 @@ export function DiscoverMeterInline({
     };
   }, []);
 
-  // The edge picked now, for a save that returns after the operator picked
-  // another: its outcome belongs to the list of the edge it was sent for.
-  // Written where the edge changes, not during render.
-  const pickedEdgeIdRef = React.useRef(pickedEdgeId);
+  // How many times the edge has been changed, for a save that returns after
+  // the operator picked another: its outcome belongs to the list of the edge
+  // it was sent for. A count rather than the edge's id, so picking another
+  // edge and then the first again still counts as a change: the list was
+  // cleared either way. Written where the edge changes, not during render.
+  const edgeChangesRef = React.useRef(0);
 
   const pickedEdge = sortedEdges.find((e) => e.id === pickedEdgeId) ?? null;
 
@@ -250,8 +252,8 @@ export function DiscoverMeterInline({
     // and picking another edge clears the list, so the list a save returns
     // to may be another edge's, where the same component id can name a
     // different device.
-    const savingEdgeId = pickedEdge.id;
-    const edgeChanged = () => pickedEdgeIdRef.current !== savingEdgeId;
+    const savingEdgeChanges = edgeChangesRef.current;
+    const edgeChanged = () => edgeChangesRef.current !== savingEdgeChanges;
     setSaveError(null);
     setPhase("saving");
 
@@ -387,7 +389,7 @@ export function DiscoverMeterInline({
           <Select
             value={pickedEdgeId}
             onValueChange={(v) => {
-              pickedEdgeIdRef.current = v;
+              edgeChangesRef.current += 1;
               setPickedEdgeId(v);
               setDiscovered([]);
               setSkipped([]);
