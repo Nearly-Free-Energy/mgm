@@ -17,8 +17,11 @@
 --      credential key. The CLI writes it when MGM_ALLOW_DEV_CREDENTIAL_KEY=1
 --      is set, as ./setup.sh and the Test job do, and a production database
 --      must not carry it (docs/runbooks/dek.md). It is checked inside the
---      database, so a tunnelled port or another account's stack does not get
---      past it. If 00018 or dek.md stop using that marker, revisit.
+--      database, so a tunnelled port to a production database does not get
+--      past it. It proves a development database, not whose: another
+--      account's local database carries it too. The wrapper checks which
+--      container the database is in. If 00018 or dek.md stop using that
+--      marker, revisit.
 --   4. No organization but the sample one 00003_seed.sql.template writes, and
 --      neither of the two this file writes: a database that holds any other
 --      is not a fresh local one. Reset it instead (`supabase db reset`); that

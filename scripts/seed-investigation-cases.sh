@@ -10,17 +10,26 @@
 # from the outside in:
 #   - --disposable is required.
 #   - The database URL comes only from `supabase status`, run at this
-#     repository's root, so it names the stack this checkout started (its
-#     project_id in supabase/config.toml). There is no option to pass a URL: a
-#     loopback address is not proof of "my stack", since on a shared machine
-#     127.0.0.1 can be another account's Docker.
+#     repository's root; there is no option to pass one. Which stack status
+#     reports is still the CLI's choice: SUPABASE_WORKDIR picks the project
+#     directory (and so its project_id and ports), as it does for every
+#     `supabase` command, and the port it prints is the one in that
+#     directory's config.toml, whoever is listening on it.
 #   - The URL must be a postgres URI for a single loopback host, with a valid
 #     port and no query string, which libpq could use to point elsewhere.
+#   - A loopback port is not proof of "my stack": on a shared machine
+#     127.0.0.1 can reach another account's Docker. So the database behind the
+#     URL must be the one inside the supabase_db_* container that publishes
+#     that port on the Docker daemon this shell's `docker` reaches (DOCKER_HOST
+#     or the current docker context): both must report the same
+#     pg_control_system() system_identifier. If that daemon is not yours, this
+#     check proves nothing, so point docker at your own first.
 #   - PGHOST, PGHOSTADDR, PGSERVICE and PGSERVICEFILE are unset for psql, and
 #     ~/.psqlrc is not read.
 #   - supabase/scripts/seed-investigation-cases.sql refuses a database
 #     without the development opt-in in Vault, or with organizations other
-#     than the local sample one, and runs here in one transaction.
+#     than the local sample one, and runs here in one transaction. Those prove
+#     a fresh development database, not whose it is.
 #   - Afterwards this checks that the seed wrote its organizations and that
 #     the component-id trigger it disables for the legacy rows is enabled.
 set -euo pipefail
@@ -38,7 +47,7 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-for tool in npx psql python3; do
+for tool in npx psql python3 docker; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "Refusing: $tool is not installed." >&2
     exit 1
@@ -61,8 +70,8 @@ fi
 
 # Parsed in isolated mode (-I), so no module is loaded from the current
 # directory or PYTHON* variables. The loopback set matches
-# scripts/emergency-sign-in-link.py's LOOPBACK_HOSTS.
-if ! DB_URL="$DB_URL" python3 -I - <<'PY'
+# scripts/emergency-sign-in-link.py's LOOPBACK_HOSTS. Prints the port.
+if ! port="$(DB_URL="$DB_URL" python3 -I - <<'PY'
 import os
 import sys
 from urllib.parse import urlsplit
@@ -92,14 +101,34 @@ except ValueError:
     refuse("has an invalid port")
 if parts.query or parts.fragment:
     refuse("carries connection parameters")
+print(parts.port or 5432)
 PY
-then
+)"; then
   exit 1
 fi
 
 run_psql() {
   env -u PGHOST -u PGHOSTADDR -u PGSERVICE -u PGSERVICEFILE psql -X "$DB_URL" "$@"
 }
+
+# The database behind the URL must be the one in this daemon's container that
+# publishes the port (see the header).
+if ! containers="$(docker ps --filter "publish=${port}" --filter "name=supabase_db_" --format '{{.Names}}')"; then
+  echo "Refusing: docker ps failed. Start the Docker daemon your local stack runs on." >&2
+  exit 1
+fi
+if [ -z "$containers" ] || [ "$(printf '%s\n' "$containers" | wc -l | tr -d ' ')" != "1" ]; then
+  echo "Refusing: no single supabase_db_* container on this Docker daemon publishes port ${port}." >&2
+  echo "On a shared machine that port may be another account's stack; point docker (DOCKER_HOST or docker context) at the daemon your own stack runs on." >&2
+  exit 1
+fi
+IDENTITY_SQL="SELECT system_identifier FROM pg_control_system()"
+inside="$(docker exec "$containers" psql -X -U postgres -d postgres -At -c "$IDENTITY_SQL" || true)"
+behind="$(run_psql -At -c "$IDENTITY_SQL" || true)"
+if [ -z "$inside" ] || [ "$inside" != "$behind" ]; then
+  echo "Refusing: the database at port ${port} is not the one in container ${containers}." >&2
+  exit 1
+fi
 
 run_psql -v ON_ERROR_STOP=1 -v disposable=1 --single-transaction \
   -f supabase/scripts/seed-investigation-cases.sql

@@ -427,13 +427,23 @@ runs on (§5 of that document).
    through the local mail catcher, as in the Quick Start.
 
 The script refuses to run without `--disposable`. It takes the database
-address only from `supabase status` in this checkout, never from an option
-or the environment, and refuses any address that is not a single loopback
-host. The SQL it runs (`supabase/scripts/seed-investigation-cases.sql`)
-then refuses a database with no development opt-in in Vault (the entry
+address only from `supabase status` in this checkout, never from an option,
+and refuses any address that is not a single loopback host. As with every
+`supabase` command, `SUPABASE_WORKDIR` chooses which project's stack that
+status describes, and the port it prints is the one in that project's
+`config.toml`, whoever listens on it: on a shared machine a loopback port
+can be another account's Docker. So the script also requires the database
+at that address to be the one inside the `supabase_db_*` container that
+publishes the port on the Docker daemon your `docker` command reaches
+(`DOCKER_HOST` or the current docker context), comparing the two databases'
+system identifiers. Point `docker` at your own daemon first; the check
+proves nothing about a daemon that is not yours. The SQL it runs
+(`supabase/scripts/seed-investigation-cases.sql`) then refuses a database
+with no development opt-in in Vault (the entry
 `MGM_ALLOW_DEV_CREDENTIAL_KEY=1` adds, which `docs/runbooks/dek.md` keeps
 off a production database), or with any organization besides the local
-sample one, including the two it seeded before. To seed again, reset first.
+sample one, including the two it seeded before. Those prove a fresh
+development database, not whose it is. To seed again, reset first.
 
 Three devices are written with no component id, as rows from before
 migration `00018` can still be: the trigger that refuses that is disabled
