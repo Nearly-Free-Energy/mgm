@@ -564,9 +564,11 @@ composer's check, not the gate's.
 
 A missing `mgm_plugins` row means enabled, so existing organizations need no
 backfill, except for a plugin the catalog marks `defaultEnabled: false`, as
-it marks the tenant app: that plugin is off for an organization until an
-operator turns it on there (RFC mgm#197 § 3), so no organization's tenants
-get an app nobody switched on. `mgm_plugin_enabled_for_org` names those
+it marks the tenant app and the operations plugin: that plugin is off for an
+organization until an operator turns it on there, so no organization's
+tenants get an app nobody switched on (RFC mgm#197 § 3), and no
+organization's investigations share the installation-wide evidence budget
+without opting in (#133). `mgm_plugin_enabled_for_org` names those
 plugins in SQL, while Settings → Plugins reads `defaultEnabled`
 (`resolvePluginStatuses`, and `validatePluginToggle` for a plugin's
 dependents). `src/lib/plugins/__tests__/default-off-plugins.test.ts` reads
