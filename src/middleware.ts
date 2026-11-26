@@ -87,7 +87,10 @@ function apiRefusal(status: number, code: string, error: string): NextResponse {
  * 4. A token Supabase Auth does not accept, or whose claims name no client
  *    MGM accepts (verifyBearer, callerFromClaims): 401 `unauthenticated`.
  *    That includes a revoked client, at once, and a token with `client_id`
- *    and no kind.
+ *    and no kind. When Auth gives no answer about the token (unreachable,
+ *    no answer within AUTH_TIMEOUT_MS, or an error of its own): 503
+ *    `auth_unavailable`, still refused, so a client can tell an outage
+ *    from a dead token.
  * 5. An agent client outside AGENT_ROUTES, public paths included: 403
  *    `agent_route_refused`.
  *
@@ -119,6 +122,9 @@ async function bearerRequest(
     return apiRefusal(503, "client_tokens_unavailable", "This installation cannot accept app tokens right now. Use MGM in a browser.");
   }
   const check = await verifyBearer(token, settings);
+  if (!check.ok && check.reason === "auth_unavailable") {
+    return apiRefusal(503, "auth_unavailable", "Sign-in could not be checked right now. Try again shortly.");
+  }
   if (!check.ok) return apiRefusal(401, "unauthenticated", "Authentication required");
   if (check.caller.kind === "agent" && !isAgentRoute(request.method, request.nextUrl.pathname)) {
     return apiRefusal(403, "agent_route_refused", "An assistant cannot use this route.");

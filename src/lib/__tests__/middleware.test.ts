@@ -1198,6 +1198,17 @@ describe("middleware for a bearer token (RFC #259 § 2)", () => {
     await refusal(await middleware(bearerRequest("/api/communities", OPERATOR)), 401, "unauthenticated");
   });
 
+  it("answers 503 auth_unavailable, not 401, when Supabase Auth gives no answer about the token, and still refuses", async () => {
+    const middleware = await loadMiddleware();
+    authAnswer = { status: 503, body: { message: "Service unavailable" } };
+    await refusal(await middleware(bearerRequest("/api/communities", OPERATOR)), 503, "auth_unavailable");
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("fetch failed"))));
+    const res = await middleware(bearerRequest("/api/communities", OPERATOR));
+    await refusal(res, 503, "auth_unavailable");
+    expect(res.headers.get("x-middleware-next")).toBeNull();
+    expect(res.headers.get("x-middleware-request-x-mgm-credential")).toBeNull();
+  });
+
   it.each([
     ["client_id with no kind", tokenWith(operatorClaims({ mgm_client_kind: undefined }))],
     ["a browser session's token", tokenWith(browserClaims())],

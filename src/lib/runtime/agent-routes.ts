@@ -13,6 +13,17 @@
  * available() or view loader (assistantGate in
  * src/lib/gui/host/server/agent.ts).
  *
+ * `GET /api/gui/catalog` is listed while the release allowlist
+ * (src/lib/mgm/released-routes.ts) still leaves it out until the CLI ships
+ * (RFC #259 § 7), on purpose: middleware answers the allowlist's 404 before
+ * it looks at any token, so the entry opens nothing today, and the pull
+ * request that releases the catalog opens it to agent clients in the same
+ * change, already narrowed to an organization's catalog and behind the
+ * assistant gate. That pull request should add a middleware test that lets
+ * an agent client through on it, with `entity=` refused at the host. If the
+ * catalog is released without being ready for an assistant, take it off
+ * this list first.
+ *
  * agent-routes.test.ts pins this list. Adding a route widens what an
  * assistant can reach on the person's behalf: it needs the same review as a
  * change to the data boundary (ADR-007 decision 6).

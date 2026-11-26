@@ -36,6 +36,7 @@ import type { UserRoleRecord } from "@/lib/types/domain";
 import { BILLING_SURFACE } from "../../surface";
 import { CLOSE_PERIOD_REFUSALS, closePeriodAvailable, prepareClosePeriod } from "../close-checklist";
 import { CLOSE_CHECKLIST_LOADED_EXAMPLES } from "../close-checklist-examples";
+import { BROWSER } from "@/lib/runtime/caller";
 
 const MG = "e7f00000-0000-4000-8002-0000000000a1";
 const PERIOD = "e7f00000-0000-4000-8003-0000000000b1";
@@ -69,6 +70,7 @@ function contextWith(client: SupabaseClient, roles: UserRoleRecord[] = [managerO
     newClient: async () => client,
     makeFmt: (locale) => createFmt({ locale }),
     now: new Date("2026-11-18T08:00:00Z"),
+    caller: BROWSER,
   });
   if (!made.ok) throw new Error("fixture context refused");
   return made.ctx;
