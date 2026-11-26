@@ -22,13 +22,15 @@
  * row's link. Entering the box, each move and each copy is announced.
  *
  * For screen readers the box is a read-only grid (decided on #287, from
- * #212): its rows are rows, the tenant is each row's header and every other
- * cell a gridcell, so NVDA and JAWS switch to focus mode on it and pass the
- * keys above to it, where a region left them in browse mode, which takes the
- * arrow keys and C for itself. The table under it is presentation only. Focus
- * stays on the box and the polite announcements say where the cursor is, so
- * the box sets no aria-activedescendant, which would have each move read
- * twice; if the moves stop being announced, point it at the cursor's cell.
+ * #212): role="grid" names it as a grid, its rows are rows, the tenant is
+ * each row's header and every other cell a gridcell, and the table under it
+ * is presentation only. Focus stays on the box and the polite announcements
+ * say where the cursor is. That has not been tried with NVDA or JAWS, and
+ * NVDA may stay in browse mode on a focused read-only grid with no focused
+ * cell, keeping the arrow keys and C for itself, as it did with the region
+ * this replaced. If it does, the fallback is an id on each copy cell and
+ * aria-activedescendant on the box pointing at the cursor's gridcell, with
+ * the move announcements dropped, since the active cell is then read out.
  * Below 600 px a list of cards (./cards.tsx) takes the grid's place; their
  * figures are buttons, so no grid keys are needed there.
  */
