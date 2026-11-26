@@ -21,8 +21,11 @@ SCRIPT = Path(__file__).resolve().parents[1] / "seed-investigation-cases.sh"
 SEED_FILE = "supabase/scripts/seed-investigation-cases.sql"
 DB_URL = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 CONTAINER = "supabase_db_mgm"
+# What the Supabase CLI's database container shows in `docker ps`'s Ports
+# column: host port 54322 bound to Postgres's 5432 inside the container.
+PORTS = "0.0.0.0:54322->5432/tcp, [::]:54322->5432/tcp"
 SYSTEM_IDENTIFIER = "7700000000000000001"
-SYSTEM_TOOLS = ["bash", "dirname", "env", "grep", "head", "tr", "wc"]
+SYSTEM_TOOLS = ["bash", "dirname", "env", "grep", "head"]
 PG_VARIABLES = ["PGHOST", "PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE"]
 # The Test workflow sets this, so that a missing shellcheck fails the gate
 # instead of silently skipping the lint check.
@@ -54,7 +57,23 @@ if tool == "npx":
         print('DB_URL="' + os.environ["FAKE_DB_URL"] + '"')
 elif tool == "docker":
     if args[:1] == ["ps"]:
-        answer("FAKE_CONTAINERS")
+        # FAKE_CONTAINERS is a JSON list of [name, ports] rows, filtered and
+        # printed as docker does: name= matches anywhere in the name. Any
+        # other filter fails, publish= included: Docker's reference and its
+        # daemons disagree on which side of a binding it matches, so the
+        # script must read the Ports column instead.
+        filters = [args[k + 1] for k, value in enumerate(args) if value == "--filter"]
+        template = args[args.index("--format") + 1] if "--format" in args else "{{{{.Names}}}}"
+        for name, ports in json.loads(os.environ.get("FAKE_CONTAINERS", "[]")):
+            shown = True
+            for item in filters:
+                key, _, value = item.partition("=")
+                if key == "name":
+                    shown = shown and value in name
+                else:
+                    sys.exit(64)
+            if shown:
+                print(template.replace("{{{{.Names}}}}", name).replace("{{{{.Ports}}}}", ports))
     elif args[:1] == ["exec"]:
         answer("FAKE_ID_INSIDE")
     else:
@@ -106,7 +125,7 @@ class SeedInvestigationCasesTests(unittest.TestCase):
             "LC_ALL": "C",
             "FAKE_LOG": str(self.log),
             "FAKE_DB_URL": DB_URL,
-            "FAKE_CONTAINERS": CONTAINER,
+            "FAKE_CONTAINERS": json.dumps([[CONTAINER, PORTS]]),
             "FAKE_ID_INSIDE": SYSTEM_IDENTIFIER,
             "FAKE_ID_BEHIND": SYSTEM_IDENTIFIER,
         }
@@ -189,23 +208,53 @@ class SeedInvestigationCasesTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         ps, execute = self.calls("docker")
         self.assertEqual(ps["argv"][0], "ps")
-        self.assertIn("publish=54322", ps["argv"])
         self.assertIn("name=supabase_db_", ps["argv"])
+        self.assertIn("{{.Ports}}", ps["argv"][ps["argv"].index("--format") + 1])
         self.assertEqual(execute["argv"][:2], ["exec", CONTAINER])
         self.assertIn("SELECT system_identifier FROM pg_control_system()", execute["argv"])
         behind = [c for c in self.calls("psql") if "system_identifier" in " ".join(c["argv"])]
         self.assertEqual(len(behind), 1)
         self.assertIn(DB_URL, behind[0]["argv"])
 
-    def test_refuses_unless_exactly_one_container_publishes_the_port(self):
-        for containers in ("", f"{CONTAINER}\nsupabase_db_other"):
-            with self.subTest(containers=containers):
+    def test_finds_the_container_by_its_host_binding(self):
+        cases = {
+            "IPv4 only": [[CONTAINER, "0.0.0.0:54322->5432/tcp"]],
+            "loopback only": [[CONTAINER, "127.0.0.1:54322->5432/tcp"]],
+            "beside other containers": [
+                ["supabase_db_other", "0.0.0.0:57322->5432/tcp"],
+                [CONTAINER, PORTS],
+                ["supabase_db_stopped_ports", ""],
+            ],
+        }
+        for label, containers in cases.items():
+            with self.subTest(label):
                 if self.log.exists():
                     self.log.unlink()
-                result = self.run_script("--disposable", env={"FAKE_CONTAINERS": containers})
+                result = self.run_script("--disposable", env={"FAKE_CONTAINERS": json.dumps(containers)})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                execute = [c for c in self.calls("docker") if c["argv"][0] == "exec"]
+                self.assertEqual(execute[0]["argv"][:2], ["exec", CONTAINER])
+
+    def test_refuses_unless_exactly_one_container_publishes_the_port(self):
+        cases = {
+            "none": [],
+            "two": [[CONTAINER, PORTS], ["supabase_db_other", "127.0.0.1:54322->5432/tcp"]],
+            "another host port": [[CONTAINER, "0.0.0.0:57322->5432/tcp"]],
+            "a longer host port": [[CONTAINER, "0.0.0.0:154322->5432/tcp"]],
+            "another container port": [[CONTAINER, "0.0.0.0:54322->5433/tcp"]],
+            "udp": [[CONTAINER, "0.0.0.0:54322->5432/udp"]],
+            "the port inside, not on the host": [[CONTAINER, "0.0.0.0:5432->54322/tcp"]],
+            "a name that only contains the prefix": [["x_supabase_db_mgm", PORTS]],
+        }
+        for label, containers in cases.items():
+            with self.subTest(label):
+                if self.log.exists():
+                    self.log.unlink()
+                result = self.run_script("--disposable", env={"FAKE_CONTAINERS": json.dumps(containers)})
                 self.assertEqual(result.returncode, 1)
                 self.assertIn("no single supabase_db_* container", result.stderr)
                 self.assertEqual(self.calls("psql"), [])
+                self.assertEqual([c for c in self.calls("docker") if c["argv"][0] == "exec"], [])
 
     def test_refuses_a_database_that_is_not_the_containers(self):
         for env in (

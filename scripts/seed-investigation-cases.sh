@@ -20,10 +20,15 @@
 #   - A loopback port is not proof of "my stack": on a shared machine
 #     127.0.0.1 can reach another account's Docker. So the database behind the
 #     URL must be the one inside the supabase_db_* container that publishes
-#     that port on the Docker daemon this shell's `docker` reaches (DOCKER_HOST
-#     or the current docker context): both must report the same
-#     pg_control_system() system_identifier. If that daemon is not yours, this
-#     check proves nothing, so point docker at your own first.
+#     its Postgres port (5432 in the container) on that host port, on the
+#     Docker daemon this shell's `docker` reaches (DOCKER_HOST or the current
+#     docker context): exactly one such container, and both databases must
+#     report the same pg_control_system() system_identifier. The binding is
+#     read from `docker ps`'s Ports column rather than its publish= filter,
+#     whose side of a binding Docker's reference and its daemons disagree on
+#     (the reference's example matches the container port; Docker 29 matches
+#     the host port). If that daemon is not yours, this check proves nothing,
+#     so point docker at your own first.
 #   - PGHOST, PGHOSTADDR, PGSERVICE and PGSERVICEFILE are unset for psql, and
 #     ~/.psqlrc is not read.
 #   - supabase/scripts/seed-investigation-cases.sql refuses a database
@@ -112,13 +117,28 @@ run_psql() {
 }
 
 # The database behind the URL must be the one in this daemon's container that
-# publishes the port (see the header).
-if ! containers="$(docker ps --filter "publish=${port}" --filter "name=supabase_db_" --format '{{.Names}}')"; then
+# publishes its Postgres port on the URL's port (see the header). Ports reads
+# like "0.0.0.0:54322->5432/tcp, [::]:54322->5432/tcp", host side first. The
+# Supabase CLI runs Postgres on 5432 inside supabase_db_*; if that changes,
+# this finds no container and refuses.
+if ! listing="$(docker ps --filter "name=supabase_db_" --format '{{.Names}} {{.Ports}}')"; then
   echo "Refusing: docker ps failed. Start the Docker daemon your local stack runs on." >&2
   exit 1
 fi
-if [ -z "$containers" ] || [ "$(printf '%s\n' "$containers" | wc -l | tr -d ' ')" != "1" ]; then
-  echo "Refusing: no single supabase_db_* container on this Docker daemon publishes port ${port}." >&2
+containers=""
+matches=0
+while read -r name ports; do
+  # docker's name filter matches anywhere in the name.
+  case "$name" in supabase_db_*) ;; *) continue ;; esac
+  case ", ${ports}," in
+    *":${port}->5432/tcp,"*)
+      containers="$name"
+      matches=$((matches + 1))
+      ;;
+  esac
+done <<<"$listing"
+if [ "$matches" != "1" ]; then
+  echo "Refusing: no single supabase_db_* container on this Docker daemon publishes port ${port} as its Postgres port." >&2
   echo "On a shared machine that port may be another account's stack; point docker (DOCKER_HOST or docker context) at the daemon your own stack runs on." >&2
   exit 1
 fi

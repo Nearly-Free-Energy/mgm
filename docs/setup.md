@@ -619,9 +619,13 @@ status describes, and the port it prints is the one in that project's
 `config.toml`, whoever listens on it: on a shared machine a loopback port
 can be another account's Docker. So the script also requires the database
 at that address to be the one inside the `supabase_db_*` container that
-publishes the port on the Docker daemon your `docker` command reaches
-(`DOCKER_HOST` or the current docker context), comparing the two databases'
-system identifiers. Point `docker` at your own daemon first; the check
+publishes its Postgres port (5432 inside the container) on that host port,
+on the Docker daemon your `docker` command reaches (`DOCKER_HOST` or the
+current docker context). It reads the host side of each binding from
+`docker ps`'s Ports column (`0.0.0.0:54322->5432/tcp`), not from its
+`publish=` filter, whose side of a binding Docker's reference and its
+daemons disagree on; it requires exactly one such container, and compares
+the two databases' system identifiers. Point `docker` at your own daemon first; the check
 proves nothing about a daemon that is not yours. The SQL it runs
 (`supabase/scripts/seed-investigation-cases.sql`) then refuses a database
 with no development opt-in in Vault (the entry
