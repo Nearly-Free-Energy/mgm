@@ -142,6 +142,20 @@ Decision 2 also says a missing grant stops every sign-in. A missing `EXECUTE` on
 
 Until #274 creates `mgm_agent` and the hook sets it, the hook refuses every sign-in and refresh of a client listed as `agent`: with the role `authenticated`, an agent token would hold the person's full authority at the database API, which decision 7 exists to bound. This is the Consequences' "the operator removes the agent client from MGM's table", enforced by the database rather than left to the operator. `mgm_clients` already accepts the kind `agent`, so #274 changes only the hook.
 
+## Amendment (26 Nov 2026): the consent page reads Supabase Auth's authorizations (#271)
+
+Decision 3 has the consent page show its warning and wait for a click even for a client the person approved before. Supabase Auth's `GET /oauth/authorizations/{id}`, the call that would tell the page which client is asking, cannot be used for that: on its first call for a client the person approved before, it approves the sign-in and issues the code, and it answers with the code alone, without naming the client. So the page asks Supabase Auth nothing until the person clicks Connect, and reads the client from Supabase Auth's own table, `auth.oauth_authorizations`, which the database API does not expose.
+
+That takes a sixth migration beyond the five the Consequences list, `20261126150000_client_consent.sql`, with its database tests in the same commit:
+
+- `fn_client_authorization_read` (what the page shows) and `fn_client_approval_record` (the record Connect writes), both `SECURITY DEFINER`, run by `service_role` only, after a `getUser()` check of the person's cookie session and with that person's id.
+- `mgm_client_approvals.authorization_id`, unique, so one sign-in gets one record however often the person clicks or reloads, and a second person cannot record a sign-in the first recorded. The hook does not read it.
+- A record's `created_at` is its authorization's (never later than the click), not the click's, so the hook's ten minutes end with the sign-in the record was written for. Without it, a record written late in its sign-in's life would stay usable for up to ten minutes after that sign-in expired, which is wider than the window the Consequences accept.
+
+MGM now also depends on the shape of a third Supabase Auth table. The functions read six columns of `auth.oauth_authorizations` as Supabase Auth v2.198.0 defines them: `authorization_id` (text), `client_id` (uuid), `user_id` (uuid), `status` (`auth.oauth_authorization_status`), `expires_at` and `created_at` (timestamptz), and the status labels `pending`, `approved`, `denied` and `expired`. `client_consent.test.ts` pins them on the version CI runs. A renamed column fails closed: the function that reads it raises, and the page or the approvals route answers with an error, so no approval is recorded. A changed status label makes the page answer that the sign-in was already answered.
+
+So the Consequences' "the shape of two Supabase Auth tables" is three, and when a hosted project runs a newer Auth version than CI (decision 9), this table's columns and status labels are among what is checked by hand, with `auth.sessions` and `auth.oauth_consents`.
+
 ## Amendment (26 Nov 2026): a bearer token must name a client (#272)
 
 Decision 6 says a request carries a cookie session or a bearer token, and that the caller's kind comes from the verified claims. It does not say what a bearer token with no `client_id` is. That is a browser session's token, copied out of the browser and sent from a script: Supabase Auth v2.198.0 sets `client_id` only on a session an OAuth client started, and the hook returns a browser's token unchanged.

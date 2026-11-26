@@ -606,10 +606,13 @@ The reverse direction is checked by
 `src/lib/runtime/__tests__/described-writes.test.ts`: every write handler
 under `src/app/api` on a released path is named by an action, or listed in
 `UNDESCRIBED_WRITES` (`src/lib/runtime/__tests__/route-rules.ts`), either as
-permanent, with the reason the route is not a person's action (no person
-sends it, or it writes nothing: a `POST` that only reads, such as the OpenEMS
-connection test, is not an action), or as not yet described, with the issue
-in `DESCRIBING_ISSUES` that will describe it.
+permanent, with the reason the route cannot be an action (no person sends
+it; it writes nothing, since a `POST` that only reads, such as the OpenEMS
+connection test, is not an action; or it must refuse every caller but the
+person's own cookie session on one of MGM's pages, as the consent page's
+`POST /api/auth/oauth/approvals` does, while an action is offered to any
+signed-in caller, a client's bearer token included), or as not yet
+described, with the issue in `DESCRIBING_ISSUES` that will describe it.
 Unlike the gate rule (§ "The gate"), it covers core plugins. It finds
 handlers with the TypeScript AST and checks that the gate rule's handler
 finder sees each of them.

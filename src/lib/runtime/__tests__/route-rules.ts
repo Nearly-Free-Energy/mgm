@@ -118,11 +118,15 @@ export const DESCRIBING_ISSUES = {
 } as const satisfies Record<`#${number}`, readonly MgmPluginName[]>;
 
 /**
- * Why no action names a write route. `permanent`: the route is not a
- * person's action (no person sends it, or it writes nothing: an action is a
- * write a person confirms, and RFC #259 § 3 serves reads as views), and its
- * reason says why and what would make that wrong ("Wrong once …", which
- * described-writes.test.ts requires).
+ * Why no action names a write route. `permanent`: the route cannot be an
+ * action, for one of three reasons. No person sends it; or it writes nothing
+ * (an action is a write a person confirms, and RFC #259 § 3 serves reads as
+ * views); or it must refuse every caller but the person's own cookie session
+ * on one of MGM's own pages, while an action is offered to any signed-in
+ * caller, a client's bearer token included (ADR-008). Its reason says which,
+ * and what would make that wrong ("Wrong once …", which
+ * described-writes.test.ts requires); for the third, that includes actions
+ * becoming limitable to the cookie session.
  * `not-yet-described`: the issue that will describe it.
  */
 export type UndescribedWrite =
@@ -148,10 +152,17 @@ export type UndescribedWrite =
  * each issue touch only their own lines.
  */
 export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
-  // ── Permanent: not a person's action ──
-  // A POST that writes nothing is here rather than an action: what it
-  // answers is a read, and the twice-sent test (repeat.db.test.ts) can show
-  // no action "safe" whose first send writes nothing.
+  // ── Permanent: cannot be an action ──
+  // No person sends it, it writes nothing, or it answers only the person's
+  // own cookie session on one of MGM's pages (UndescribedWrite above). A POST
+  // that writes nothing is here rather than an action: what it answers is a
+  // read, and the twice-sent test (repeat.db.test.ts) can show no action
+  // "safe" whose first send writes nothing.
+  "POST /api/auth/oauth/approvals": {
+    kind: "permanent",
+    reason:
+      "Records the approval MGM's consent page gives a client sign-in (ADR-008 decision 2), only from the person's cookie session and never for a bearer token, while an action is offered to any signed-in caller, a client included. Wrong once an action can be limited to the person's own cookie session on MGM's page, refusing every bearer caller, or once it records anything but the caller's own approval of a sign-in on that page.",
+  },
   "POST /api/auth/sign-in-link": {
     kind: "permanent",
     reason:
