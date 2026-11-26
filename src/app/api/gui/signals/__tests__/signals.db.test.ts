@@ -11,7 +11,8 @@
  * this organization's signals; a person whose rows are all tenant rows gets
  * a 403 and no watcher runs. While billing or metering is off its watchers are skipped;
  * while Payments is off reconciliation is still reported and failures and
- * checkouts never submitted are not. A period ending today in its own zone
+ * checkouts never submitted are not, and with billing off as well the
+ * reconciliation's link still loads. A period ending today in its own zone
  * is not yet due. No tenant's name reaches the answer. Nothing here calls
  * out: every request goes to the local Supabase.
  *
@@ -39,6 +40,7 @@ vi.mock("@/lib/supabase/server", () => ({
   },
 }));
 
+import { GET as viewRoute } from "../../view/route";
 import { GET } from "../route";
 
 const ORG = "e8700000-0000-4000-8000-000000000001";
@@ -292,7 +294,7 @@ describe.skipIf(shouldSkip())("GET /api/gui/signals against the database", () =>
       ...(REPORTS_MISSING
         ? [[`billing.period-missing:${UNBILLED}`, "warn", expect.stringMatching(/^Unbilled site: no billing period for \w+ \d{4}$/), `/microgrids/${UNBILLED}/billing`]]
         : []),
-      expect.arrayContaining([`payments.failed:${OCTOBER}`, "warn", "Signals site: 1 payment failed in October 2026"]),
+      expect.arrayContaining([`payments.failed:${OCTOBER}`, "warn", "Signals site: 1 bill has a failed payment in October 2026"]),
       [
         `payments.not-submitted:${COMMUNITY}`,
         "warn",
@@ -372,6 +374,28 @@ describe.skipIf(shouldSkip())("GET /api/gui/signals against the database", () =>
       expect(body.checked).toContain("payments.reconcile");
       for (const id of ["payments.failed", "payments.not-submitted"]) expect([...body.checked, ...body.unchecked]).not.toContain(id);
     } finally {
+      await setPlugin("payments", true);
+    }
+  });
+
+  // Payments depends on billing, so billing is turned off only after Payments
+  // (validatePluginToggle). The period's payments page is Payments' view, which
+  // asks only Payments' gate and reads through RLS and listHistory, so it
+  // still loads, with the gate's notice, and the reconciliation keeps a link.
+  it("still reports reconciliation while billing and Payments are both off, and its link loads", async () => {
+    caller = manager;
+    await setPlugin("payments", false);
+    await setPlugin("billing", false);
+    try {
+      const { body } = await answer(ORG);
+      const reconcile = body.top.find((s) => s.id === `payments.reconcile:${OCTOBER}`);
+      expect(reconcile?.href).toBe(`/microgrids/${MICROGRID}/billing/${OCTOBER}/payments?bill=${BILL_HELD}`);
+      const res = await viewRoute(new NextRequest(`http://localhost/api/gui/view?href=${encodeURIComponent(reconcile!.href)}`, { headers: { "accept-language": "en-GB" } }));
+      const text = await res.text();
+      expect(res.status, text).toBe(200);
+      expect(JSON.parse(text)).toMatchObject({ view: "payments.bill-attempts", notice: { text: expect.stringMatching(/^Payments are disabled for this organization/) } });
+    } finally {
+      await setPlugin("billing", true);
       await setPlugin("payments", true);
     }
   });
