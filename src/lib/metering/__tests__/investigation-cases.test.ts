@@ -254,6 +254,12 @@ describe("case ids", () => {
     // Only 0a is organization B's.
     expect(Object.entries(CASE_VARIANTS).filter(([, v]) => v.org === "B").map(([nn]) => nn)).toEqual(["0a"]);
   });
+
+  it("has a read for every existing case and none for a pending one", () => {
+    // The type already ties them; this catches a cast or a widened type, since
+    // a case that lost its read would otherwise become a todo with no failure.
+    for (const c of CASES) expect(c.read !== null, c.id).toBe(c.mechanism === "exists");
+  });
 });
 
 describe.each(CASES)("$id", (c) => {
@@ -262,7 +268,7 @@ describe.each(CASES)("$id", (c) => {
   });
 
   const read = c.read;
-  if (c.mechanism === "pending" || read === null) {
+  if (read === null) {
     it.todo("figures (A2-4)");
   } else if (read.ok) {
     it("reads the day with §2's figures, and a clear day's elsewhere", async () => {

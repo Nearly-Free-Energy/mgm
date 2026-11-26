@@ -72,19 +72,20 @@ export type InvestigationCase = {
   /** The microgrid's number, hexadecimal (`caseMicrogridId`). */
   microgrid: string;
   date: string;
-  mechanism: "exists" | "pending";
   /**
    * The scenario `siteScenario` draws for the day. A pending case's day is
    * the base its overlay (A2-4) applies to.
    */
   scenario: SiteScenario;
-  /** Null while the case is pending: A2-4 pins it with its scenario. */
-  read: CaseRead | null;
   /** A2-3 fills it. */
   evidence?: unknown;
   /** A2-12 fills it. */
   result?: unknown;
-};
+} & (
+  | { mechanism: "exists"; read: CaseRead }
+  /** A pending case has no read: A2-4 pins it with its scenario and flips the mechanism. */
+  | { mechanism: "pending"; read: null }
+);
 
 const KAMPALA = "Africa/Kampala";
 const plain = (overrides: Partial<CaseVariant> = {}): CaseVariant => ({
