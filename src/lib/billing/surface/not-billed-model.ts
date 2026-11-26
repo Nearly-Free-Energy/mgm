@@ -25,8 +25,14 @@
  * meter may still have no data, which only a run finds. In a closed period
  * no run can bill them, so a metered tenant's reason says only that their
  * meter gave them no bill for it.
+ *
+ * A closed period leaves out the tenants who came onto the microgrid only
+ * after it (joinedAfterPeriod): they were not its tenants, and nothing can
+ * bill them in it. A draft lists them, since a draft can still bill them
+ * from readings, as when a tenant is recorded late.
  */
 import type { ActionLink, Fmt, LoadedModel } from "@/lib/gui/surface";
+import { dayKeyInZone } from "@/lib/timezone/day-key";
 import { meterCoverage, type MeterCoverage, type PrimaryMeterLink } from "../meter-coverage";
 
 export const NOT_BILLED_VIEW = "billing.not-billed";
@@ -82,11 +88,50 @@ export const NOT_BILLED_COPY = {
 export const notBilledHref = (microgridId: string, periodId: string): `/${string}` =>
   `/microgrids/${microgridId}/billing/${periodId}/not-billed`;
 
-export type NotBilledTenant = { id: string; display_name: string; primaryLinks: readonly PrimaryMeterLink[] };
+export type NotBilledTenant = {
+  id: string;
+  display_name: string;
+  primaryLinks: readonly PrimaryMeterLink[];
+  /** When the tenant's record was created (tenants.created_at). */
+  created_at: string;
+};
+
+export type NotBilledPeriod = { id: string; start_date: string; end_date: string; status: "draft" | "closed"; timezone: string };
+
+/**
+ * Whether a tenant came onto the microgrid only after the period: their
+ * record was created after its last day, in the period's time zone, and
+ * every primary meter link starts after that day too (or there is none). A
+ * link with no start date, or a creation time that cannot be placed in the
+ * zone, counts as within the period, so the tenant is kept.
+ */
+export function joinedAfterPeriod(tenant: NotBilledTenant, period: Pick<NotBilledPeriod, "end_date" | "timezone">): boolean {
+  let createdOn: string;
+  try {
+    createdOn = dayKeyInZone(new Date(tenant.created_at), period.timezone);
+  } catch {
+    return false;
+  }
+  if (createdOn <= period.end_date) return false;
+  return tenant.primaryLinks.every((l) => typeof l.effective_from === "string" && l.effective_from > period.end_date);
+}
+
+/**
+ * The tenants the section lists, in the order given: those with no bill for
+ * the period, less, in a closed period, those who joined after it. The
+ * loader counts these against the most a view lists.
+ */
+export function notBilledTenants<T extends NotBilledTenant>(
+  tenants: readonly T[],
+  billedTenantIds: ReadonlySet<string>,
+  period: NotBilledPeriod,
+): T[] {
+  return tenants.filter((t) => !billedTenantIds.has(t.id) && !(period.status === "closed" && joinedAfterPeriod(t, period)));
+}
 
 export type NotBilledInput = {
   microgridId: string;
-  period: { id: string; start_date: string; end_date: string; status: "draft" | "closed" };
+  period: NotBilledPeriod;
   /** Every tenant of the microgrid, in the order to list them (by name). */
   tenants: readonly NotBilledTenant[];
   /** The tenants with a bill for the period. */
@@ -98,8 +143,7 @@ type Row = LoadedModel<"collection">["body"]["rows"][number];
 
 export function buildNotBilledModel(i: NotBilledInput): LoadedModel<"collection"> {
   const { microgridId, period, fmt } = i;
-  const rows: Row[] = i.tenants
-    .filter((t) => !i.billedTenantIds.has(t.id))
+  const rows: Row[] = notBilledTenants(i.tenants, i.billedTenantIds, period)
     .map((t) => {
       // As the host links a tenant (src/lib/gui/host/server/entities.ts), and as the review's rows link theirs.
       const tenantRef = { kind: "tenant", id: t.id, label: t.display_name, href: `/microgrids/${microgridId}/setup/tenants/${t.id}` } as const;

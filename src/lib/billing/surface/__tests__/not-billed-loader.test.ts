@@ -2,7 +2,9 @@
  * The `billing.not-billed` loader: reads the period on the path's microgrid,
  * every bill and every tenant in pages, through the person's own client
  * only; refusals with fixed copy rather than a partial list; no capability
- * composed, so the section still loads while billing is off.
+ * composed, so the section still loads while billing is off. A closed
+ * period leaves out the tenants who joined after it, from the list and from
+ * the count against the most a view lists.
  */
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -78,13 +80,19 @@ const request = (): SurfaceRequest => ({
 });
 
 const covering = { role: "primary_consumption_meter", effective_from: "2020-01-01", effective_to: null, devices: { openems_component_id: "m1", edges: { openems_edge_id: "e0" } } };
-const tenant = (n: number, links: unknown[] = []) => ({ id: T(n), display_name: `Unit ${n}`, tenant_devices: links });
+const tenant = (n: number, links: unknown[] = [], createdAt = "2020-01-01T00:00:00+00:00") => ({
+  id: T(n),
+  display_name: `Unit ${n}`,
+  tenant_devices: links,
+  created_at: createdAt,
+});
+const APRIL = { id: PERIOD, start_date: "2026-04-01", end_date: "2026-04-30", timezone: "Africa/Kampala" };
 
 beforeEach(() => {
   composeBilling.mockReset();
   reads = [];
   tables = {
-    billing_periods: { data: { id: PERIOD, start_date: "2026-04-01", end_date: "2026-04-30", status: "draft" }, error: null },
+    billing_periods: { data: { ...APRIL, status: "draft" }, error: null },
     billing_line_items: { data: [{ id: "b1", tenant_id: T(2) }], error: null },
     tenants: { data: [tenant(1, [covering]), tenant(2, [covering]), tenant(3)], error: null },
   };
@@ -106,10 +114,42 @@ describe("loadNotBilled", () => {
     expect(reads).toContainEqual(["eq", "billing_line_items", "billing_period_id", PERIOD]);
     expect(reads).toContainEqual(["eq", "tenants", "microgrid_id", MG]);
     expect(reads).toContainEqual(["eq", "tenants", "tenant_devices.role", "primary_consumption_meter"]);
+    // The period's zone and each tenant's creation, for a closed period's list.
+    expect(reads).toContainEqual(["select", "billing_periods", "id, start_date, end_date, status, timezone"]);
+    expect(reads.find((r) => r[0] === "select" && r[1] === "tenants")?.[2]).toMatch(/, created_at$/);
+  });
+
+  it("leaves a tenant who joined after a closed period out of its list, and lists them in a draft", async () => {
+    // Recorded in June, with a meter from June: not a tenant in April.
+    tables.tenants = { data: [tenant(1, [covering]), tenant(4, [{ ...covering, effective_from: "2026-06-01" }], "2026-06-01T08:00:00+00:00")], error: null };
+    tables.billing_line_items = { data: [], error: null };
+    tables.billing_periods = { data: { ...APRIL, status: "closed" }, error: null };
+    const closed = await loadNotBilled(request());
+    if (!closed.ok) throw new Error(closed.message);
+    expect(closed.model.body.rows.map((r) => r.id)).toEqual([T(1)]);
+
+    tables.billing_periods = { data: { ...APRIL, status: "draft" }, error: null };
+    const draft = await loadNotBilled(request());
+    if (!draft.ok) throw new Error(draft.message);
+    expect(draft.model.body.rows.map((r) => r.id)).toEqual([T(1), T(4)]);
+  });
+
+  it("does not count the tenants a closed period leaves out against the most it lists", async () => {
+    tables.billing_line_items = { data: [], error: null };
+    tables.tenants = {
+      data: Array.from({ length: PERIOD_REVIEW_MAX_ROWS + 1 }, (_, n) => tenant(n, [], n === 0 ? undefined : "2026-06-01T08:00:00+00:00")),
+      error: null,
+    };
+    tables.billing_periods = { data: { ...APRIL, status: "closed" }, error: null };
+    const out = await loadNotBilled(request());
+    if (!out.ok) throw new Error(out.message);
+    expect(out.model.body.rows.map((r) => r.id)).toEqual([T(0)]);
+    tables.billing_periods = { data: { ...APRIL, status: "draft" }, error: null };
+    expect(await loadNotBilled(request())).toEqual(NOT_BILLED_REFUSALS.tooLarge);
   });
 
   it("offers no action on a closed period", async () => {
-    tables.billing_periods = { data: { id: PERIOD, start_date: "2026-04-01", end_date: "2026-04-30", status: "closed" }, error: null };
+    tables.billing_periods = { data: { ...APRIL, status: "closed" }, error: null };
     const out = await loadNotBilled(request());
     if (!out.ok) throw new Error(out.message);
     expect(out.model.body.rows).toHaveLength(2);

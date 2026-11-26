@@ -5,7 +5,8 @@
  * loader reads the period, its bills and the microgrid's tenants with their
  * primary meter links through that client. Each tenant with no bill is
  * listed with why, a billed tenant is left out, and Bill from readings is
- * offered on each row of a draft, not of a closed period. While billing is
+ * offered on each row of a draft, not of a closed period, which also leaves
+ * out a tenant who joined after it. While billing is
  * off the section still loads, with the gate's notice and the action
  * disabled, and the review still lists it. Another organization's manager
  * and a tenant get nothing.
@@ -112,12 +113,20 @@ beforeAll(async () => {
       "devices",
       [1, 3, 4].map((n) => ({ id: device(n), edge_id: EDGE, name: `Meter ${n}`, device_type: "consumption_meter", openems_component_id: `meter${n}` })),
     ],
-    // 1 metered, no bill; 2 no meter; 3 a meter assigned after the period began; 4 metered, billed; 5 on the second microgrid.
+    // 1 metered, no bill; 2 no meter; 3 a meter assigned after the period began; 4 metered, billed; 5 on the second microgrid;
+    // 6 no meter, recorded in October, after the closed September period. All but 6 recorded in January.
     [
       "tenants",
       [
-        ...[1, 2, 3, 4].map((n) => ({ id: tenant(n), microgrid_id: MICROGRID, display_name: `Unit ${n}`, primary_phone: `+2567000007${String(n).padStart(2, "0")}` })),
-        { id: tenant(5), microgrid_id: SECOND, display_name: "Unit 5", primary_phone: "+256700000705" },
+        ...[1, 2, 3, 4].map((n) => ({
+          id: tenant(n),
+          microgrid_id: MICROGRID,
+          display_name: `Unit ${n}`,
+          primary_phone: `+2567000007${String(n).padStart(2, "0")}`,
+          created_at: "2026-01-01T06:00:00+00:00",
+        })),
+        { id: tenant(5), microgrid_id: SECOND, display_name: "Unit 5", primary_phone: "+256700000705", created_at: "2026-01-01T06:00:00+00:00" },
+        { id: tenant(6), microgrid_id: MICROGRID, display_name: "Unit 6", primary_phone: "+256700000706", created_at: "2026-10-10T06:00:00+00:00" },
       ],
     ],
     [
@@ -184,6 +193,7 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: the tenants not billed for a p
       [tenant(1), "No bill from its meter yet"],
       [tenant(2), "No meter for this period"],
       [tenant(3), "Meter assignment gap in this period"],
+      [tenant(6), "No meter for this period"],
     ]);
     expect(model.body.rows[0].entity).toMatchObject({ kind: "tenant", id: tenant(1), href: `/microgrids/${MICROGRID}/setup/tenants/${tenant(1)}` });
     for (const row of model.body.rows) {
@@ -193,7 +203,7 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: the tenants not billed for a p
     }
   });
 
-  it("lists a closed period's tenants not billed with no action", async () => {
+  it("lists a closed period's tenants not billed with no action, leaving out a tenant who joined after it", async () => {
     caller = manager;
     const model = await loaded(href(CLOSED));
     expect(model.body.rows.map((r) => [r.id, r.cells.reason.text])).toEqual([
@@ -216,7 +226,7 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: the tenants not billed for a p
     try {
       const model = await loaded(href());
       expect(model.notice).toMatchObject({ tone: "warning", text: expect.stringContaining("Billing is disabled") });
-      expect(model.body.rows).toHaveLength(3);
+      expect(model.body.rows).toHaveLength(4);
       for (const row of model.body.rows) expect(row.actions).toEqual([expect.objectContaining({ action: "billing.bill-from-readings", enabled: false })]);
       const review = await loaded(`/microgrids/${MICROGRID}/billing/${DRAFT}`);
       expect(review.attached).toContainEqual({ view: "billing.not-billed", title: "Tenants not billed", href: href(), hint: "section" });

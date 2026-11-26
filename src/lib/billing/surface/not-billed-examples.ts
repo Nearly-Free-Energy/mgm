@@ -29,15 +29,20 @@ const BILLING_DISABLED =
   "Billing is disabled for this organization. Enable it in Settings → Plugins; tariffs, periods, bills, and payment history are preserved.";
 
 const id = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
-const NOVEMBER = { id: id(0xb2), start_date: "2026-11-01", end_date: "2026-11-30", status: "draft" as const };
-const OCTOBER = { id: id(0xb1), start_date: "2026-10-01", end_date: "2026-10-31", status: "closed" as const };
+const NOVEMBER = { id: id(0xb2), start_date: "2026-11-01", end_date: "2026-11-30", status: "draft" as const, timezone: "Africa/Kampala" };
+const OCTOBER = { id: id(0xb1), start_date: "2026-10-01", end_date: "2026-10-31", status: "closed" as const, timezone: "Africa/Kampala" };
 
 const meter = (from: string, to: string | null = null): PrimaryMeterLink => ({
   effective_from: from,
   effective_to: to,
   devices: { openems_component_id: "meter0", edges: { openems_edge_id: "edge0" } },
 });
-const tenant = (n: number, name: string, links: PrimaryMeterLink[]): NotBilledTenant => ({ id: id(0xc0 + n), display_name: name, primaryLinks: links });
+const tenant = (n: number, name: string, links: PrimaryMeterLink[]): NotBilledTenant => ({
+  id: id(0xc0 + n),
+  display_name: name,
+  primaryLinks: links,
+  created_at: "2026-01-01T06:00:00+00:00",
+});
 const TENANTS = [
   // Billed in the examples below.
   tenant(1, "Akello Grace", [meter("2026-01-01")]),

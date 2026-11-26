@@ -1,7 +1,8 @@
 /**
  * The `billing.not-billed` model: the tenants of the period's microgrid with
  * no bill for it, in the order given, with why (meterCoverage's answer), and
- * Bill from readings on each while the period is a draft.
+ * Bill from readings on each while the period is a draft. A closed period
+ * leaves out the tenants who joined after it.
  */
 import { describe, expect, it } from "vitest";
 import { createFmt } from "@/lib/gui/fmt";
@@ -13,6 +14,7 @@ import { NOT_BILLED_EXAMPLES, NOT_BILLED_LOADED_EXAMPLES } from "../not-billed-e
 import {
   BILL_FROM_READINGS_ACTION,
   buildNotBilledModel,
+  joinedAfterPeriod,
   NOT_BILLED_COPY,
   NOT_BILLED_KEYS,
   NOT_BILLED_CLOSED_REASON,
@@ -20,12 +22,22 @@ import {
   NOT_BILLED_TITLE,
   NOT_BILLED_VIEW,
   notBilledHref,
+  notBilledTenants,
   type NotBilledInput,
+  type NotBilledTenant,
 } from "../not-billed-model";
 
 const fmt = createFmt({ locale: "en-GB" });
 const MG = "e7900000-0000-4000-8002-0000000000a1";
-const PERIOD = { id: "e7900000-0000-4000-8003-0000000000b1", start_date: "2026-04-01", end_date: "2026-04-30", status: "draft" as const };
+const PERIOD = {
+  id: "e7900000-0000-4000-8003-0000000000b1",
+  start_date: "2026-04-01",
+  end_date: "2026-04-30",
+  status: "draft" as const,
+  timezone: "Africa/Kampala",
+};
+/** Long before the period, as the tenants below were recorded. */
+const EARLY = "2020-01-01T00:00:00+00:00";
 const T = (n: number) => `e7900000-0000-4000-8004-${String(n).padStart(12, "0")}`;
 const view = BILLING_SURFACE.views!.find((v) => v.id === NOT_BILLED_VIEW) as ViewDef;
 
@@ -41,10 +53,10 @@ const build = (o: Partial<NotBilledInput> = {}) =>
     microgridId: MG,
     period: PERIOD,
     tenants: [
-      { id: T(1), display_name: "Akello Grace", primaryLinks: [link("2020-01-01", null)] },
-      { id: T(2), display_name: "Byaruhanga Peter", primaryLinks: [] },
-      { id: T(3), display_name: "Kato Joseph", primaryLinks: [link("2026-05-01", null)] },
-      { id: T(4), display_name: "Nambi Sarah", primaryLinks: [link("2020-01-01", null)] },
+      { id: T(1), display_name: "Akello Grace", primaryLinks: [link("2020-01-01", null)], created_at: EARLY },
+      { id: T(2), display_name: "Byaruhanga Peter", primaryLinks: [], created_at: EARLY },
+      { id: T(3), display_name: "Kato Joseph", primaryLinks: [link("2026-05-01", null)], created_at: EARLY },
+      { id: T(4), display_name: "Nambi Sarah", primaryLinks: [link("2020-01-01", null)], created_at: EARLY },
     ],
     billedTenantIds: new Set([T(4)]),
     fmt,
@@ -76,7 +88,7 @@ describe("buildNotBilledModel", () => {
     ["a covering link with no meter", [link("2020-01-01", null, null)], "no_meter"],
     ["a covering meter on an edge with no OpenEMS id", [link("2020-01-01", null, { ...meter, edges: { openems_edge_id: null } })], "no_meter"],
   ] as [string, PrimaryMeterLink[], MeterCoverage][])("says why for %s", (_label, primaryLinks, coverage) => {
-    const model = build({ tenants: [{ id: T(1), display_name: "Akello Grace", primaryLinks }], billedTenantIds: new Set() });
+    const model = build({ tenants: [{ id: T(1), display_name: "Akello Grace", primaryLinks, created_at: EARLY }], billedTenantIds: new Set() });
     expect(model.body.rows[0].cells.reason).toEqual(fmt.text(NOT_BILLED_REASON[coverage]));
   });
 
@@ -99,6 +111,53 @@ describe("buildNotBilledModel", () => {
     const model = build({ period: { ...PERIOD, status: "closed" } });
     expect(model.body.rows).toHaveLength(3);
     for (const row of model.body.rows) expect(row.actions).toEqual([]);
+  });
+
+  describe("a tenant who joined after the period", () => {
+    // Recorded on 1 May in Kampala (21:30 UTC on 30 April), after April's last day there.
+    const MAY_FIRST_KAMPALA = "2026-04-30T21:30:00+00:00";
+    const late = (o: Partial<NotBilledTenant> = {}): NotBilledTenant => ({
+      id: T(9),
+      display_name: "Zawadi Late",
+      primaryLinks: [],
+      created_at: MAY_FIRST_KAMPALA,
+      ...o,
+    });
+
+    it.each([
+      ["recorded after the period, with no meter", late(), true],
+      ["recorded after the period, with a meter from after it", late({ primaryLinks: [link("2026-05-01", null)] }), true],
+      ["recorded after the period, with a meter from within it", late({ primaryLinks: [link("2026-04-15", null)] }), false],
+      ["recorded after the period, with one of two meters from before it", late({ primaryLinks: [link("2026-06-01", null), link("2026-04-30", null)] }), false],
+      ["recorded after the period, with a meter of no start date", late({ primaryLinks: [link(null, null)] }), false],
+      ["recorded on the period's last day in its zone (late in UTC's day before)", late({ created_at: "2026-04-29T21:30:00+00:00" }), false],
+      ["recorded before the period, with a meter from after it", late({ created_at: EARLY, primaryLinks: [link("2026-05-01", null)] }), false],
+      ["recorded at a time that cannot be read", late({ created_at: "not a time" }), false],
+    ])("%s: joined after it is %s", (_label, tenant, expected) => {
+      expect(joinedAfterPeriod(tenant, PERIOD)).toBe(expected);
+    });
+
+    it("keeps a tenant whose creation cannot be placed in an unknown zone", () => {
+      expect(joinedAfterPeriod(late(), { ...PERIOD, timezone: "Not/AZone" })).toBe(false);
+    });
+
+    it("is left out of a closed period's list, and of the count the loader checks", () => {
+      const closed = { ...PERIOD, status: "closed" as const };
+      const input = { tenants: [late(), late({ id: T(8), display_name: "Within", primaryLinks: [link("2026-04-15", null)] })], billedTenantIds: new Set<string>() };
+      expect(build({ ...input, period: closed }).body.rows.map((r) => r.id)).toEqual([T(8)]);
+      expect(notBilledTenants(input.tenants, input.billedTenantIds, closed).map((t) => t.id)).toEqual([T(8)]);
+    });
+
+    it("is still listed in a draft, which can bill them from readings", () => {
+      const model = build({ tenants: [late()], billedTenantIds: new Set() });
+      expect(model.body.rows.map((r) => r.id)).toEqual([T(9)]);
+      expect(model.body.rows[0].actions).toHaveLength(1);
+    });
+
+    it("leaves a closed period with every tenant then billed saying so", () => {
+      const model = build({ period: { ...PERIOD, status: "closed" }, tenants: [late()], billedTenantIds: new Set() });
+      expect(model.body).toMatchObject({ rows: [], empty: { title: NOT_BILLED_COPY.allBilled } });
+    });
   });
 
   it("promises a closed period's metered tenant no bill from its meter, which no run can give it", () => {
