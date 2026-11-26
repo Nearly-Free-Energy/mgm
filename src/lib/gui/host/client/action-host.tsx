@@ -50,8 +50,8 @@
  * round, ticks and typing cleared, with the route's message as its note. It
  * never sends on its own: the person confirms the new step as any other. A
  * refused second prepare ends the action with that refusal, and a different
- * action or a weaker level ends it with the route's 409; both refresh the
- * view. A second prepare that throws ends it with the 409 too. Any other
+ * action or a weaker level ends it with the route's 409, as does a second
+ * prepare that throws, which is logged; each refreshes the view. Any other
  * failed write shows the same step again with the route's message.
  */
 import {
@@ -376,7 +376,7 @@ export function ActionHost({
   const prepareAgain = useCallback(
     async (current: Flow, values: Json | null, result: Failure) => {
       // It runs unawaited, so a throw would leave the step busy for good:
-      // any throw ends the action with the write's answer instead.
+      // any throw is logged and ends the action with the write's answer instead.
       try {
         const again = withoutKeys(values, current.writeOnly);
         const next = await prepare(runtime, current.ref, isObject(again) ? again : undefined);
@@ -404,8 +404,12 @@ export function ActionHost({
           { flow: fresh, step: fresh.hasForm ? "form" : "confirm", busy: false, error: { message: result.message }, values: again },
           true,
         );
-      } catch {
-        finish(current, result);
+      } catch (error) {
+        console.error("[gui] prepare again failed", error);
+        if (flow.current === current) {
+          finish(current, result);
+          runtime.refresh();
+        }
       }
     },
     [runtime, finish, show, forms],

@@ -298,7 +298,10 @@ read a stored credential, or to send data to another origin.
      the new step as a new round, ticks and typing cleared, with the
      route's message as its note, and never sends on its own. A refusal of
      the new prepare ends the action with that refusal and refreshes the
-     view; any other answer ends it with the route's 409. Any other failed
+     view; any other answer (another action, route, method or bound
+     fields, or a weaker level), and a new prepare that throws, ends it
+     with the route's 409 and refreshes the view too, since the write was
+     refused because something changed. Any other failed
      write shows the same step again with the route's message. The host
      prepares again through `prepareAction` rather than using a step the
      route's body may carry, so the step is always one the host checked,

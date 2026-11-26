@@ -1372,11 +1372,15 @@ describe("ActionHost when what was confirmed changed", () => {
 
   it("ends with the write's 409, never a step left busy, when the second prepare's answer cannot be read", async () => {
     // A "prepared" answer with no spec: reading it throws inside prepareAgain.
-    const { writes } = mount([{ body: closing("UGX 100", "d1") }, { body: { type: "prepared" } }], { status: 409, body: CHANGED });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { runtime, writes } = mount([{ body: closing("UGX 100", "d1") }, { body: { type: "prepared" } }], { status: 409, body: CHANGED });
     const done = act(ref());
     await confirmAll();
     await expect(done).resolves.toMatchObject({ ok: false, status: 409, code: "acme_changed", message: CHANGED.error });
     await waitFor(() => expect(screen.queryByRole("button", { name: "Rename site" })).toBeNull());
+    expect(runtime.refresh).toHaveBeenCalledOnce();
+    expect(logged).toHaveBeenCalledWith("[gui] prepare again failed", expect.any(TypeError));
+    logged.mockRestore();
     expect(writes()).toHaveLength(1);
   });
 
