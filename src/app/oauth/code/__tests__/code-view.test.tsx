@@ -51,6 +51,7 @@ describe("CodeView", () => {
     ["a refused sign-in", "?error=access_denied&state=" + STATE, /refused/],
     ["another error", "?error=server_error&error_description=Click%20evil.example", /did not finish/],
     ["no code", `?state=${STATE}`, /incomplete/],
+    ["no state", `?code=${CODE}`, /incomplete/],
     ["a code of the wrong shape", `?code=abc&state=${STATE}`, /incomplete/],
     ["a state of the wrong shape", `?code=${CODE}&state=short`, /incomplete/],
     ["nothing (a reload after the code was shown)", "", /incomplete/],

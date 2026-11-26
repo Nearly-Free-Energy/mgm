@@ -2,11 +2,20 @@
 
 /**
  * The sign-in code, shown once. It is read from the address bar on the first
- * render in the browser, and the query is then removed from the address bar
- * and from this history entry, so the code does not stay in the browser's
- * history or show on a shared screen after it is copied. Reloading the page
- * therefore shows that the link is incomplete; the person runs mgm login
- * again.
+ * render in the browser, and history.replaceState then takes the query off
+ * the address bar and the current history entry, so the code does not show
+ * on a shared screen after it is copied, and Back, Forward and a reload no
+ * longer bring it back: a reload shows that the link is incomplete, and the
+ * person runs mgm login again.
+ *
+ * That is all replaceState does. The browser's history list and address-bar
+ * suggestions still hold the address as Supabase Auth's redirect delivered
+ * it, code included, before this page ran. The code is safe there because it
+ * works once, only until its authorization expires, and only with the PKCE
+ * verifier the CLI holds (ADR-008 decision 3). If a code ever outlives its
+ * exchange or its authorization, or a client sends the `plain` challenge
+ * method (whose verifier is the challenge, in the authorize address in the
+ * same history), revisit this.
  */
 import * as React from "react";
 import { CODE_PATH } from "@/lib/auth/client-consent";
@@ -101,6 +110,9 @@ export function CodeView() {
 
       <div role="note" className="space-y-1 rounded-md border-l-4 border-warning bg-warning-muted p-4 text-warning-fg">
         <p className="text-body font-semibold">Paste it only into the terminal that asked for it</p>
+        {/* Ten minutes: Supabase Auth's default authorization lifetime and the
+            token hook's record window (20261126090100). If either changes,
+            revisit this. */}
         <p className="text-dense">
           Not into a website, a chat or an email. It works once, within ten minutes of running{" "}
           <code className="font-mono">mgm login</code>. If you did not run it, close this page.

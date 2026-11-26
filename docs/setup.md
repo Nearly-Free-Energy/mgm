@@ -369,7 +369,14 @@ the version a project runs with `curl <supabase-url>/auth/v1/health -H
   `enabled = true`, `authorization_url_path = "/oauth/consent"`,
   `allow_dynamic_registration = false`). Supabase Auth sends the person to
   the consent page at `site_url` plus that path. The CLI's built-in signing
-  key is enough; no key setup is needed.
+  key is enough; no key setup is needed. The clients' return address is
+  `MGM_APP_URL` plus `/oauth/code` (the discovery answer gives the CLI that
+  address), and the consent page follows Supabase Auth only to the code page
+  of its own origin, so `MGM_APP_URL` must have `site_url`'s origin. Locally
+  that is `http://127.0.0.1:3000`, not the `http://localhost:3000` that
+  `./setup.sh` and `.env.local.example` write: to sign a client in locally,
+  set `MGM_APP_URL=http://127.0.0.1:3000` in `.env.local` and open MGM at
+  that address.
 - *Hosted:* leave the OAuth server off until the release you run includes
   MGM's consent and code pages (#271, released with the CLI), the
   resolver's check of client tokens (#272) and the CLI. Before then no client can complete a sign-in, and a
@@ -391,17 +398,20 @@ If the access-token hook is not on, or the migrations up to
 
 **2. Register each client** with Supabase Auth's admin endpoint, as a
 public client: no secret, the grant types `authorization_code` and
-`refresh_token`, and one return address, MGM's sign-in code page,
-`/oauth/code`. Return addresses must match exactly, port included.
-Locally:
+`refresh_token`, and one return address, MGM's sign-in code page:
+`MGM_APP_URL` plus `/oauth/code`, the address the discovery answer gives
+the CLI. Supabase Auth compares return addresses as exact strings, so
+`localhost` and `127.0.0.1` differ, and so do ports. Locally, with
+`MGM_APP_URL` set as in step 1:
 
 ```bash
 eval "$(supabase status -o env | grep '^SERVICE_ROLE_KEY=')"
+MGM_APP_URL=http://127.0.0.1:3000   # as in .env.local: site_url's origin
 curl -sS -X POST http://127.0.0.1:54321/auth/v1/admin/oauth/clients \
   -H "apikey: $SERVICE_ROLE_KEY" -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
   -H "Content-Type: application/json" \
   -d '{"client_name": "MGM CLI",
-       "redirect_uris": ["http://127.0.0.1:3000/oauth/code"],
+       "redirect_uris": ["'"$MGM_APP_URL"'/oauth/code"],
        "grant_types": ["authorization_code", "refresh_token"],
        "token_endpoint_auth_method": "none"}'
 ```
@@ -409,9 +419,8 @@ curl -sS -X POST http://127.0.0.1:54321/auth/v1/admin/oauth/clients \
 The answer's `client_id` is the client's id, and its `client_type` must be
 `public`. For a hosted project, send the same request to
 `https://<ref>.supabase.co/auth/v1/admin/oauth/clients` with the project's
-service-role key, and `MGM_APP_URL` in place of `http://127.0.0.1:3000`; or
-add the client in the dashboard as a public client with the same return
-address. For the assistant bridge, repeat with `"client_name": "MGM
+service-role key and `MGM_APP_URL` set to MGM's address; or add the client
+in the dashboard as a public client with the same return address. For the assistant bridge, repeat with `"client_name": "MGM
 assistant bridge"`.
 
 **3. List each client in MGM's table.** Locally with `supabase db query`,
@@ -716,6 +725,17 @@ one of its days, checks that
 neither scrolls sideways and that every link and button in `main` is at
 least 44 × 44 px, and follows the links from the month to a day, to the
 day before and back up to the month.
+
+`e2e/oauth.spec.ts` signs a client in through the consent and code pages
+(#271), once as the organization manager and once as the tenant: it
+registers a client of its own with Supabase Auth, whose return address is
+the code page on port 3100, lists it in `mgm_clients`, answers Connect,
+exchanges the string the code page shows for a token, opens a second
+sign-in and answers Don't connect, and opens an unknown sign-in and the
+code page with no code, checking each at 360 px. Connect's record is the
+one write it allows. It is skipped until `src/lib/mgm/released-routes.ts`
+lists `/oauth/consent`, `/oauth/code` and `/api/auth/oauth/approvals`, and
+runs from the release that does.
 
 ```bash
 npx playwright install chromium        # once

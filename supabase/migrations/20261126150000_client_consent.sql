@@ -14,13 +14,14 @@
 -- MGM's server calls them after a getUser() check of the person's cookie
 -- session, with that person's id (the consent page and
 -- POST /api/auth/oauth/approvals; service-role-session-check.test.ts lists
--- both). They read five columns of auth.oauth_authorizations as Supabase Auth
--- v2.198.0 defines them: authorization_id, client_id, user_id, status and
--- expires_at. If Supabase renames one, both functions fail; if it changes
--- what status holds, the page answers that the sign-in was already answered.
--- client_consent.test.ts pins the columns and their types on the version CI
--- runs (ADR-008, Consequences: MGM depends on the shape of Supabase Auth's
--- tables).
+-- both). They read six columns of auth.oauth_authorizations as Supabase Auth
+-- v2.198.0 defines them: authorization_id, client_id, user_id, status,
+-- expires_at and created_at (the record alone reads created_at). If
+-- Supabase renames one, the functions that read it fail; if it changes what
+-- status holds, the page answers that the sign-in was already answered.
+-- client_consent.test.ts pins the columns, their types and the status labels
+-- on the version CI runs (ADR-008, Consequences: MGM depends on the shape of
+-- Supabase Auth's tables; and its amendment of 26 Nov 2026 on this table).
 --
 -- An answer, in order:
 --   'unknown'  no such authorization, or Supabase Auth has bound it to
@@ -99,6 +100,17 @@ COMMENT ON FUNCTION public.fn_client_authorization_read(TEXT, UUID) IS
 -- session, which binds the authorization to them. A record whose
 -- authorization another person recorded first is not written, and the
 -- answer is 'unknown'.
+--
+-- A record takes its authorization's created_at rather than the time of the
+-- click, or the click's if that is earlier (Supabase Auth's clock running
+-- ahead of the database's). The hook counts a record for ten minutes from created_at, and an authorization
+-- lives ten minutes from its own created_at by default, so a record ends
+-- with the sign-in it was written for, give or take the skew between the two
+-- clocks, rather than up to ten minutes after it. The person's own exchange
+-- loses nothing: its code works only until the authorization expires
+-- (ADR-008 decision 3). If the hook's window or Supabase Auth's lifetime
+-- changes, or Supabase Auth stops setting created_at when it creates the
+-- authorization, revisit this.
 CREATE OR REPLACE FUNCTION public.fn_client_approval_record(_authorization_id TEXT, _user_id UUID)
 RETURNS TABLE (outcome TEXT, client_id UUID, kind TEXT, label TEXT)
 LANGUAGE plpgsql
@@ -109,6 +121,7 @@ AS $$
 #variable_conflict use_column
 DECLARE
   _read RECORD;
+  _started TIMESTAMPTZ;
 BEGIN
   SELECT r.outcome, r.client_id, r.kind, r.label INTO _read
     FROM public.fn_client_authorization_read(_authorization_id, _user_id) AS r;
@@ -117,8 +130,17 @@ BEGIN
     RETURN;
   END IF;
 
-  INSERT INTO public.mgm_client_approvals (user_id, client_id, authorization_id)
-  VALUES (_user_id, _read.client_id, _authorization_id)
+  SELECT a.created_at INTO _started
+    FROM auth.oauth_authorizations AS a
+   WHERE a.authorization_id = _authorization_id;
+  IF _started IS NULL THEN
+    -- Gone since the read above: Supabase Auth cleans up old authorizations.
+    RETURN QUERY SELECT 'unknown'::text, NULL::uuid, NULL::text, NULL::text;
+    RETURN;
+  END IF;
+
+  INSERT INTO public.mgm_client_approvals (user_id, client_id, authorization_id, created_at)
+  VALUES (_user_id, _read.client_id, _authorization_id, LEAST(_started, now()))
   ON CONFLICT ON CONSTRAINT mgm_client_approvals_authorization_id_key DO NOTHING;
 
   IF NOT EXISTS (

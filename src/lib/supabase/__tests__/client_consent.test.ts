@@ -15,6 +15,8 @@
  *      someone else), expired, answered; only ok writes a record.
  *   4. One record per authorization: a second call writes nothing, and
  *      another person cannot record an authorization someone else recorded.
+ *   5. A record takes its authorization's created_at, so the hook's ten
+ *      minutes end with the sign-in it was written for.
  *
  * The page and route around these, and a sign-in that uses the record, are
  * src/app/api/auth/oauth/approvals/__tests__/sign-in.db.test.ts.
@@ -213,12 +215,13 @@ describe.skipIf(skip)("client consent: the consent page's read and record (#271)
     const columns = ownerRows<{ column_name: string; udt_name: string }>(
       `SELECT column_name, udt_name FROM information_schema.columns
         WHERE table_schema = 'auth' AND table_name = 'oauth_authorizations'
-          AND column_name IN ('authorization_id', 'client_id', 'user_id', 'status', 'expires_at')
+          AND column_name IN ('authorization_id', 'client_id', 'user_id', 'status', 'expires_at', 'created_at')
         ORDER BY column_name`
     );
     expect(columns).toEqual([
       { column_name: "authorization_id", udt_name: "text" },
       { column_name: "client_id", udt_name: "uuid" },
+      { column_name: "created_at", udt_name: "timestamptz" },
       { column_name: "expires_at", udt_name: "timestamptz" },
       { column_name: "status", udt_name: "oauth_authorization_status" },
       { column_name: "user_id", udt_name: "uuid" },
@@ -309,5 +312,25 @@ describe.skipIf(skip)("client consent: the consent page's read and record (#271)
     expect((await call("fn_client_approval_record", id, userA)).outcome).toBe("ok");
     expect(await call("fn_client_approval_record", id, userB)).toEqual(refused("unknown"));
     expect(records(id)).toEqual([{ user_id: userA, client_id: listed, used: false }]);
+  }, 30_000);
+
+  // ── 5. When a record starts ───────────────────────────────────────────────
+
+  it("dates a record from its authorization, never later than the click", async () => {
+    // Started five minutes ago and still pending: the record ends with it.
+    const earlier = await authorize(listed);
+    ownerRows(`UPDATE auth.oauth_authorizations SET created_at = now() - interval '5 minutes' WHERE authorization_id = '${earlier}' RETURNING 1 AS n`);
+    // A clock ahead of the database's gives no extra time.
+    const ahead = await authorize(listed);
+    ownerRows(`UPDATE auth.oauth_authorizations SET created_at = now() + interval '5 minutes' WHERE authorization_id = '${ahead}' RETURNING 1 AS n`);
+    for (const id of [earlier, ahead]) expect((await call("fn_client_approval_record", id, userA)).outcome).toBe("ok");
+
+    const [row] = ownerRows<{ same: boolean; ahead_not_later: boolean }>(
+      `SELECT
+         (SELECT r.created_at = a.created_at FROM public.mgm_client_approvals r
+            JOIN auth.oauth_authorizations a USING (authorization_id) WHERE r.authorization_id = '${earlier}') AS same,
+         (SELECT r.created_at <= now() FROM public.mgm_client_approvals r WHERE r.authorization_id = '${ahead}') AS ahead_not_later`
+    );
+    expect(row).toEqual({ same: true, ahead_not_later: true });
   }, 30_000);
 });

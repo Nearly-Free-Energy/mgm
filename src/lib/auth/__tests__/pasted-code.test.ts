@@ -26,6 +26,7 @@ describe("the pasted sign-in code", () => {
     ["a state that is too long", { state: "a".repeat(513), code: CODE }],
     ["a code that is not a UUID", { state: STATE, code: "not-a-code" }],
     ["an empty code", { state: STATE, code: "" }],
+    ["an empty state", { state: "", code: CODE }],
   ])("refuses to make one from %s", (_name, parts) => {
     expect(encodePastedCode(parts)).toBeNull();
   });
