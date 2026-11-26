@@ -78,13 +78,6 @@ export type ManualReadingInput = {
   reason?: string;
 };
 
-export type SeedReadingInput = {
-  deviceId: string;
-  dialReadingKwh: number;
-  readAt: string;
-  startKwh: number;
-};
-
 export type GenerationOutput = GenerationResult;
 
 export type GenerationFatal = RunGenerationFatal;
@@ -101,7 +94,6 @@ export interface BillingGeneration {
     tenantIds?: string[];
     manualReadings?: ManualReadingInput[];
     revertToEdgeTenantIds?: string[];
-    seedReadings?: SeedReadingInput[];
     /** The capability only writes; a preview runs through billing review (src/lib/cordis/billing-review.ts). */
     mode: "write";
     actorUserId: string;

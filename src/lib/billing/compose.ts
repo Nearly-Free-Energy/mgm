@@ -68,7 +68,6 @@ export const BillingPlugin = {
           tenantIds: input.tenantIds,
           manualReadings: input.manualReadings,
           revertToEdgeTenantIds: input.revertToEdgeTenantIds,
-          seedReadings: input.seedReadings,
           mode: input.mode,
           actorUserId: input.actorUserId,
           expectedBill: input.expectedBill,

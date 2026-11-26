@@ -151,10 +151,10 @@ export type ManualReadingInput = {
  *
  * All three are sent. The derived value is what generation uses; the inputs
  * are what make a wrong seed diagnosable a year later rather than anonymous.
- * GenerateBillsBody checks only that startKwh does not exceed dialReadingKwh;
- * nothing recomputes startKwh from the inputs, so
- * the client's arithmetic is trusted. If a server-side recomputation is
- * added, say so here.
+ * No request body carries seeds any more (GenerateBillsBody version 2):
+ * billing review's preview is the one run that takes them, resolved on the
+ * server (src/lib/cordis/review-seeds.ts). Nothing here recomputes startKwh
+ * from the inputs. If a server-side recomputation is added, say so here.
  *
  * `readAt` is NOT "now". An operator can read a dial in the morning and type
  * it that evening, and the subtraction is over the interval that actually

@@ -760,7 +760,6 @@ export class BillingCapability implements BillingCapabilityContract {
       tenantIds: parsed.tenantIds,
       manualReadings: parsed.manualReadings,
       revertToEdgeTenantIds: parsed.revertToEdgeTenantIds,
-      seedReadings: parsed.seedReadings,
       mode: "write",
       actorUserId: this.scope.userId,
       ...(expectedBill ? { expectedBill } : {}),
