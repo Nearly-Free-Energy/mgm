@@ -9,7 +9,8 @@
  *   - filters discovery results to consumption_meter only
  *   - persists via POST /api/devices, then hands the saved device back to
  *     the wizard via `onDevicePersisted` so the parent can append it to
- *     `availableMeters` and auto-select it
+ *     `availableMeters` and auto-select it; the saved meter then leaves
+ *     the candidates, as it would on the next discover
  *   - errors are owned + rendered inline (no `onError` callback)
  *   - components the route skipped because MGM cannot store their id
  *     (`skipped` in the response) are named in a note, as in `<DiscoverDevices>`
@@ -249,10 +250,17 @@ export function DiscoverMeterInline({
       };
 
       onDevicePersisted(newMeter);
-      // Reset the inline pick UI so re-discovery starts clean. Phase goes
-      // back to 'ready' rather than 'idle' because the discovery list is
-      // still relevant; the saved component will appear `alreadyAdded:true`
-      // on the next discover.
+      // The meter is saved now, and the wizard's own meter list holds it
+      // and selects it. Mark it `alreadyAdded`, as the next discover would,
+      // so it leaves the candidates: picking it here again would send it to
+      // POST /api/devices a second time, which refuses a saved device (409
+      // metering_devices_already_saved). Phase goes back to 'ready' rather
+      // than 'idle' because the rest of the discovery list still applies.
+      setDiscovered((prev) =>
+        prev.map((d) =>
+          d.componentId === candidate.componentId ? { ...d, alreadyAdded: true } : d
+        )
+      );
       setPickedComponentId("");
       setEditedName("");
       setPhase("ready");
@@ -384,12 +392,17 @@ export function DiscoverMeterInline({
           meter to contain a keyword, when the device-type control has existed
           since #151. When discovery skipped components (the note above), the
           edge is reachable and configured, so the first branch leaves that
-          hint out too. */}
+          hint out too. A consumption meter that is already saved (one saved
+          from this list included) is not unclassified: when every consumption
+          meter found is saved, there is simply no new one, and the edge is
+          reachable and configured, so the hint stays out. */}
       {showResults && edgeOnline && candidates.length === 0 && (
-        discovered.length === 0 ? (
+        discovered.length === 0 ||
+        discovered.some((d) => d.suggestedDeviceType === "consumption_meter") ? (
           <p className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">
             No new consumption meters on this edge.
-            {skipped.length === 0 &&
+            {discovered.length === 0 &&
+              skipped.length === 0 &&
               " Make sure the edge is online and has components configured."}
           </p>
         ) : (
