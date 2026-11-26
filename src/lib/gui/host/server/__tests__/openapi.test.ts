@@ -27,7 +27,7 @@ import { MGM_BUNDLED_PLUGINS } from "@/lib/plugins/bundled";
 import { getMgmRuntime, resetMgmRuntimeForTests } from "@/lib/runtime/root";
 import { UNGATED_WRITES, apiRouteFiles, exemptionKey, handlerSources } from "@/lib/runtime/__tests__/route-rules";
 import { describeAction } from "../catalog";
-import { HOST_CODES, listedCodes } from "../error-codes";
+import { HOST_CODES, PREPARE_AGAIN, listedCodes } from "../error-codes";
 import {
   EMPTY_BODY_ROUTES,
   HOST_ROUTES,
@@ -203,12 +203,34 @@ describe("the OpenAPI document", () => {
 
   it("names only listed codes on the host's routes, and every host code a route answers", () => {
     const plugins = MGM_BUNDLED_PLUGINS.filter((p) => !p.core).map((p) => p.name);
-    const listed = new Set(listedCodes(plugins.flatMap((p) => [[p, "disabled"] as const, [p, "unavailable"] as const])).map((c) => c.code));
+    const listed = new Set(listedCodes(plugins.flatMap((p) => [[p, "disabled"] as const, [p, "unavailable"] as const]), []).map((c) => c.code));
     const named = new Set(operations(doc).filter(({ path: p }) => p.startsWith("/api/gui/")).flatMap(({ op }) => codesOf(op)));
     for (const code of named) expect(listed.has(code), code).toBe(true);
     for (const [code, entry] of Object.entries(HOST_CODES)) if (entry.status.length > 0) expect(named.has(code), code).toBe(true);
     const published = (doc["x-mgm-error-codes"] as Obj[]).map((c) => c.code as string);
     for (const code of named) expect(published, code).toContain(code);
+  });
+
+  it("lists every code any operation names, once, at each status it is named at", () => {
+    const list = doc["x-mgm-error-codes"] as Obj[];
+    const published = new Map(list.map((c) => [c.code as string, c]));
+    expect(published.size).toBe(list.length);
+    for (const { path: p, method, op } of operations(doc)) {
+      for (const [status, response] of Object.entries(op.responses)) {
+        for (const code of (response["x-mgm-codes"] as string[] | undefined) ?? []) {
+          const at = `${method} ${p} ${status}: ${code}`;
+          expect(published.has(code), at).toBe(true);
+          expect(published.get(code)?.status, at).toContain(Number(status));
+        }
+      }
+    }
+  });
+
+  it("lists each action's prepareAgainOn codes at 409, with what they mean", () => {
+    const again = [...surface.actions.values()].flatMap(({ def }) => def.prepareAgainOn ?? []);
+    expect(again.length).toBeGreaterThan(0);
+    const published = new Map((doc["x-mgm-error-codes"] as Obj[]).map((c) => [c.code as string, c]));
+    for (const code of again) expect(published.get(code), code).toEqual({ code, status: [409], meaning: PREPARE_AGAIN.meaning });
   });
 
   it("describes each host shape the same as a request or an answer, so one schema serves both", () => {
@@ -270,6 +292,11 @@ describe("openApiDocument, on actions the registry does not hold yet", () => {
     expect(Object.keys((body["application/json"].schema as Obj).properties as Obj)).toEqual(["note", "confirmation"]);
     expect(op.responses["400"]["x-mgm-codes"]).toEqual(["invalid_body"]);
     expect(op.responses["409"]["x-mgm-codes"]).toEqual(["billing_disabled", "zz_changed"]);
+    expect((doc["x-mgm-error-codes"] as Obj[]).find((c) => c.code === "zz_changed")).toEqual({
+      code: "zz_changed",
+      status: [409],
+      meaning: PREPARE_AGAIN.meaning,
+    });
     expect(op.responses["503"]["x-mgm-codes"]).toEqual(["billing_gate_unavailable"]);
     // The route answers 401 too, when Supabase Auth refuses a session middleware let through.
     expect(op.responses["401"]).toMatchObject({

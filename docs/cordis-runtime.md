@@ -494,13 +494,17 @@ The described API's error codes are listed in one place,
 `src/lib/gui/host/server/error-codes.ts`, each with what it means and the
 statuses it comes with: the host's `gui_` codes, the catalog's reasons
 among them; the gate's two refusals, `<plugin>_disabled` (409) and
-`<plugin>_gate_unavailable` (503); and `invalid_body` (400), which
-`parseJsonBody` answers on every action route. An action route's other
-codes are its own and are not listed yet, since no field of an action
-names them. `error-codes.test.ts` fails while a `gui_` code written in the
-host's server modules or routes is missing from the list, a listed one is
-written nowhere, or a status written beside a code is not listed for it,
-and it asks the gate and `parseJsonBody` for theirs. Two answers come from
+`<plugin>_gate_unavailable` (503); `invalid_body` (400), which
+`parseJsonBody` answers on every action route; and each code an action
+lists in `prepareAgainOn` (409), its route's own, on which the host
+prepares the action again (`PREPARE_AGAIN`). An action route's other codes
+are its own too and are not listed yet, since no field of an action names
+them. `openapi.test.ts` fails while an operation names a code the
+document does not list at that status. `error-codes.test.ts` fails while a
+`gui_` code written in the host's server modules or routes is missing from
+the list, a listed one is written nowhere, or a status written beside a
+code is not listed for it, and it asks the gate and `parseJsonBody` for
+theirs. Two answers come from
 middleware before any route and carry no code: a 401 `{ error }` for an
 API request with no session, and a plain-text 404 for a path not
 released.

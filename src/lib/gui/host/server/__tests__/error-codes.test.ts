@@ -20,7 +20,7 @@ import { z } from "zod";
 import { MGM_BUNDLED_PLUGINS, getBundledPlugin } from "@/lib/plugins/bundled";
 import { MgmGate } from "@/lib/runtime/gate";
 import { parseJsonBody } from "@/lib/validation/parse-body";
-import { BODY_CODES, GATE_CODES, HOST_CODES, gateCode, listedCodes, type HostCode } from "../error-codes";
+import { BODY_CODES, GATE_CODES, HOST_CODES, PREPARE_AGAIN, gateCode, listedCodes, type HostCode } from "../error-codes";
 
 const REPO = path.resolve(__dirname, "../../../../../..");
 const HOST_SERVER = "src/lib/gui/host/server";
@@ -177,15 +177,32 @@ describe("the body parser's code", () => {
 });
 
 describe("listedCodes", () => {
-  it("lists every host and body code, and the gate's codes asked for, each once and sorted", () => {
-    const codes = listedCodes([
-      ["billing", "disabled"],
-      ["payments", "unavailable"],
-      ["billing", "disabled"],
-    ]).map((c) => c.code);
+  it("lists every host and body code, and the gate's and prepare-again codes asked for, each once and sorted", () => {
+    const listed = listedCodes(
+      [
+        ["billing", "disabled"],
+        ["payments", "unavailable"],
+        ["billing", "disabled"],
+      ],
+      ["zz_changed", "aa_changed", "zz_changed"],
+    );
+    const codes = listed.map((c) => c.code);
     expect(codes).toEqual([...codes].sort());
     expect(new Set(codes).size).toBe(codes.length);
-    expect(codes.filter((c) => !Object.hasOwn(HOST_CODES, c))).toEqual(["billing_disabled", "invalid_body", "payments_gate_unavailable"]);
+    expect(codes.filter((c) => !Object.hasOwn(HOST_CODES, c))).toEqual([
+      "aa_changed",
+      "billing_disabled",
+      "invalid_body",
+      "payments_gate_unavailable",
+      "zz_changed",
+    ]);
     expect(codes).toEqual(expect.arrayContaining(Object.keys(HOST_CODES)));
+    expect(listed.find((c) => c.code === "zz_changed")).toEqual({ code: "zz_changed", status: [409], meaning: PREPARE_AGAIN.meaning });
+  });
+
+  it("refuses a prepare-again code that is also the host's, the gate's or the body's", () => {
+    for (const code of ["gui_not_found", "billing_disabled", "invalid_body"]) {
+      expect(() => listedCodes([["billing", "disabled"]], [code]), code).toThrow(code);
+    }
   });
 });

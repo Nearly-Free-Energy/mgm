@@ -12690,6 +12690,13 @@
       "meaning": "Whether the plugin is on could not be read, so nothing was done. Try again."
     },
     {
+      "code": "billing_period_totals_changed",
+      "status": [
+        409
+      ],
+      "meaning": "The route's own: what the person confirmed changed after prepare. Prepare the action again and confirm the new step; the route never takes the old one."
+    },
+    {
       "code": "community_management_disabled",
       "status": [
         409
@@ -12856,6 +12863,13 @@
       "meaning": "The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one."
     },
     {
+      "code": "metering_connection_name_required",
+      "status": [
+        409
+      ],
+      "meaning": "The route's own: what the person confirmed changed after prepare. Prepare the action again and confirm the new step; the route never takes the old one."
+    },
+    {
       "code": "metering_disabled",
       "status": [
         409
@@ -12884,6 +12898,13 @@
         "healthy"
       ],
       "meaning": "Whether the plugin is on could not be read, so nothing was done. Try again."
+    },
+    {
+      "code": "version_conflict",
+      "status": [
+        409
+      ],
+      "meaning": "The route's own: what the person confirmed changed after prepare. Prepare the action again and confirm the new step; the route never takes the old one."
     }
   ]
 }

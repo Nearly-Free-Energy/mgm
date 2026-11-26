@@ -35,7 +35,7 @@ import { GUI_CONTRACT, type EntityKind, type Json } from "../../contract";
 import { OWN_ID_RE, byCatalogOrder } from "../shared/merge-actions";
 import { TENANT_UNIT_PARAM } from "../shared/tenant-units";
 import { MAX_CATALOG_ENTITIES, describeAction } from "./catalog";
-import { BODY_CODES, GATE_CODES, HOST_CODES, gateCode, listedCodes, type GateRefusal, type HostCode } from "./error-codes";
+import { BODY_CODES, GATE_CODES, HOST_CODES, PREPARE_AGAIN, gateCode, listedCodes, type GateRefusal, type HostCode } from "./error-codes";
 import { describeBody } from "./input-spec";
 import * as model from "./model-schema";
 import { MAX_PREPARE_BYTES, prepareBodySchema, preparedActionSchema } from "./prepare";
@@ -588,11 +588,7 @@ function actionOperation(method: string, pattern: string, group: readonly Regist
   const coded: Coded[] = [
     BODY_REFUSAL,
     ...(gates ? [gateCoded(plugin, "disabled"), gateCoded(plugin, "unavailable")] : []),
-    ...again.map((code) => ({
-      code,
-      status: [409],
-      meaning: "The route's own: what the person confirmed changed after prepare. Prepare the action again and confirm the new step; the route never takes the old one.",
-    })),
+    ...again.map((code) => ({ code, status: PREPARE_AGAIN.status, meaning: PREPARE_AGAIN.meaning })),
   ];
   const isReleased = released(pattern);
   const titles = actions.map(({ def }) => def.title);
@@ -729,7 +725,10 @@ export function openApiDocument(surface: DescribedSurface): OpenApiDocument {
         },
       },
     },
-    "x-mgm-error-codes": listedCodes(gated).map((c) => plain(c)),
+    "x-mgm-error-codes": listedCodes(
+      gated,
+      [...surface.actions.values()].flatMap(({ def }) => def.prepareAgainOn ?? []),
+    ).map((c) => plain(c)),
   };
 }
 

@@ -21,13 +21,16 @@ import "server-only";
  * - BODY_CODES: the refusal of parseJsonBody (src/lib/validation/parse-body.ts),
  *   which every action's route parses its body with (gui-surface.test.ts,
  *   check 2).
+ * - PREPARE_AGAIN: what each code an action lists in `prepareAgainOn`
+ *   (ActionDef in ../../surface.ts) means. Those codes are its route's own,
+ *   and listedCodes takes them from the actions the document describes.
  *
- * An action route's other refusals are its own, such as
+ * An action route's other refusals are its own too, such as
  * `billing_period_not_found`, and not all alike: some carry `code`, many a
  * `reason` instead, some only `error` (ActionRefusal in ./openapi.ts). They
- * are not listed here: no field of an action says which codes its route
- * answers. If ActionDef (../../surface.ts) comes to declare them, list them
- * from there.
+ * are not listed here: an action declares only the codes its route answers
+ * when it must be prepared again, and no field names the rest. If ActionDef
+ * comes to declare them, list them from there as `prepareAgainOn` is.
  *
  * Codes the kit makes on the client for an interface (`cancelled`,
  * `gui_bad_action`, `gui_bad_href`) are never an HTTP answer, so they are not
@@ -185,15 +188,31 @@ export const BODY_CODES = {
   },
 } as const satisfies Record<string, CodeEntry>;
 
+/**
+ * A code an action lists in `prepareAgainOn` (ActionDef in ../../surface.ts):
+ * its route's own refusal when what the person confirmed has changed since
+ * prepare. The host prepares the action again on such a code only at 409
+ * (../client/action-host.tsx), so that is its status. If the host comes to
+ * prepare again at another status, revisit it.
+ */
+export const PREPARE_AGAIN = {
+  status: [409],
+  meaning:
+    "The route's own: what the person confirmed changed after prepare. Prepare the action again and confirm the new step; the route never takes the old one.",
+} as const satisfies CodeEntry;
+
 /** One code as the document lists it. */
 export type ListedCode = CodeEntry & { code: string };
 
 /**
- * Every host and body code above, and the gate's code for each plugin and
- * refusal in `gates`, each once, sorted by code: the list the OpenAPI
- * document publishes, given the gate refusals its routes answer.
+ * Every host and body code above, the gate's code for each plugin and
+ * refusal in `gates`, and each code in `prepareAgain`, each once, sorted by
+ * code: the list the OpenAPI document publishes, given the gate refusals its
+ * routes answer and its actions' `prepareAgainOn` codes. Throws if a
+ * `prepareAgain` code is also one of the others, which would list one code
+ * with two meanings.
  */
-export function listedCodes(gates: Iterable<readonly [MgmPluginName, GateRefusal]>): ListedCode[] {
+export function listedCodes(gates: Iterable<readonly [MgmPluginName, GateRefusal]>, prepareAgain: Iterable<string>): ListedCode[] {
   const entry = (code: string, e: CodeEntry): ListedCode => ({
     code,
     status: [...e.status],
@@ -201,10 +220,15 @@ export function listedCodes(gates: Iterable<readonly [MgmPluginName, GateRefusal
     meaning: e.meaning,
   });
   const gate = new Map([...gates].map(([plugin, refusal]) => [gateCode(plugin, refusal), entry(gateCode(plugin, refusal), GATE_CODES[refusal])]));
-  const all = [
+  const others = [
     ...Object.entries(HOST_CODES).map(([code, e]) => entry(code, e)),
     ...gate.values(),
     ...Object.entries(BODY_CODES).map(([code, e]) => entry(code, e)),
   ];
-  return all.sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
+  const taken = new Set(others.map((c) => c.code));
+  const again = [...new Set(prepareAgain)].map((code) => {
+    if (taken.has(code)) throw new Error(`listedCodes: ${code} is an action's prepareAgainOn code and also the host's, the gate's or parseJsonBody's`);
+    return entry(code, PREPARE_AGAIN);
+  });
+  return [...others, ...again].sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
 }
