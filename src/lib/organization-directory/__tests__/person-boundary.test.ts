@@ -34,7 +34,7 @@ import { parseContribution, SurfaceContributionError } from "@/lib/gui/host/serv
 import { prepareAction } from "@/lib/gui/host/server/prepare";
 import type { ActionDef } from "@/lib/gui/surface";
 import { MGM_BUNDLED_PLUGINS } from "@/lib/plugins/bundled";
-import type { Caller } from "@/lib/runtime/caller";
+import { BROWSER, type Caller } from "@/lib/runtime/caller";
 import { getMgmRuntime, resetMgmRuntimeForTests } from "@/lib/runtime/root";
 import type { UserRoleRecord } from "@/lib/types/domain";
 import { ORGANIZATION_DIRECTORY_SURFACE, USER_KIND } from "../surface";
@@ -62,7 +62,7 @@ function context(caller?: Caller) {
       throw new Error("the host read something before refusing the proposal");
     },
     makeFmt: (locale) => createFmt({ locale }),
-    ...(caller ? { caller } : {}),
+    caller: caller ?? BROWSER,
   });
   if (!made.ok) throw new Error("fixture context refused");
   return made.ctx;

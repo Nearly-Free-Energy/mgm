@@ -24,6 +24,7 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers({ "accept-lang
 
 import { STATUS_BUDGET_MS, buildManifest, getManifest, preloadManifest, readManifestQuery, serveManifest } from "../manifest";
 import { ORG_A, ORG_B, contextFor, managerOf, superAdmin, tableClient, tenantHomes, tenantOf } from "./host-fakes";
+import { BROWSER } from "@/lib/runtime/caller";
 
 const COMMUNITY = "e7100000-0000-4000-8001-000000000001";
 const MICROGRID_A = "e7100000-0000-4000-8001-000000000002";
@@ -132,6 +133,7 @@ describe("buildManifest", () => {
     const made = hostContext({ user: user as unknown as User, roles: [managerOf(ORG_A)] }, new Headers(), {
       newClient: async () => client,
       makeFmt: () => ({}) as Fmt,
+      caller: BROWSER,
     });
     if (!made.ok) throw new Error("context refused");
     const outcome = await buildManifest(made.ctx, { gui: "gridtop" });

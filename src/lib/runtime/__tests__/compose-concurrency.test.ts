@@ -312,8 +312,8 @@ describe("composers on the shared runtime", () => {
     // Billing resolves the period through its own organization's client, and
     // generates on that client through a metering source bound to it.
     const previews = await Promise.all([
-      billingA.data.billing.previewBills({ billingPeriodId: SITES[ORG_A].periodId }),
-      billingB.data.billing.previewBills({ billingPeriodId: SITES[ORG_B].periodId }),
+      billingA.data.billing.generateFromMeters(SITES[ORG_A].periodId),
+      billingB.data.billing.generateFromMeters(SITES[ORG_B].periodId),
     ]);
     for (const preview of previews) expect(preview.ok, JSON.stringify(preview)).toBe(true);
     expect(drain(mocks.generationRuns)).toEqual([
@@ -343,7 +343,7 @@ describe("composers on the shared runtime", () => {
     // Disposing `a`'s scopes makes its capabilities inert, before any read.
     await Promise.all([billingA.data.dispose(), meteringA.data.dispose()]);
     expect(
-      await billingA.data.billing.previewBills({ billingPeriodId: SITES[ORG_A].periodId })
+      await billingA.data.billing.generateFromMeters(SITES[ORG_A].periodId)
     ).toMatchObject({ ok: false, code: "billing_composition_disposed" });
     expect(
       await meteringA.data.metering.getConsumption(consumptionQuery(ORG_A))
@@ -355,8 +355,8 @@ describe("composers on the shared runtime", () => {
     // B and A's second manager are still live: past the disposed guard, and
     // each still on its own client.
     const stillBilling = await Promise.all([
-      billingA2.data.billing.previewBills({ billingPeriodId: SITES[ORG_A].periodId }),
-      billingB.data.billing.previewBills({ billingPeriodId: SITES[ORG_B].periodId }),
+      billingA2.data.billing.generateFromMeters(SITES[ORG_A].periodId),
+      billingB.data.billing.generateFromMeters(SITES[ORG_B].periodId),
     ]);
     const [stillMeteringA2, stillMeteringB] = await Promise.all([
       meteringA2.data.metering.getConsumption(consumptionQuery(ORG_A)),
@@ -447,7 +447,7 @@ describe("composers on the shared runtime", () => {
 
     // B's refusal leaves A's compositions working on A's client.
     expect(
-      await billingA.data.billing.previewBills({ billingPeriodId: SITES[ORG_A].periodId })
+      await billingA.data.billing.generateFromMeters(SITES[ORG_A].periodId)
     ).toMatchObject({ ok: true });
     expect(
       await meteringA.data.metering.getConsumption(consumptionQuery(ORG_A))

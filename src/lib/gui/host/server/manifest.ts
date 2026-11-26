@@ -45,6 +45,7 @@ import { surfaceSnapshot } from "./snapshot";
 import type { SurfaceSnapshot } from "./surface-registry";
 import { readTenantUnits, type HostUnit } from "./units";
 import type { HostFailure, HostOutcome } from "./view";
+import { BROWSER } from "@/lib/runtime/caller";
 
 export { STATUS_BUDGET_MS } from "./signals";
 
@@ -272,6 +273,8 @@ export const getManifest = cache(
     const made = hostContext(await getRequestUserAccess(), await headers(), {
       newClient: createClient,
       makeFmt: (locale) => createFmt({ locale }),
+      // A page is cookie-only: middleware refuses a bearer token on it.
+      caller: BROWSER,
     });
     if (!made.ok) return made;
     return buildManifest(made.ctx, { gui, path, requested, preferred });

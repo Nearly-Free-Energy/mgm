@@ -18,7 +18,7 @@ import "server-only";
  */
 import { rolesIncludeStaff } from "@/lib/auth/access";
 import { CORE_ENTITY_KINDS, type CoreEntityKind } from "@/lib/plugins/bundled";
-import type { GateDecision } from "@/lib/runtime/gate";
+import { codePrefix, type GateDecision } from "@/lib/runtime/gate";
 import type { EntityKind, Href, ModelBase, Signals, ViewKind, ViewModel } from "../../contract";
 import type { Loaded, LoadedModel, ViewDef } from "../../surface";
 import { fillPath } from "../shared/merge-actions";
@@ -85,7 +85,8 @@ export function shownNotice(host: Notice | undefined, own: Notice | undefined): 
 }
 /** The shortest refresh the host sends: vendor views call an outside system on every load. */
 export const MIN_REFRESH_SECONDS = { db: 15, vendor: 60 } as const;
-const LOADER_STATUSES: ReadonlySet<number> = new Set([403, 404, 409, 500, 503]);
+/** The statuses a view's loader may refuse with; any other is answered gui_output_invalid. */
+export const LOADER_STATUSES: ReadonlySet<number> = new Set([403, 404, 409, 500, 503]);
 const MAX_MESSAGE = 300;
 const NOT_AVAILABLE = { type: "values", values: [{ t: "text", text: "Not available" }] } as const;
 
@@ -163,10 +164,16 @@ function checkLoaded(def: ViewDef, loaded: unknown): HostOutcome<LoadedModel<Vie
   return model.ok ? model : OUTPUT_INVALID;
 }
 
+/** The gate's decision for `plugin`; a gate that throws refuses as its own 503 would, with its code (codePrefix in src/lib/runtime/gate.ts). */
 async function decide(gate: PluginGate | null, plugin: RegisteredView["plugin"]): Promise<GateDecision> {
   if (!gate) return { ok: true, organizationId: null };
   return gate(plugin).catch(
-    (): GateDecision => ({ ok: false, status: 503, code: `${plugin}_gate_unavailable`, message: "Could not check whether this part of MGM is enabled." }),
+    (): GateDecision => ({
+      ok: false,
+      status: 503,
+      code: `${codePrefix(plugin)}_gate_unavailable`,
+      message: "Could not check whether this part of MGM is enabled.",
+    }),
   );
 }
 

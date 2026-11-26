@@ -7,8 +7,10 @@ import "server-only";
  * used to live inline in the session route `POST /api/billing/generate`
  * (removed once nothing called it, #201). Its callers:
  *
- *   1. `BillingCapability.previewBills` — mode='preview', the one unguarded
- *      run, which writes nothing.
+ *   1. Billing review's preview (src/lib/cordis/billing-review.ts, for POST
+ *      /api/billing-review/preview) — mode='preview', the one unguarded
+ *      run. It saves no bills, but may re-pin an empty draft's tariff
+ *      (step 2), which is why its route gates itself.
  *      `tenantIds`: undefined → all metered/un-metered tenants on the
  *      period's microgrid; `[]` → explicit no-op; `[uuid, …]` → only those.
  *      `manualReadings`: per-tenant `{ startKwh, endKwh, reason? }`
@@ -20,7 +22,8 @@ import "server-only";
  *      that guard only; it does not add a tenant to the processed set.
  *
  *      Returns the in-memory calc + previousTotalAmount/previousPaymentStatus
- *      from the prior line item; writes nothing.
+ *      from the prior line item; saves no bill or audit row (the tariff
+ *      re-pin of step 2 aside).
  *
  *   Every write is guarded (mode='write' with none of the three below is
  *   refused before anything is read, #247). Two callers rewrite one existing
@@ -148,10 +151,10 @@ export type ManualReadingInput = {
  *
  * All three are sent. The derived value is what generation uses; the inputs
  * are what make a wrong seed diagnosable a year later rather than anonymous.
- * GenerateBillsBody checks only that startKwh does not exceed dialReadingKwh;
- * nothing recomputes startKwh from the inputs, so
- * the client's arithmetic is trusted. If a server-side recomputation is
- * added, say so here.
+ * No request body carries seeds any more (GenerateBillsBody version 2):
+ * billing review's preview is the one run that takes them, resolved on the
+ * server (src/lib/cordis/review-seeds.ts). Nothing here recomputes startKwh
+ * from the inputs. If a server-side recomputation is added, say so here.
  *
  * `readAt` is NOT "now". An operator can read a dial in the morning and type
  * it that evening, and the subtraction is over the interval that actually
@@ -205,6 +208,13 @@ export type GenerationErrorCode =
    * is changed by regenerating it.
    */
   | "bill_exists"
+  /**
+   * A guarded run's first bill for a tenant, or a first bill from readings,
+   * found no period at its insert (fn_record_first_line_item_with_audit's
+   * billing_period_not_found): the period was deleted after the run read
+   * it. Nothing was written.
+   */
+  | "period_not_found"
   /**
    * #339. The device has no prior MGM `end_kwh` and no seed was supplied, so
    * `start_kwh` is unknowable. Previously this fell to `?? 0`, which asserted
@@ -1459,15 +1469,21 @@ function expectedBillRefusal(err: { code?: string; message?: string }): { code: 
 
 /**
  * fn_record_first_line_item_with_audit's refusals (migration
- * 20261120130100_record_first_line_item.sql), by the token its message
- * starts with, in the copy of the action that ran: a first bill from
- * readings (`newBillOnly`) or a whole-period run from meter data. Its tariff
- * refusal keeps the upsert's text and is mapped to `tariff_changed` with the
- * other write failures below; anything else is an ordinary write failure.
+ * 20261120130100_record_first_line_item.sql, last issued by
+ * 20261124170000), by the token its message starts with, in the copy of the
+ * action that ran: a first bill from readings (`newBillOnly`) or a
+ * whole-period run from meter data. billing_period_not_found is its one
+ * P0002, raised when the period is gone (deleted after the run read it);
+ * the others are 23514. Its tariff refusal keeps the upsert's text and is
+ * mapped to `tariff_changed` with the other write failures below; anything
+ * else is an ordinary write failure.
  */
 function firstBillRefusal(err: { code?: string; message?: string }, newBillOnly: boolean): { code: GenerationErrorCode; error: string } | null {
-  if (err.code !== "23514") return null;
   const token = (err.message ?? "").split(":")[0].trim();
+  if (err.code === "P0002" && token === "billing_period_not_found") {
+    return { code: "period_not_found", error: newBillOnly ? BILL_FROM_READINGS_COPY.periodNotFound : GENERATE_FROM_METERS_COPY.periodNotFound };
+  }
+  if (err.code !== "23514") return null;
   if (token === "billing_period_closed") {
     return { code: "period_closed", error: newBillOnly ? BILL_FROM_READINGS_COPY.closed : GENERATE_FROM_METERS_COPY.closed };
   }

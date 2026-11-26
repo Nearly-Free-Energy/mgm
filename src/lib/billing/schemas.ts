@@ -249,36 +249,7 @@ const PeriodsManualReading = z
     path: ["endKwh"],
   });
 
-/**
- * Checks the shape of a seed and that `startKwh <= dialReadingKwh` (no
- * negative usage since the period began). It does not re-derive startKwh
- * from OpenEMS, so a wrong startKwh that still sits below the dial reading
- * is accepted; the inputs travel with it so a wrong seed stays diagnosable.
- */
-const PeriodsSeedReading = z
-  .strictObject(
-    {
-      deviceId: z
-        .guid({ error: periodsEntryError("seedReadings", ".deviceId must be a UUID") })
-        .meta({ title: "Meter" }),
-      dialReadingKwh: periodsKwh("seedReadings", "dialReadingKwh").meta({ title: "Meter dial reading (kWh)" }),
-      startKwh: periodsKwh("seedReadings", "startKwh").meta({ title: "Start reading (kWh)" }),
-      // Date.parse, not z.iso.datetime: clients send a bare date such as 2026-08-20.
-      readAt: z
-        .string({ error: periodsEntryError("seedReadings", ".readAt must be an ISO timestamp") })
-        .refine((v) => !Number.isNaN(Date.parse(v)), {
-          error: periodsEntryError("seedReadings", ".readAt must be an ISO timestamp"),
-        })
-        .meta({ title: "Read at" }),
-    },
-    { error: periodsEntryObjectError("seedReadings") }
-  )
-  .refine((r) => r.startKwh <= r.dialReadingKwh, {
-    error: periodsEntryError("seedReadings", ".startKwh cannot exceed dialReadingKwh"),
-    path: ["startKwh"],
-  });
-
-/** The keys previewing and generating share, in the order today's messages are checked. */
+/** GenerateBillsBody's keys, in the order today's messages are checked. */
 const periodsGenerationShape = {
   billingPeriodId: z.guid({ error: "billingPeriodId must be a UUID string" }).meta({ title: "Billing period" }),
   // Absent: every tenant on the period's microgrid. []: nobody.
@@ -309,33 +280,21 @@ function periodsNoManualRevert(
 }
 
 /**
- * The input BillingCapability.generateBills and previewBills parse with.
+ * The input BillingCapability's bill generation parses with (generateBills,
+ * and generateFromMeters and billFromReadings through it). It takes no seed
+ * readings since version 2: every run it parses for writes behind a guard
+ * that refuses them (generate.ts, steps 0a to 0c), and billing review's
+ * preview resolves its own (src/lib/cordis/review-seeds.ts).
  */
 export const GenerateBillsBody = z
   .strictObject(
     {
       ...periodsGenerationShape,
-      seedReadings: z
-        .array(PeriodsSeedReading, { error: "seedReadings must be an array" })
-        // One seed per device: taking the last of two would make the reading
-        // used depend on array order. Runs only once every entry parsed.
-        .superRefine((seeds, ctx) => {
-          const seen = new Set<string>();
-          for (const seed of seeds) {
-            if (seen.has(seed.deviceId)) {
-              ctx.addIssue({ code: "custom", message: `seedReadings has more than one entry for device ${seed.deviceId}` });
-              return;
-            }
-            seen.add(seed.deviceId);
-          }
-        })
-        .optional()
-        .meta({ title: "Starting readings" }),
     },
     { error: periodsBodyError }
   )
   .superRefine(periodsNoManualRevert);
-export const GENERATE_BILLS_BODY_VERSION = 1;
+export const GENERATE_BILLS_BODY_VERSION = 2;
 
 /**
  * The most tenants one billing review compares. POST /api/billing-review/preview
@@ -580,6 +539,8 @@ export const GENERATE_FROM_METERS_COPY = {
   meters: "Could not read the meters right now. Nothing was changed. Try again shortly.",
   failed: "Bills could not be generated. Refresh the period to see its bills, and try again.",
   nothingToRead: "There is nothing to read from meters for this period.",
+  // The period was deleted while the run wrote (period_not_found in ./generate.ts).
+  periodNotFound: "Billing period not found.",
 } as const;
 
 /**
@@ -590,14 +551,17 @@ export const GENERATE_FROM_METERS_COPY = {
  * billing.bill-from-readings' availability (`closed`) and prepare (`closed`,
  * `tenantNotFound`, `otherMicrogrid`, `hasBill`) give the same refusals
  * before it runs (src/lib/billing/surface/not-billed.ts). The bill engine
- * gives `closed`, `hasBill` and `failed` itself (newBillOnly in
- * ./generate.ts).
+ * gives `closed`, `hasBill`, `periodNotFound` and `failed` itself
+ * (newBillOnly in ./generate.ts).
  *  - closed: a closed period's totals were reviewed and closed.
  *  - hasBill: the tenant already has a bill for the period; regenerating
  *    that bill (billing.regenerate-bill, manual readings) changes it.
  *  - otherMicrogrid: the tenant belongs to another microgrid than the
  *    period's.
  *  - tenantNotFound: no tenant the person can read has that id.
+ *  - periodNotFound: no period the person can read has that id, as the
+ *    route reads it, or the period was deleted before the insert
+ *    (period_not_found in ./generate.ts).
  *  - noTariff: the microgrid has no rate schedule to pin.
  *  - tariffChanged: the period's tariff changed between the pin and the
  *    write (fn_record_line_item_with_audit).
@@ -608,6 +572,7 @@ export const BILL_FROM_READINGS_COPY = {
   hasBill: "This tenant already has a bill for this period. Regenerate that bill to change its readings.",
   otherMicrogrid: "This tenant is not on this period's microgrid.",
   tenantNotFound: "Tenant not found.",
+  periodNotFound: GENERATE_FROM_METERS_COPY.periodNotFound,
   noTariff: GENERATE_FROM_METERS_COPY.noTariff,
   tariffChanged: "The period's tariff changed while the bill was calculated. Nothing was written. Try again.",
   failed: "The bill could not be written. Refresh the period to see its bills, and try again.",

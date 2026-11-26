@@ -75,7 +75,7 @@ describe("DELETE /api/billing-periods/[periodId] (#201)", () => {
       href: `/microgrids/${MG_ID}/billing`,
     });
     expect(received).toEqual([PERIOD_ID, TYPED]);
-    // Composed for the period's organization, without readOnly, so the plugin gate applies.
+    // Composed for the period's organization, so composeBilling's plugin check applies.
     expect(compose).toHaveBeenCalledWith({ supabase: expect.anything(), organizationId: ORG_ID });
     expect(dispose).toHaveBeenCalledTimes(1);
   });

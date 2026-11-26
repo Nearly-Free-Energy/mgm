@@ -13,17 +13,21 @@ import "server-only";
  * definition of what needs attention is what they report. The bills and
  * their periods are then read through the person's own client (row-level
  * security: billing_line_items and billing_periods are FOR ALL on
- * user_can_access_microgrid); if those policies change, revisit what this
- * shows. Composing on req.supabase queues that client's other queries
- * behind getUser's auth lock, so the bills are read after the capability.
- * `payments.not-submitted` reads the communities' names the same way
- * (communities is FOR ALL on user_can_access_org), filtered to the
+ * user_can_access_microgrid), filtered to the organization through the
+ * period's microgrid and community as well, as the billing and metering
+ * watchers filter theirs, so a super admin's client, which sees every
+ * organization, returns only this one's; if those policies change, revisit
+ * what this shows. Composing on req.supabase queues that client's other
+ * queries behind getUser's auth lock, so the bills are read after the
+ * capability. `payments.not-submitted` reads the communities' names the
+ * same way (communities is FOR ALL on user_can_access_org), filtered to the
  * organization.
  *
  * When listAttention reports more attempts than it returns (`truncated`),
- * the counts of `payments.reconcile` and `payments.failed` cover only the
- * most recently changed ones. `payments.not-submitted` throws instead, so
- * it is listed as unchecked rather than undercounting a community.
+ * every watcher throws, so it is listed as unchecked: the listing keeps the
+ * most recently changed attempts, so a cut one is the oldest, and a period
+ * whose held attempts were all cut would otherwise lose its signal without
+ * notice, and a held list cut short could show a held bill as failed.
  *
  * Any refusal or failed read throws, so the host lists the watcher as
  * unchecked rather than as having nothing to report; the error itself is
@@ -37,9 +41,11 @@ import {
   buildFailedSignals,
   buildNotSubmittedSignals,
   buildReconcileSignals,
+  FAILED_SIGNAL,
   FAILED_WINDOW_DAYS,
   NOT_SUBMITTED_THRESHOLD,
   NOT_SUBMITTED_WINDOW_HOURS,
+  RECONCILE_SIGNAL,
   type AttentionBill,
 } from "./attention-signals-model";
 
@@ -82,12 +88,14 @@ async function listed(req: SurfaceRequest, queries: Query[]): Promise<Listed[]> 
   }
 }
 
-/** Each query's attempts, in order, from one composition of the capability. */
-async function attention(req: SurfaceRequest, queries: Query[]): Promise<AttentionAttempt[][]> {
-  return (await listed(req, queries)).map((l) => l.attempts);
+/** Each query's attempts, in order, from one composition of the capability; throws when any listing was cut short. */
+async function attention(req: SurfaceRequest, watcher: string, queries: Query[]): Promise<AttentionAttempt[][]> {
+  const answers = await listed(req, queries);
+  if (answers.some((l) => l.truncated)) throw new Error(`${watcher}: more attempts than one read returns`);
+  return answers.map((l) => l.attempts);
 }
 
-/** The bills the attempts are for, with their periods and microgrids, as the person's client returns them. */
+/** The bills the attempts are for, with their periods and microgrids, as the person's client returns them for the organization. */
 async function readBills(req: SurfaceRequest, attempts: readonly AttentionAttempt[]): Promise<Map<string, AttentionBill>> {
   const ids = [...new Set(attempts.map((a) => a.lineItemId))];
   const chunks = Array.from({ length: Math.ceil(ids.length / BILLS_PER_READ) }, (_, i) => ids.slice(i * BILLS_PER_READ, (i + 1) * BILLS_PER_READ));
@@ -95,7 +103,8 @@ async function readBills(req: SurfaceRequest, attempts: readonly AttentionAttemp
     chunks.map((chunk) =>
       req.supabase
         .from("billing_line_items")
-        .select("id, payment_status, billing_periods!inner(id, start_date, end_date, microgrid_id, microgrids!inner(id, name))")
+        .select("id, payment_status, billing_periods!inner(id, start_date, end_date, microgrid_id, microgrids!inner(id, name, communities!inner(org_id)))")
+        .eq("billing_periods.microgrids.communities.org_id", req.organizationId)
         .in("id", chunk),
     ),
   );
@@ -122,7 +131,7 @@ async function readBills(req: SurfaceRequest, attempts: readonly AttentionAttemp
 
 /** `payments.reconcile`: the periods with attempts held for a manager to reconcile. */
 export async function loadReconcileSignals(req: SurfaceRequest): Promise<SignalOut[]> {
-  const [held] = await attention(req, [{ status: "needs_reconciliation" }]);
+  const [held] = await attention(req, RECONCILE_SIGNAL, [{ status: "needs_reconciliation" }]);
   if (held.length === 0) return [];
   return buildReconcileSignals(req.fmt, held, await readBills(req, held));
 }
@@ -130,7 +139,7 @@ export async function loadReconcileSignals(req: SurfaceRequest): Promise<SignalO
 /** `payments.failed`: the periods with failures in the last FAILED_WINDOW_DAYS on bills still to be paid. */
 export async function loadFailedSignals(req: SurfaceRequest): Promise<SignalOut[]> {
   const since = new Date(req.now.getTime() - FAILED_WINDOW_DAYS * 86_400_000).toISOString();
-  const [failed, held] = await attention(req, [{ status: "failed", since }, { status: "needs_reconciliation" }]);
+  const [failed, held] = await attention(req, FAILED_SIGNAL, [{ status: "failed", since }, { status: "needs_reconciliation" }]);
   if (failed.length === 0) return [];
   return buildFailedSignals(req.fmt, failed, held, await readBills(req, failed));
 }

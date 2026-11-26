@@ -42,6 +42,7 @@ const microgrid = (over: Partial<ConnectionInput> = {}): ConnectionInput => ({
   emsType: "cloud_aws",
   status: "auth_failed",
   checkedAt: "2026-11-19T06:15:00Z",
+  createdAt: "2026-03-02T09:00:00Z",
   ...over,
 });
 
@@ -50,7 +51,7 @@ describe("loadConnectionSignals", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const { client, calls } = tableClient({
       microgrids: {
-        data: [{ id: MG, name: "North site", timezone: "Africa/Kampala", ems_type: "direct_url", ems_last_discover_status: "unreachable", ems_last_discover_at: "2026-11-19T06:15:00Z", ems_last_discover_error: VENDOR_TEXT }],
+        data: [{ id: MG, name: "North site", timezone: "Africa/Kampala", ems_type: "direct_url", ems_last_discover_status: "unreachable", ems_last_discover_at: "2026-11-19T06:15:00Z", created_at: "2026-03-02T09:00:00Z", ems_last_discover_error: VENDOR_TEXT }],
       },
     });
     const out = await loadConnectionSignals(req(client));
@@ -58,7 +59,7 @@ describe("loadConnectionSignals", () => {
       {
         table: "microgrids",
         ops: [
-          ["select", ["id, name, timezone, ems_type, ems_last_discover_status, ems_last_discover_at, communities!inner(org_id)"]],
+          ["select", ["id, name, timezone, ems_type, ems_last_discover_status, ems_last_discover_at, created_at, communities!inner(org_id)"]],
           ["eq", ["communities.org_id", ORG]],
           ["not", ["ems_type", "is", null]],
           ["in", ["ems_last_discover_status", ["auth_failed", "unreachable", "zero_edges", "unknown_error"]]],
@@ -84,7 +85,7 @@ describe("loadConnectionSignals", () => {
 
 describe("buildConnectionSignals", () => {
   it("says what the last check found, with when, in the microgrid's zone", () => {
-    expect(buildConnectionSignals(fmt, [microgrid()], NOW)).toEqual([
+    expect(buildConnectionSignals(fmt, [microgrid()])).toEqual([
       {
         id: MG,
         kind: "alarm",
@@ -104,35 +105,44 @@ describe("buildConnectionSignals", () => {
     ["zero_edges", "North site: OpenEMS lists no edges"],
     ["unknown_error", "North site: the OpenEMS connection check failed"],
   ])("words %s as fixed copy", (status, title) => {
-    expect(buildConnectionSignals(fmt, [microgrid({ status })], NOW).map((s) => s.title)).toEqual([title]);
+    expect(buildConnectionSignals(fmt, [microgrid({ status })]).map((s) => s.title)).toEqual([title]);
   });
 
   it("leaves out a healthy check, no check, and a microgrid with no backend", () => {
     const out = buildConnectionSignals(
       fmt,
       [microgrid({ id: "ok", status: "success" }), microgrid({ id: "never", status: null }), microgrid({ id: "none", emsType: null })],
-      NOW,
     );
     expect(out).toEqual([]);
   });
 
-  it("dates a failure with no recorded time now, without a fact, and reads an unknown zone as UTC", () => {
-    const [undated] = buildConnectionSignals(fmt, [microgrid({ checkedAt: null })], NOW);
-    expect(undated).toMatchObject({ at: NOW.toISOString() });
-    expect(undated).not.toHaveProperty("facts");
-    const [utc] = buildConnectionSignals(fmt, [microgrid({ timezone: "Kampala" })], NOW);
+  it("dates a failure with no recorded time by the microgrid's creation, the same on every poll, without a fact, and reads an unknown zone as UTC", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(NOW);
+      const [undated] = buildConnectionSignals(fmt, [microgrid({ checkedAt: null })]);
+      vi.setSystemTime(new Date(NOW.getTime() + 5 * 60_000));
+      const [again] = buildConnectionSignals(fmt, [microgrid({ checkedAt: null })]);
+      expect([undated.at, again.at]).toEqual(["2026-03-02T09:00:00.000Z", "2026-03-02T09:00:00.000Z"]);
+      expect(undated).not.toHaveProperty("facts");
+      const [neither] = buildConnectionSignals(fmt, [microgrid({ checkedAt: "not a time", createdAt: "" })]);
+      expect(neither.at).toBe("1970-01-01T00:00:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+    const [utc] = buildConnectionSignals(fmt, [microgrid({ timezone: "Kampala" })]);
     expect(utc.facts).toEqual([fmt.datetime("2026-11-19T06:15:00.000Z", "UTC")]);
   });
 
   it(`lists microgrids by name and stops at ${MAX_SIGNALS_PER_SOURCE}`, () => {
     const many = Array.from({ length: MAX_SIGNALS_PER_SOURCE + 3 }, (_, i) => microgrid({ id: `m${i}`, name: `Site ${String(MAX_SIGNALS_PER_SOURCE + 3 - i).padStart(3, "0")}` }));
-    const out = buildConnectionSignals(fmt, many, NOW);
+    const out = buildConnectionSignals(fmt, many);
     expect(out).toHaveLength(MAX_SIGNALS_PER_SOURCE);
     expect(out[0].title).toBe("Site 001: OpenEMS refused the saved sign-in");
   });
 
   it("returns signals a watcher may send, as the examples are", () => {
-    for (const s of [...buildConnectionSignals(fmt, [microgrid()], NOW), ...CONNECTION_EXAMPLES]) {
+    for (const s of [...buildConnectionSignals(fmt, [microgrid()]), ...CONNECTION_EXAMPLES]) {
       expect(signalOutSchema.safeParse(s).success).toBe(true);
     }
     expect(CONNECTION_EXAMPLES.map((s) => s.title)).toEqual(["Kiwumu: OpenEMS refused the saved sign-in", "Lwamata: OpenEMS could not be reached"]);

@@ -109,7 +109,9 @@ type BillingReviewPluginConfig = { fixtureReadings?: readonly FixtureReading[] }
 
 /**
  * The review capability plugin. It is intentionally narrow: the only exposed
- * operation is `preview`, whose generation mode cannot write billing records.
+ * operation is `preview`, whose generation mode saves no bills, but may
+ * re-pin an empty draft period's tariff (step 2 of runGenerationFor), which
+ * is why POST /api/billing-review/preview gates itself.
  * Metering sources come from the root registry; fixture registration is
  * opt-in per request and absent from the production route.
  */

@@ -167,10 +167,6 @@ describe("the composers that check the session themselves", () => {
     ["composeMetering", () => composeMetering({ supabase: sessionEndedElsewhere(), organizationId: ORG_ID })],
     ["composeBilling", () => composeBilling({ supabase: sessionEndedElsewhere(), organizationId: ORG_ID })],
     [
-      "composeBilling with readOnly",
-      () => composeBilling({ supabase: sessionEndedElsewhere(), organizationId: ORG_ID, readOnly: true }),
-    ],
-    [
       "composeCommunityManagement",
       () => composeCommunityManagement({ supabase: sessionEndedElsewhere(), organizationId: ORG_ID }),
     ],

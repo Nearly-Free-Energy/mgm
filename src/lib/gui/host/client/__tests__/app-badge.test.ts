@@ -41,11 +41,24 @@ describe("app badge", () => {
   });
 
   it("swallows a rejection and a synchronous throw", async () => {
-    const rejected = vi.fn(() => Promise.reject(new DOMException("Not allowed", "NotAllowedError")));
+    // Each rejection must be caught: the promise .catch returns is recorded, and must settle.
+    const caught: Promise<unknown>[] = [];
+    const rejected = vi.fn(() => {
+      const p = Promise.reject(new DOMException("Not allowed", "NotAllowedError"));
+      const own = p.catch.bind(p);
+      p.catch = ((onRejected) => {
+        const settled = own(onRejected);
+        caught.push(settled);
+        return settled;
+      }) as typeof p.catch;
+      return p;
+    });
     install({ setAppBadge: rejected, clearAppBadge: rejected });
     setAppBadge(2);
     clearAppBadge();
-    await Promise.resolve();
+    expect(rejected).toHaveBeenCalledTimes(2);
+    expect(caught).toHaveLength(2);
+    await expect(Promise.all(caught)).resolves.toEqual([undefined, undefined]);
     install({
       setAppBadge: () => {
         throw new TypeError("Illegal invocation");

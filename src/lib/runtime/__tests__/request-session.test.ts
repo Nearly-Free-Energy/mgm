@@ -121,24 +121,79 @@ describe("bearerClientFor", () => {
   });
 });
 
+/**
+ * True when `text` can build a Supabase client: it takes a value (not only
+ * types) from any @supabase/* package, by a static import or re-export, a
+ * side-effect import, import() or require().
+ */
+function importsSupabaseValues(text: string): boolean {
+  const statements = text.match(/(?:^|\n)\s*(?:import|export)\b[^;]*?\bfrom\s*["']@supabase\/[^"']+["']/g) ?? [];
+  const typeOnly = (statement: string) => {
+    const s = statement.trim();
+    if (/^(?:import|export)\s+type\b/.test(s)) return true;
+    const named = /^import\s*\{([^}]*)\}\s*from\b/.exec(s);
+    return named !== null && named[1].split(",").map((x) => x.trim()).filter(Boolean).every((x) => x.startsWith("type "));
+  };
+  return (
+    statements.some((statement) => !typeOnly(statement)) ||
+    /(?:^|\n)\s*import\s*["']@supabase\//.test(text) ||
+    /\b(?:import|require)\s*\(\s*["']@supabase\//.test(text)
+  );
+}
+
 describe("a client on a bearer token", () => {
   // Every client token reaches MGM's code through createClient. A second
-  // place that builds one would make a client whose caller is not recorded,
-  // and callerOf would read it as a browser session.
-  it("is built only by bearerClientFor", () => {
+  // place that builds one, however it is written (a global Authorization
+  // header, supabase-js's accessToken option, a headers object built
+  // elsewhere, @supabase/ssr given a token), would make a client whose
+  // caller is not recorded, and callerOf would read it as a browser session,
+  // past openHostRequest's and prepareAction's agent refusals. So the files
+  // that may build a Supabase client at all are pinned: a new one fails here
+  // and is reviewed against recordCaller (../caller.ts) before it is added.
+  it("is built only by bearerClientFor, among the files pinned as able to build a client", () => {
     const builders: string[] = [];
     const walk = (dir: string) => {
       for (const entry of readdirSync(path.join(REPO, dir), { withFileTypes: true })) {
         const rel = `${dir}/${entry.name}`;
         if (entry.isDirectory()) {
           if (entry.name !== "__tests__") walk(rel);
-        } else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
-          const text = readFileSync(path.join(REPO, rel), "utf8");
-          if (/global\s*:\s*\{[^}]*headers\s*:\s*\{[^}]*Authorization/.test(text)) builders.push(rel);
+        } else if (/\.[cm]?[jt]sx?$/.test(entry.name) && !/\.test\.[cm]?[jt]sx?$/.test(entry.name)) {
+          if (importsSupabaseValues(readFileSync(path.join(REPO, rel), "utf8"))) builders.push(rel);
         }
       }
     };
     walk("src");
-    expect(builders).toEqual(["src/lib/runtime/request-session.ts"]);
+    expect(builders.sort()).toEqual([
+      // verifyBearer: asks Auth about a token with getUser(token); the client
+      // never reaches a route.
+      "src/lib/runtime/bearer.ts",
+      // bearerClientFor: the one client on a bearer token, recorded.
+      "src/lib/runtime/request-session.ts",
+      // The browser's own client: no bearer token in a browser.
+      "src/lib/supabase/client.ts",
+      // createClient: the cookie client, after bearerClientFor returned null.
+      "src/lib/supabase/server.ts",
+      // The service role, which needs a getUser()-backed check first.
+      "src/lib/supabase/service.ts",
+      // The cookie session's client; middleware never builds one for a
+      // bearer request.
+      "src/middleware.ts",
+    ]);
+  });
+
+  it.each([
+    ['import { createClient } from "@supabase/supabase-js";', true],
+    ['import {\n  createClient as make,\n  type SupabaseClient,\n} from "@supabase/supabase-js";', true],
+    ['import * as supabase from "@supabase/supabase-js";', true],
+    ['import { createServerClient } from "@supabase/ssr";', true],
+    ['import { GoTrueClient } from "@supabase/auth-js";', true],
+    ['export { createClient } from "@supabase/supabase-js";', true],
+    ['const { createClient } = await import("@supabase/supabase-js");', true],
+    ['const { createClient } = require("@supabase/supabase-js");', true],
+    ['import type { SupabaseClient } from "@supabase/supabase-js";', false],
+    ['import { type SupabaseClient, type User } from "@supabase/supabase-js";', false],
+    ["// Uses `@supabase/supabase-js` `createClient()`", false],
+  ])("reads %j as able to build a client: %s", (text, expected) => {
+    expect(importsSupabaseValues(text)).toBe(expected);
   });
 });

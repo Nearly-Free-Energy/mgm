@@ -31,12 +31,13 @@ type MicrogridRow = {
   ems_type: string | null;
   ems_last_discover_status: string | null;
   ems_last_discover_at: string | null;
+  created_at: string;
 };
 
 export async function loadConnectionSignals(req: SurfaceRequest): Promise<SignalOut[]> {
   const { data, error } = await req.supabase
     .from("microgrids")
-    .select("id, name, timezone, ems_type, ems_last_discover_status, ems_last_discover_at, communities!inner(org_id)")
+    .select("id, name, timezone, ems_type, ems_last_discover_status, ems_last_discover_at, created_at, communities!inner(org_id)")
     .eq("communities.org_id", req.organizationId)
     .not("ems_type", "is", null)
     .in("ems_last_discover_status", [...FAILING_DISCOVER_STATUSES])
@@ -51,6 +52,7 @@ export async function loadConnectionSignals(req: SurfaceRequest): Promise<Signal
     emsType: m.ems_type,
     status: m.ems_last_discover_status,
     checkedAt: m.ems_last_discover_at,
+    createdAt: m.created_at,
   }));
-  return buildConnectionSignals(req.fmt, microgrids, req.now);
+  return buildConnectionSignals(req.fmt, microgrids);
 }

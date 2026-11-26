@@ -128,6 +128,8 @@ function harness(
     priorItems?: { id: string; device_id: string; end_kwh: number; billing_period_id: string }[];
     /** As a gateway's request-line limit: a read whose `.in()` lists hold more ids in all fails. */
     maxInIds?: number;
+    /** The period's pinned rate schedule as read; null for a period not pinned yet, which the run pins. */
+    rateScheduleId?: string | null;
   } = {},
 ) {
   const period = { status: o.status ?? "draft" };
@@ -151,7 +153,7 @@ function harness(
           end_date: "2026-04-30",
           timezone: "Africa/Kampala",
           status: o.status ?? "draft",
-          rate_schedule_id: SCHEDULE_ID,
+          rate_schedule_id: o.rateScheduleId === undefined ? SCHEDULE_ID : o.rateScheduleId,
         },
         error: null,
       },
@@ -216,13 +218,14 @@ function harness(
       Promise.resolve(listRead(table, after, ins)).then(onFulfilled, onRejected);
     return b;
   }
-  const supabase = { from: (table: string) => builder(table), rpc } as unknown as SupabaseClient;
+  const from = vi.fn((table: string) => builder(table));
+  const supabase = { from, rpc } as unknown as SupabaseClient;
   const getReadings = vi.fn(async ({ devices }: { devices: Array<{ id: string }> }) => {
     if (o.closeDuringRead) period.status = "closed";
     return devices.map((d) => ({ deviceId: d.id, usageKwh: d.id === device(10) ? null : 42, startDate: "2026-04-01", endDate: "2026-04-30" }));
   });
   const meteringProvider = { getReadings } as unknown as MeteringProvider;
-  return { supabase, rpc, getReadings, meteringProvider, listReads, inLists };
+  return { supabase, from, rpc, getReadings, meteringProvider, listReads, inLists };
 }
 
 const writes = (rpc: ReturnType<typeof vi.fn>) =>
@@ -289,11 +292,15 @@ describe("runGenerationFor with guardExistingBills", () => {
   });
 
   it("refuses a closed period before pinning the tariff, reading meters or writing", async () => {
-    const h = harness({ status: "closed" });
+    // Not pinned, so the run would pin it if it went on: only the closed
+    // check before the pin refuses it here.
+    const h = harness({ status: "closed", rateScheduleId: null });
     const out = await run(h);
     expect(out).toEqual({ kind: "fatal", status: 409, body: { error: GENERATE_FROM_METERS_COPY.closed, code: "billing_period_closed" } });
     expect(h.rpc).not.toHaveBeenCalled();
     expect(h.getReadings).not.toHaveBeenCalled();
+    // The period only: no tenant, bill or rate schedule read.
+    expect(h.from.mock.calls.map(([table]) => table)).toEqual(["billing_periods"]);
   });
 
   it("stops when the period's bills cannot be read, before reading meters or writing", async () => {
@@ -502,12 +509,12 @@ describe("runGenerationFor with guardExistingBills", () => {
   });
 
   it.each([
-    ["billing_line_item_exists: the tenant already has a bill for this billing period", "bill_exists", "hasBill"],
-    ["billing_period_closed: a first bill is not added to a closed billing period", "period_closed", "closed"],
-  ] as const)("reports the first bill's refusal %j as fixed copy, for that tenant only", async (message, code, copy) => {
-    const h = harness({ writeError: (name) => (name === "fn_record_first_line_item_with_audit" ? { code: "23514", message } : null) });
+    ["billing_line_item_exists: the tenant already has a bill for this billing period", "23514", "bill_exists", BILL_FROM_READINGS_COPY.hasBill],
+    ["billing_period_closed: a first bill is not added to a closed billing period", "23514", "period_closed", GENERATE_FROM_METERS_COPY.closed],
+    ["billing_period_not_found: the billing period does not exist or is not yours to bill", "P0002", "period_not_found", GENERATE_FROM_METERS_COPY.periodNotFound],
+  ] as const)("reports the first bill's refusal %j as fixed copy, for that tenant only", async (message, sqlstate, code, error) => {
+    const h = harness({ writeError: (name) => (name === "fn_record_first_line_item_with_audit" ? { code: sqlstate, message } : null) });
     const by = await results(h);
-    const error = copy === "closed" ? GENERATE_FROM_METERS_COPY.closed : BILL_FROM_READINGS_COPY.hasBill;
     // The tenant had no bill as read, so no hadBill.
     expect(by.get(tenant(1))).toEqual({ kind: "error", tenantId: tenant(1), tenantName: "Unit 1", code, error });
     expect(by.get(tenant(2))).toMatchObject({ kind: "written" });
