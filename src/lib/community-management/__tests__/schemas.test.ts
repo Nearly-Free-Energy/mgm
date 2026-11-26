@@ -12,7 +12,10 @@
  * Where the route took the body, the schema takes it too, or refuses it
  * with the generic 400 for one of the two reasons ../schemas.ts gives (a key
  * the route ignored, a value of a type it read as null), and the operation
- * writes the same from the schema's output as from the body itself.
+ * writes the same from the schema's output as from the body itself. A body
+ * that is JSON but not an object is in the corpus too: null, on which a
+ * create route failed with a 500, gets the answer that route gave every
+ * other such body.
  *
  * And each schema's JSON Schema, pinned for its input version.
  */
@@ -150,8 +153,12 @@ interface Route {
   schema: z.ZodObject;
   refusals: BodyRefusals;
   base: Record<string, unknown>;
-  /** What the route answered before the capability ran, or null when it went on. */
-  pre?: (body: Record<string, unknown>) => Answer | null;
+  /**
+   * What the route answered before the capability ran, or null when it went
+   * on. It reads fields as the route did (`field`), so it throws on null, as
+   * the route did.
+   */
+  pre?: (body: unknown) => Answer | null;
   run(repo: CommunityManagementRepository, body: unknown): Promise<CommunityManagementResult<unknown>>;
   /**
    * Why the route took a body the schema refuses with the generic 400: a
@@ -162,6 +169,8 @@ interface Route {
 }
 
 const isText = (v: unknown) => typeof v === "string" || v === null;
+/** A field read off the body as the create routes read it, unchecked: a TypeError on null, undefined on any other value that is not an object. */
+const field = (body: unknown, key: string): unknown => (body as Record<string, unknown>)[key];
 const ADDRESS_KEYS = ["address_line1", "address_line2", "address_city", "address_region", "address_country", "address_postal_code"];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** A route's leniency: the keys it read, and those of them whose values of another type it read as null. */
@@ -182,7 +191,7 @@ const ROUTES: Route[] = [
     base: { org_id: ORG, name: "Kisakye", address_city: "Entebbe", geography_notes: "By the lake" },
     // composeCommunityManagement, with org_id or "".
     pre: (b) =>
-      typeof b.org_id === "string" && UUID.test(b.org_id)
+      typeof field(b, "org_id") === "string" && UUID.test(field(b, "org_id") as string)
         ? null
         : { status: 400, body: { error: "Invalid organization id — expected UUID.", code: "community_invalid_org", field: "org_id" } },
     run: (repo, body) => createCommunityOperation(repo, SCOPE, body),
@@ -203,7 +212,7 @@ const ROUTES: Route[] = [
     base: { community_id: COMMUNITY, name: "Site A", currency: "UGX", timezone: "Africa/Kampala", lat: "0.3", lng: 32.5, address_city: "Kampala" },
     // The route's own check, before it read the community.
     pre: (b) =>
-      typeof b.community_id === "string" && UUID.test(b.community_id)
+      typeof field(b, "community_id") === "string" && UUID.test(field(b, "community_id") as string)
         ? null
         : { status: 400, body: { error: "Invalid community_id — expected UUID.", field: "community_id" } },
     run: (repo, body) => createMicrogridOperation(repo, SCOPE, body),
@@ -235,7 +244,7 @@ const ROUTES: Route[] = [
     },
     // The route's own check, before it read the microgrid.
     pre: (b) =>
-      typeof b.microgrid_id === "string" && b.microgrid_id.trim()
+      typeof field(b, "microgrid_id") === "string" && (field(b, "microgrid_id") as string).trim()
         ? null
         : { status: 422, body: { error: "microgrid_id is required.", field: "microgrid_id" } },
     run: (repo, body) => createTenantOperation(repo, SCOPE, body),
@@ -296,7 +305,10 @@ const PROBES: unknown[] = [
 const DOUBLE_FAULTS: unknown[] = [null, "", 42, "x".repeat(51)];
 const OMIT = Symbol("omit");
 
-function bodiesOf(route: Route): { body: Record<string, unknown>; changed: [string, unknown][] }[] {
+/** JSON bodies that are not objects, each tried once. */
+const NOT_OBJECTS: unknown[] = [[], null, "x", 1, true];
+
+function bodiesOf(route: Route): { body: unknown; changed: [string, unknown][] }[] {
   const keys = [...new Set([...Object.keys(route.schema.shape), ...Object.keys(route.base)])];
   const set = (body: Record<string, unknown>, key: string, value: unknown) => {
     const next = { ...body };
@@ -304,10 +316,11 @@ function bodiesOf(route: Route): { body: Record<string, unknown>; changed: [stri
     else next[key] = value;
     return next;
   };
-  const out: { body: Record<string, unknown>; changed: [string, unknown][] }[] = [{ body: route.base, changed: [] }];
+  const out: { body: unknown; changed: [string, unknown][] }[] = [{ body: route.base, changed: [] }];
   for (const key of keys) for (const value of [OMIT, ...PROBES]) out.push({ body: set(route.base, key, value), changed: [[key, value]] });
   out.push({ body: { ...route.base, extra: "x" }, changed: [["extra", "x"]] });
   out.push({ body: {}, changed: [] });
+  for (const body of NOT_OBJECTS) out.push({ body, changed: [] });
   for (const [i, a] of keys.entries()) {
     for (const b of keys.slice(i + 1)) {
       for (const va of DOUBLE_FAULTS) {
@@ -331,10 +344,22 @@ describe("each described route's schema keeps the route's own answers", () => {
     let accepted = 0;
     let refused = 0;
     let newlyRefused = 0;
+    const failed: string[] = [];
+    // The route's answer, or, where it failed with a 500, the answer it gave
+    // every other body that is not an object.
+    const routeAnswer = async (body: unknown, raw: Write[]): Promise<Answer> => {
+      try {
+        return route.pre?.(body) ?? operationAnswer(await route.run(fakeRepository(raw), body));
+      } catch (error) {
+        if (!(error instanceof TypeError)) throw error;
+        failed.push(JSON.stringify(body));
+        return routeAnswer([], raw);
+      }
+    };
     for (const { body, changed } of bodiesOf(route)) {
       const show = JSON.stringify(body);
       const raw: Write[] = [];
-      const before = route.pre?.(body) ?? operationAnswer(await route.run(fakeRepository(raw), body));
+      const before = await routeAnswer(body, raw);
       const { answer, data } = await schemaAnswer(route.schema, route.refusals, body);
       if (answer !== "accepted" && answer.body.code === "invalid_body") {
         // The generic 400: only for a body the route read more loosely.
@@ -359,6 +384,8 @@ describe("each described route's schema keeps the route's own answers", () => {
       }
     }
     expect(problems).toEqual([]);
+    // Only a create route, reading its parent id off null, failed.
+    expect(failed).toEqual(route.pre ? ["null"] : []);
     // The corpus reaches both answers, so the comparison shows something.
     expect(accepted).toBeGreaterThan(10);
     expect(refused).toBeGreaterThan(10);

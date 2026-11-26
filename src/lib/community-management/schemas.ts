@@ -11,8 +11,11 @@
  * after the route, and schemas.test.ts holds each schema's answers to
  * theirs. A schema refuses more than its route did in two ways only: a key
  * the route ignored, and a value of a type the route read as null; both get
- * the generic 400. If an operation's validation changes, change its schema
- * and refusals with it.
+ * the generic 400. A body that is JSON but not an object gets the answer
+ * its route gave: on a create, the refusal of a missing parent id, which
+ * the route gave every such body but null (on null it failed with a 500);
+ * on an edit, the operation's. If an operation's validation changes,
+ * change its schema and refusals with it.
  *
  * A change to a schema's JSON Schema is a new input version: bump its
  * constant (schemas.test.ts pins each version's shape).
@@ -84,6 +87,8 @@ export const CREATE_COMMUNITY_BODY_VERSION = 1;
 export const CREATE_COMMUNITY_REFUSALS: BodyRefusals = {
   json: INVALID_JSON,
   issue(issue) {
+    // The route read org_id off any body, so one that is not an object had none.
+    if (notAnObject(issue)) return { status: 400, body: { error: ORG_ID, code: "community_invalid_org", field: "org_id" } };
     switch (keyOf(issue)) {
       case "org_id":
         return { status: 400, body: { error: issue.message, code: "community_invalid_org", field: "org_id" } };
@@ -163,6 +168,8 @@ const looseCoordinate = (key: "lat" | "lng", title: string) =>
     .optional()
     .meta({ title });
 
+const COMMUNITY_ID = "Invalid community_id — expected UUID.";
+
 /**
  * POST /api/microgrids. `community_id` is the community it goes under,
  * bound from the action's entity; the route answered a malformed one itself,
@@ -171,7 +178,7 @@ const looseCoordinate = (key: "lat" | "lng", title: string) =>
  */
 export const CreateMicrogridBody = z.strictObject(
   {
-    community_id: z.guid({ error: "Invalid community_id — expected UUID." }).meta({ title: "Community" }),
+    community_id: z.guid({ error: COMMUNITY_ID }).meta({ title: "Community" }),
     name: name(),
     currency: currency(),
     timezone: timezone().optional(),
@@ -185,6 +192,8 @@ export const CREATE_MICROGRID_BODY_VERSION = 1;
 export const CREATE_MICROGRID_REFUSALS: BodyRefusals = {
   json: INVALID_JSON,
   issue(issue) {
+    // The route read community_id off any body, so one that is not an object had none.
+    if (notAnObject(issue)) return { status: 400, body: { error: COMMUNITY_ID, field: "community_id" } };
     if (keyOf(issue) === "community_id") return { status: 400, body: { error: issue.message, field: "community_id" } };
     return microgridFieldRefusal(issue);
   },
@@ -256,6 +265,8 @@ const limitedText = (key: string, max: number, title: string) =>
 
 const customerType = () => z.enum(["residential", "commercial"], { error: CUSTOMER_TYPE });
 
+const MICROGRID_ID = "microgrid_id is required.";
+
 /**
  * POST /api/tenants/with-meter. `microgrid_id` is the microgrid the tenant
  * belongs to, bound from the action's entity; the route answered a missing
@@ -267,9 +278,9 @@ const customerType = () => z.enum(["residential", "commercial"], { error: CUSTOM
 export const CreateTenantBody = z.strictObject(
   {
     microgrid_id: z
-      .string({ error: "microgrid_id is required." })
+      .string({ error: MICROGRID_ID })
       .trim()
-      .min(1, { error: "microgrid_id is required." })
+      .min(1, { error: MICROGRID_ID })
       .meta({ title: "Microgrid" }),
     display_name: z
       .string({ error: "display_name is required." })
@@ -303,6 +314,8 @@ export const CREATE_TENANT_BODY_VERSION = 1;
 export const CREATE_TENANT_REFUSALS: BodyRefusals = {
   json: INVALID_JSON,
   issue(issue) {
+    // The route read microgrid_id off any body, so one that is not an object had none.
+    if (notAnObject(issue)) return { status: 422, body: { error: MICROGRID_ID, field: "microgrid_id" } };
     const key = keyOf(issue);
     const at = (status: 400 | 422, code: string): RefusedBody => ({
       status,
