@@ -462,6 +462,10 @@ release that ships the CLI lists them in `src/lib/mgm/released-routes.ts`.
   nothing, and the sign-in expires on its own.
 - Supabase Auth then sends the browser to `/oauth/code`, which shows one
   string, `<state>.<code>`, to paste into the terminal that asked for it.
+- `mgm logout` calls `POST /api/auth/logout` with its own token, which ends
+  that one session (`fn_client_sessions_end`) and nothing else, then deletes
+  its token file. The CLI itself, its token store and what logout does and
+  does not end are described in `packages/mgm-cli/README.md`.
 
 **Removing a client.** `DELETE FROM public.mgm_clients WHERE client_id =
 '<id>';` refuses its next sign-in and its next refresh. It ends no session:

@@ -1827,6 +1827,14 @@ export type Database = {
           outcome: string
         }[]
       }
+      fn_client_sessions_end: {
+        Args: { _client_id: string; _session_id?: string; _user_id: string }
+        Returns: {
+          consent_revoked: boolean
+          outcome: string
+          sessions_ended: number
+        }[]
+      }
       fn_close_billing_period: {
         Args: { _acknowledged: string[]; _digest: string; _period_id: string }
         Returns: {

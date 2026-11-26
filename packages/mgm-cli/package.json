@@ -1,0 +1,14 @@
+{
+  "name": "mgm-cli",
+  "version": "0.0.0-dev",
+  "private": true,
+  "description": "MGM's command line: sign in to an installation and act as yourself from a terminal (RFC #259).",
+  "license": "EPL-2.0",
+  "type": "module",
+  "bin": {
+    "mgm": "src/mgm.ts"
+  },
+  "engines": {
+    "node": ">=24 <25"
+  }
+}

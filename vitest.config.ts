@@ -70,6 +70,7 @@ export default defineConfig({
             "src/lib/supabase/__tests__/auth_access_token_hook.test.ts",
             "src/lib/supabase/__tests__/auth_access_token_hook_clients.test.ts",
             "src/lib/supabase/__tests__/client_consent.test.ts",
+            "src/lib/supabase/__tests__/client_sessions_end.test.ts",
             "src/lib/runtime/__tests__/bearer-session.db.test.ts",
             // Component tests of the interface kit and host run in the
             // "gui" project below, in jsdom. Without this line each would
@@ -145,8 +146,11 @@ export default defineConfig({
             "src/lib/supabase/__tests__/auth_access_token_hook.test.ts",
             "src/lib/supabase/__tests__/auth_access_token_hook_clients.test.ts",
             "src/lib/supabase/__tests__/client_consent.test.ts",
+            "src/lib/supabase/__tests__/client_sessions_end.test.ts",
             "src/app/api/auth/oauth/approvals/__tests__/sign-in.db.test.ts",
+            "src/app/api/auth/logout/__tests__/logout.db.test.ts",
             "src/lib/runtime/__tests__/bearer-session.db.test.ts",
+            "packages/mgm-cli/src/__tests__/cli.db.test.ts",
             "src/app/api/users/[id]/resend-invite/__tests__/rls-route.test.ts",
             "src/app/api/users/invite/__tests__/rls-route.test.ts",
             "src/app/api/gui/view/__tests__/site-day.db.test.ts",
@@ -177,6 +181,17 @@ export default defineConfig({
       {
         extends: true,
         test: {
+          name: "cli",
+          // The mgm command line (packages/mgm-cli). Its test against a real
+          // installation runs in the "rls" project.
+          include: ["packages/mgm-cli/**/*.test.ts"],
+          exclude: ["packages/mgm-cli/**/*.db.test.ts"],
+          environment: "node",
+        },
+      },
+      {
+        extends: true,
+        test: {
           name: "app",
           // Server-component tests (node environment) co-located with page files.
           include: ["src/app/**/*.test.{ts,tsx}"],
@@ -184,6 +199,7 @@ export default defineConfig({
           // run in the `rls` project (live local Supabase, sequential).
           exclude: [
             "src/app/api/auth/oauth/approvals/__tests__/sign-in.db.test.ts",
+            "src/app/api/auth/logout/__tests__/logout.db.test.ts",
             "src/app/api/users/[id]/resend-invite/__tests__/rls-route.test.ts",
             "src/app/api/users/invite/__tests__/rls-route.test.ts",
             "src/app/api/gui/view/__tests__/site-day.db.test.ts",

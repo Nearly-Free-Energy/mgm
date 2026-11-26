@@ -327,6 +327,11 @@ const ENTRIES: Record<string, Entry> = {
     reason:
       "getUser() answers 401 before the service-role bootstrap RPC (after the bootstrap token check).",
   },
+  "src/app/api/auth/logout/route.ts": {
+    kind: "session",
+    reason:
+      "Middleware answers a bearer request it does not accept first. The route takes its client from createClient, which builds a bearer client only for a token middleware accepted, refuses every caller but an operator client with 403, and getUser() answers 401, before fn_client_sessions_end ends one session as the service role, for the getUser() id and the same token's client_id and session_id; it never reads the body (ADR-008 decision 5). Unreleased until the CLI ships; it stays \"session\" when released.",
+  },
   "src/app/api/auth/oauth/approvals/route.ts": {
     kind: "session",
     reason:
