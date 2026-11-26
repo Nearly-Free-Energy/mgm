@@ -27,6 +27,7 @@ import { installationRequest, requireIssued, surfaceRequest, tenantRequest, type
 import { resolveSegments, type Scope } from "./entities";
 import { pluginGate, type PluginGate } from "./gate-state";
 import { isPageHref, parseHref } from "./hrefs";
+import { assistantGate, isAgentCaller } from "./agent";
 import { resolveActions } from "./merge";
 import { viewModelSchema } from "./model-schema";
 import { selectOrganization } from "./organization";
@@ -394,6 +395,14 @@ export async function dispatchView(
   if (!match) return NOT_FOUND;
   const { view } = match;
   const def = view.def;
+  // An agent client (RFC #259 § 2) reads only an organization's view marked
+  // agent: "read" (ADR-007 decision 4); every other view is a page that
+  // does not exist, before any read. A tenant view cannot carry the mark
+  // (TenantViewDef's agent?: never; tenant agent clients are #259 § 5's),
+  // and an installation view has no organization whose assistant gate
+  // could be asked.
+  const agent = isAgentCaller(ctx);
+  if (agent && (def.agent !== "read" || def.scope === "installation")) return NOT_FOUND;
   if (def.scope === "tenant") return dispatchTenantView(ctx, view, def, parsed.search, depth);
   // Every other view is staff's: about an organization, or the whole
   // installation. A person with only tenant rows (RFC mgm#197) gets the
@@ -420,6 +429,14 @@ export async function dispatchView(
     if (organizationId === null) return fail(403, "gui_no_access", "Your account has no organization yet.");
   }
   if (o.within !== undefined && organizationId !== o.within) return NOT_FOUND;
+  // Every assistant step asks the assistant plugin's gate first (ADR-007
+  // decision 5), before the view's own gate or loader. While it refuses
+  // every agent step (assistantGate), what a marked view gives an agent
+  // beyond its model (actions, attached and embedded views) is unsettled.
+  if (agent) {
+    const refused = organizationId === null ? NOT_FOUND : await assistantGate(ctx, organizationId);
+    if (refused) return refused;
+  }
 
   const gate = organizationId === null ? null : pluginGate(ctx, organizationId);
   const decision = await decide(gate, view.plugin);

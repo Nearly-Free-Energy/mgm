@@ -353,7 +353,7 @@ export const HOST_ROUTES: readonly HostRoute[] = [
       },
     ],
     answer: { schema: schemaRef("ActionCatalog"), description: "The actions, each with its availability." },
-    codes: ["gui_bad_request", "gui_no_access", "gui_not_found", "gui_output_invalid", "gui_unauthenticated", "gui_unavailable"],
+    codes: ["gui_agent_refused", "gui_bad_request", "gui_no_access", "gui_not_found", "gui_output_invalid", "gui_unauthenticated", "gui_unavailable"],
   },
   {
     method: "GET",
@@ -368,7 +368,7 @@ export const HOST_ROUTES: readonly HostRoute[] = [
       { name: "org", required: false, description: "The organization to build the manifest for.", schema: { type: "string", format: "uuid" } },
     ],
     answer: { schema: schemaRef("Manifest"), description: "The manifest." },
-    codes: ["gui_bad_request", "gui_manifest_failed", "gui_no_access", "gui_unauthenticated"],
+    codes: ["gui_agent_refused", "gui_bad_request", "gui_manifest_failed", "gui_no_access", "gui_unauthenticated"],
   },
   {
     method: "POST",
@@ -381,6 +381,7 @@ export const HOST_ROUTES: readonly HostRoute[] = [
     body: "PrepareRequest",
     answer: { schema: schemaRef("PreparedAction"), description: "The prepared action." },
     codes: [
+      "gui_agent_refused",
       "gui_action_refused",
       "gui_action_unavailable",
       "gui_bad_request",
@@ -421,7 +422,7 @@ export const HOST_ROUTES: readonly HostRoute[] = [
       { name: "org", required: false, description: "The organization to search; one the person cannot see is ignored, and their first is searched.", schema: { type: "string" } },
     ],
     answer: { schema: { type: "array", items: schemaRef("EntityHit"), maxItems: MAX_HITS }, description: "The hits, at most one per record." },
-    codes: ["gui_bad_request", "gui_no_access", "gui_unauthenticated", "gui_unavailable"],
+    codes: ["gui_agent_refused", "gui_bad_request", "gui_no_access", "gui_unauthenticated", "gui_unavailable"],
   },
   {
     method: "GET",
@@ -433,7 +434,7 @@ export const HOST_ROUTES: readonly HostRoute[] = [
       { name: "org", required: false, description: "The organization to report on; one the person cannot see is ignored, and their first is used.", schema: { type: "string" } },
     ],
     answer: { schema: schemaRef("Signals"), description: "The signals." },
-    codes: ["gui_no_access", "gui_output_invalid", "gui_unauthenticated", "gui_unavailable"],
+    codes: ["gui_agent_refused", "gui_no_access", "gui_output_invalid", "gui_unauthenticated", "gui_unavailable"],
   },
   {
     method: "GET",
@@ -448,6 +449,7 @@ export const HOST_ROUTES: readonly HostRoute[] = [
     ],
     answer: { schema: schemaRef("ViewModel"), description: "The view's model." },
     codes: [
+      "gui_agent_refused",
       "gui_bad_request",
       "gui_no_access",
       "gui_not_found",

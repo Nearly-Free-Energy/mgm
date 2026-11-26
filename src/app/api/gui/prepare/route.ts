@@ -1,8 +1,6 @@
 import type { NextRequest } from "next/server";
-import { getCurrentUserAccess } from "@/lib/auth/access";
-import { hostFailure, hostOutcome, routeHostContext } from "@/lib/gui/host/server/http";
+import { hostOutcome, openHostRequest } from "@/lib/gui/host/server/http";
 import { prepareAction, readPrepareBody } from "@/lib/gui/host/server/prepare";
-import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -13,9 +11,8 @@ export const dynamic = "force-dynamic";
  * getUser() before the body is read.
  */
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const host = routeHostContext(await getCurrentUserAccess(supabase), request.headers);
-  if (!host.ok) return hostFailure(host.status, host.code, host.message);
+  const host = await openHostRequest(request.headers);
+  if (!host.ok) return host.response;
   const body = await readPrepareBody(request);
   if (!body.ok) return hostOutcome(body);
   return hostOutcome(await prepareAction(host.ctx, body.value));

@@ -23,6 +23,7 @@ import type { ActionDef, Loaded } from "../../surface";
 import { isApiPath } from "../shared/href";
 import { actionTone, fillPath, idFits } from "../shared/merge-actions";
 import { requireIssued, surfaceRequest, type HostContext } from "./access";
+import { AGENT_REFUSED, isAgentCaller } from "./agent";
 import { gateRefusal } from "./availability";
 import { resolveSegments, type Segment } from "./entities";
 import { pluginGate } from "./gate-state";
@@ -139,10 +140,15 @@ async function ceremonyOf(
 
 /**
  * Prepares the action `input` names, with its params, for `ctx`'s person.
- * Writes nothing and never calls the action's route.
+ * Writes nothing and never calls the action's route. Refuses an agent
+ * client (403 `gui_agent_refused`) before reading anything.
  */
 export async function prepareAction(ctx: HostContext, input: unknown): Promise<HostOutcome<PreparedAction>> {
   requireIssued(ctx);
+  // An agent client prepares nothing (RFC #259 § 2): its route refuses it
+  // (openHostRequest), and this refuses it again, before the input or the
+  // surface is read, so no caller of prepareAction can skip that.
+  if (isAgentCaller(ctx)) return AGENT_REFUSED;
   const request = prepareBodySchema.safeParse(input);
   if (!request.success) return BAD_REQUEST;
   const { action } = request.data;

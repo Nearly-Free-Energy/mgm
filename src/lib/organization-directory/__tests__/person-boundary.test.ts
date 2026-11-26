@@ -15,13 +15,13 @@
  * - no view an assistant may read has a person in its path, and the host
  *   refuses to register one that does, even listed in ASSISTANT_READS.
  *
- * Agent clients themselves are not covered yet: nothing in the app tells one
- * from a browser session. #323's token hook puts the client's kind in the
- * `mgm_client_kind` claim for MGM's resolver (#272) to read, and the last
- * test here fails as soon as any source under src/ reads that claim. The
- * change that makes it fail adds, here, a test that an agent client is
- * refused `entity=org.user` by the catalog and by prepare, and then narrows
- * that check. If the claim is renamed, the same test fails on the migration.
+ * An agent client (RFC #259 § 2) is told apart from a browser session by
+ * the `mgm_client_kind` claim #323's token hook writes, which only the
+ * resolver reads (src/lib/runtime/caller.ts; #272). The catalog refuses it
+ * `entity=org.user`, and prepare refuses it everything, before either reads
+ * anyone. The last test fails when any other source under src/ reads that
+ * claim, so a second reader is reviewed against this boundary, and on the
+ * migration if the claim is renamed.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
@@ -29,10 +29,12 @@ import type { User } from "@supabase/supabase-js";
 import { afterAll, describe, expect, it } from "vitest";
 import { createFmt } from "@/lib/gui/fmt";
 import { hostContext } from "@/lib/gui/host/server/access";
+import { buildActionCatalog } from "@/lib/gui/host/server/catalog";
 import { parseContribution, SurfaceContributionError } from "@/lib/gui/host/server/contribution-schema";
 import { prepareAction } from "@/lib/gui/host/server/prepare";
 import type { ActionDef } from "@/lib/gui/surface";
 import { MGM_BUNDLED_PLUGINS } from "@/lib/plugins/bundled";
+import type { Caller } from "@/lib/runtime/caller";
 import { getMgmRuntime, resetMgmRuntimeForTests } from "@/lib/runtime/root";
 import type { UserRoleRecord } from "@/lib/types/domain";
 import { ORGANIZATION_DIRECTORY_SURFACE, USER_KIND } from "../surface";
@@ -54,12 +56,13 @@ async function snapshot() {
 }
 
 /** A context whose client throws on any use, so a refusal is shown to come before any read. */
-function context() {
+function context(caller?: Caller) {
   const made = hostContext({ user: CALLER, roles: [SUPER_ADMIN_ROW] }, new Headers({ "accept-language": "en-GB" }), {
     newClient: async () => {
       throw new Error("the host read something before refusing the proposal");
     },
     makeFmt: (locale) => createFmt({ locale }),
+    ...(caller ? { caller } : {}),
   });
   if (!made.ok) throw new Error("fixture context refused");
   return made.ctx;
@@ -126,7 +129,30 @@ describe("a person (org.user) and assistants", () => {
     expect(issues({ id: "organization" })).not.toContain(refusal);
   });
 
-  it("is not yet reachable by an agent client, since nothing in the app tells one apart", () => {
+  it("is refused to an agent client by the catalog, for entity=org.user, and by prepare, reading nothing", async () => {
+    const agent = context({ kind: "agent", clientId: "e7100000-0000-4000-8fff-0000000000c1" });
+    expect(await buildActionCatalog(agent, { org: null, preferred: null, entities: [{ kind: USER_KIND, id: PERSON }] })).toMatchObject({
+      ok: false,
+      status: 403,
+      code: "gui_agent_refused",
+    });
+    const naming = [...(await snapshot()).actions.values()].filter(({ def }) => kindsOf(def).has(USER_KIND));
+    for (const { def } of naming) {
+      const params = Object.fromEntries(
+        [...Object.entries(def.bind.path ?? {}), ...Object.entries(def.bind.body ?? {})].map(([field, kind]) => [field, kind === USER_KIND ? PERSON : ORG]),
+      );
+      // With and without provenance: an agent client prepares nothing, not only proposals.
+      for (const provenance of [undefined, PROPOSALS[0][1]]) {
+        expect(await prepareAction(agent, { action: def.id, params, ...(provenance ? { provenance } : {}) }), def.id).toMatchObject({
+          ok: false,
+          status: 403,
+          code: "gui_agent_refused",
+        });
+      }
+    }
+  });
+
+  it("is told apart from a browser session only by the resolver, the one reader of the client-kind claim", () => {
     // #323's hook writes the claim; if it is renamed, revisit this test and the header.
     const migrations = path.join(REPO_ROOT, "supabase/migrations");
     const hook = readdirSync(migrations).filter((f) => f.endsWith(".sql") && readFileSync(path.join(migrations, f), "utf8").includes("{claims,mgm_client_kind}"));
@@ -144,9 +170,8 @@ describe("a person (org.user) and assistants", () => {
       }
     };
     walk(path.join(REPO_ROOT, "src"));
-    // When this fails, agent clients can be told apart: add the test that one
-    // is refused entity=org.user by the catalog and by prepare (see the
-    // header), then list the readers here.
-    expect(readers).toEqual([]);
+    // A new reader decides something by a client's kind: check it against
+    // the test above and the header before listing it here.
+    expect(readers).toEqual(["src/lib/runtime/caller.ts"]);
   });
 });

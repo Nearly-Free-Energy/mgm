@@ -71,6 +71,11 @@ export const HOST_CODES = {
     reasons: ["state"],
     meaning: "The action's own available() said no for this record; the message says why.",
   },
+  gui_agent_refused: {
+    status: [403],
+    meaning:
+      "The caller is an assistant (an agent client), and this host route or step is closed to it: an assistant reads only the routes and views ADR-008 decision 6 and ADR-007 allow it, and writes nothing.",
+  },
   gui_availability_unchecked: {
     status: [],
     reasons: ["healthy"],

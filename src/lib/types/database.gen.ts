@@ -586,6 +586,7 @@ export type Database = {
       }
       mgm_client_approvals: {
         Row: {
+          authorization_id: string | null
           client_id: string
           created_at: string
           id: string
@@ -594,6 +595,7 @@ export type Database = {
         }
         ComputedFields: never
         Insert: {
+          authorization_id?: string | null
           client_id: string
           created_at?: string
           id?: string
@@ -601,6 +603,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          authorization_id?: string | null
           client_id?: string
           created_at?: string
           id?: string
@@ -1805,6 +1808,24 @@ export type Database = {
           p_user_id: string
         }
         Returns: undefined
+      }
+      fn_client_approval_record: {
+        Args: { _authorization_id: string; _user_id: string }
+        Returns: {
+          client_id: string
+          kind: string
+          label: string
+          outcome: string
+        }[]
+      }
+      fn_client_authorization_read: {
+        Args: { _authorization_id: string; _user_id: string }
+        Returns: {
+          client_id: string
+          kind: string
+          label: string
+          outcome: string
+        }[]
       }
       fn_close_billing_period: {
         Args: { _acknowledged: string[]; _digest: string; _period_id: string }

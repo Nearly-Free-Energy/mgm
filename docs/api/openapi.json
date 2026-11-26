@@ -3217,7 +3217,7 @@
             ]
           },
           "403": {
-            "description": "- `gui_no_access`: The person holds no role, or reaches no organization the answer needs.",
+            "description": "- `gui_agent_refused`: The caller is an assistant (an agent client), and this host route or step is closed to it: an assistant reads only the routes and views ADR-008 decision 6 and ADR-007 allow it, and writes nothing.\n- `gui_no_access`: The person holds no role, or reaches no organization the answer needs.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3226,6 +3226,7 @@
               }
             },
             "x-mgm-codes": [
+              "gui_agent_refused",
               "gui_no_access"
             ]
           },
@@ -3351,7 +3352,7 @@
             ]
           },
           "403": {
-            "description": "- `gui_no_access`: The person holds no role, or reaches no organization the answer needs.",
+            "description": "- `gui_agent_refused`: The caller is an assistant (an agent client), and this host route or step is closed to it: an assistant reads only the routes and views ADR-008 decision 6 and ADR-007 allow it, and writes nothing.\n- `gui_no_access`: The person holds no role, or reaches no organization the answer needs.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3360,6 +3361,7 @@
               }
             },
             "x-mgm-codes": [
+              "gui_agent_refused",
               "gui_no_access"
             ]
           },
@@ -3453,7 +3455,7 @@
             ]
           },
           "403": {
-            "description": "- `gui_action_refused`: The action's own prepare refused it, for a reason other than not finding its record. The status and the message are the action's.\n- `gui_human_only`: The action is human-only, and it was asked for as a proposal (with `provenance`).\n- `gui_no_access`: The person holds no role, or reaches no organization the answer needs.",
+            "description": "- `gui_action_refused`: The action's own prepare refused it, for a reason other than not finding its record. The status and the message are the action's.\n- `gui_agent_refused`: The caller is an assistant (an agent client), and this host route or step is closed to it: an assistant reads only the routes and views ADR-008 decision 6 and ADR-007 allow it, and writes nothing.\n- `gui_human_only`: The action is human-only, and it was asked for as a proposal (with `provenance`).\n- `gui_no_access`: The person holds no role, or reaches no organization the answer needs.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3463,6 +3465,7 @@
             },
             "x-mgm-codes": [
               "gui_action_refused",
+              "gui_agent_refused",
               "gui_human_only",
               "gui_no_access"
             ]
@@ -3637,7 +3640,7 @@
             ]
           },
           "403": {
-            "description": "- `gui_no_access`: The person holds no role, or reaches no organization the answer needs.",
+            "description": "- `gui_agent_refused`: The caller is an assistant (an agent client), and this host route or step is closed to it: an assistant reads only the routes and views ADR-008 decision 6 and ADR-007 allow it, and writes nothing.\n- `gui_no_access`: The person holds no role, or reaches no organization the answer needs.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3646,6 +3649,7 @@
               }
             },
             "x-mgm-codes": [
+              "gui_agent_refused",
               "gui_no_access"
             ]
           },
@@ -3717,7 +3721,7 @@
             ]
           },
           "403": {
-            "description": "- `gui_no_access`: The person holds no role, or reaches no organization the answer needs.",
+            "description": "- `gui_agent_refused`: The caller is an assistant (an agent client), and this host route or step is closed to it: an assistant reads only the routes and views ADR-008 decision 6 and ADR-007 allow it, and writes nothing.\n- `gui_no_access`: The person holds no role, or reaches no organization the answer needs.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3726,6 +3730,7 @@
               }
             },
             "x-mgm-codes": [
+              "gui_agent_refused",
               "gui_no_access"
             ]
           },
@@ -3824,7 +3829,7 @@
             ]
           },
           "403": {
-            "description": "- `gui_no_access`: The person holds no role, or reaches no organization the answer needs.\n- `gui_view_refused`: The view's loader refused, for a reason other than not finding its record. The status and the message are the loader's.",
+            "description": "- `gui_agent_refused`: The caller is an assistant (an agent client), and this host route or step is closed to it: an assistant reads only the routes and views ADR-008 decision 6 and ADR-007 allow it, and writes nothing.\n- `gui_no_access`: The person holds no role, or reaches no organization the answer needs.\n- `gui_view_refused`: The view's loader refused, for a reason other than not finding its record. The status and the message are the loader's.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3833,6 +3838,7 @@
               }
             },
             "x-mgm-codes": [
+              "gui_agent_refused",
               "gui_no_access",
               "gui_view_refused"
             ]
@@ -12722,6 +12728,13 @@
         "state"
       ],
       "meaning": "The action's own available() said no for this record; the message says why."
+    },
+    {
+      "code": "gui_agent_refused",
+      "status": [
+        403
+      ],
+      "meaning": "The caller is an assistant (an agent client), and this host route or step is closed to it: an assistant reads only the routes and views ADR-008 decision 6 and ADR-007 allow it, and writes nothing."
     },
     {
       "code": "gui_availability_unchecked",
