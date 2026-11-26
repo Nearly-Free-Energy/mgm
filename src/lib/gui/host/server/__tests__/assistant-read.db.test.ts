@@ -90,7 +90,7 @@ describe.skipIf(shouldSkip())("readForAssistant: metering.site-day against a dat
   async function read(href: string) {
     const host = routeHostContext(await getCurrentUserAccess(manager!.client), new Headers({ "accept-language": "en-GB" }));
     if (!host.ok) throw new Error(`[assistant-read.db] context refused: ${host.code}`);
-    return readForAssistant(host.ctx, { type: "view", href });
+    return readForAssistant(host.ctx, { type: "view", href, org: ORG });
   }
 
   it("serves the day with the houses' evening figure, and no device name, tenant name or country", async () => {

@@ -277,7 +277,7 @@ describe("readForAssistant, for a view", () => {
       roles = [superAdmin()];
       const home = view("community-management", { id: "community-management.home", path: "/microgrids", params: {}, entity: undefined, agent: "read" } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
       snapshot = snapshotOf([home]);
-      list({ kind: "view", id: "community-management.home" });
+      list(viewEntry("community-management.home"));
       expect(await read("/microgrids", ORG_B)).toMatchObject({ ok: true, value: { org: ORG_B } });
       expect(loadOf(home)).toHaveBeenCalledWith(expect.objectContaining({ organizationId: ORG_B }));
       expect(await read(`/microgrids?org=${ORG_A}`, ORG_B)).toMatchObject({ ok: true, value: { org: ORG_B } });
@@ -286,7 +286,7 @@ describe("readForAssistant, for a view", () => {
     it("refuses an org the person cannot see, for a view whose path names none, before any gate or load", async () => {
       const home = view("community-management", { id: "community-management.home", path: "/microgrids", params: {}, entity: undefined, agent: "read" } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
       snapshot = snapshotOf([home]);
-      list({ kind: "view", id: "community-management.home" });
+      list(viewEntry("community-management.home"));
       expect(await read("/microgrids", ORG_B)).toMatchObject({ ok: false, status: 404, code: "gui_not_found" });
       expect(checkGate).not.toHaveBeenCalled();
       expect(loadOf(home)).not.toHaveBeenCalled();
