@@ -212,13 +212,17 @@ describe("useSignalsFeed", () => {
   });
 
   it("fetches on focus or coming into view only when the last fetch is old enough", async () => {
+    expect(SIGNALS_MIN_GAP_MS).toBe(2 * 60_000);
     const fetch = fetchOf({ body: signals(1) });
     render(<Probe org={ORG} fetch={fetch} />);
     await settle();
     act(() => void window.dispatchEvent(new Event("focus")));
     act(() => setVisibility("visible"));
     expect(fetch).toHaveBeenCalledOnce();
-    await advance(SIGNALS_MIN_GAP_MS);
+    await advance(SIGNALS_MIN_GAP_MS - 1);
+    act(() => void window.dispatchEvent(new Event("focus")));
+    expect(fetch).toHaveBeenCalledOnce();
+    await advance(1);
     act(() => void window.dispatchEvent(new Event("focus")));
     await settle();
     expect(fetch).toHaveBeenCalledTimes(2);
@@ -247,6 +251,34 @@ describe("useSignalsFeed", () => {
     expect(feed().signals?.count).toBe(4);
     expect(badge.set).toHaveBeenCalledOnce();
     expect(badge.clear).not.toHaveBeenCalled();
+  });
+
+  it("fetches at once when the browser comes back online after a failed fetch, and not otherwise", async () => {
+    const fetch = fetchOf({ body: signals(4) }, { fail: true }, { body: signals(2) });
+    render(<Probe org={ORG} fetch={fetch} />);
+    await settle();
+    // Online after an answer: nothing to catch up on.
+    act(() => void window.dispatchEvent(new Event("online")));
+    await settle();
+    expect(fetch).toHaveBeenCalledOnce();
+    act(() => feed().refresh());
+    await settle();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(badge.set.mock.calls).toEqual([[4]]);
+    // Hidden, it waits for the page to come into view.
+    act(() => setVisibility("hidden"));
+    act(() => void window.dispatchEvent(new Event("online")));
+    await settle();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    act(() => void window.dispatchEvent(new Event("online")));
+    await settle();
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(badge.set).toHaveBeenLastCalledWith(2);
+    // Answered again: online no longer fetches.
+    act(() => void window.dispatchEvent(new Event("online")));
+    await settle();
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
 
   it("keeps the badge as it was, and backs off, when no source answered", async () => {

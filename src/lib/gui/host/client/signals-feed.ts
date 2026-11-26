@@ -4,7 +4,8 @@
  * The organization's signals on the client: GET /api/gui/signals for the
  * organization the shell shows, fetched after the first paint (never part of
  * the manifest), again every few minutes while the page is visible, when the
- * page comes back into view or focus, and when an action's result says
+ * page comes back into view or focus, when the browser comes back online
+ * after a fetch that failed, and when an action's result says
  * `signals: true`. What it holds is what the kit's useSignals() returns, and
  * its warnings and critical signals are the installed app's badge
  * (./app-badge.ts).
@@ -31,7 +32,10 @@
  *   badge: there is nothing of theirs to count.
  * - Anything else (503, 500, a network error, a body that is not signals)
  *   keeps what was shown, signals and badge, and doubles the wait before
- *   the next fetch, up to SIGNALS_MAX_BACKOFF_MS, until one answers.
+ *   the next fetch, up to SIGNALS_MAX_BACKOFF_MS, until one answers. The
+ *   browser's `online` event fetches at once while the page is visible, so a
+ *   page that lost its network does not wait out the backoff once it is
+ *   back.
  * - Once this page has signed the person out (markSignedOut), nothing is
  *   fetched and no answer is applied.
  * Nothing here throws or blocks rendering.
@@ -42,8 +46,8 @@ import { clearAppBadge, isSignedOut, setAppBadge } from "./app-badge";
 
 /** How often the signals are fetched again while the page is visible. Every fetch runs every watcher. */
 export const SIGNALS_REFRESH_MS = 5 * 60_000;
-/** Coming back into view or focus fetches again only when the last fetch is at least this old. */
-export const SIGNALS_MIN_GAP_MS = 30_000;
+/** Coming back into view or focus fetches again only when the last fetch is at least this old (decided on #287). */
+export const SIGNALS_MIN_GAP_MS = 2 * 60_000;
 /** The longest wait between fetches after repeated failures. */
 export const SIGNALS_MAX_BACKOFF_MS = 30 * 60_000;
 
@@ -228,6 +232,10 @@ export function useSignalsFeed(organization: string | null, fetch: Fetch): Signa
     const ifStale = () => {
       if (visible() && Date.now() - last >= wait(SIGNALS_MIN_GAP_MS)) load();
     };
+    // Back online after a fetch that failed: fetch now rather than wait out the backoff.
+    const onOnline = () => {
+      if (failures > 0 && visible()) load();
+    };
     feedRef.current = { load, seed };
     // The first fetch waits for the page's load event, then a turn more, so
     // a view's model that carries the signals can seed them first. The load
@@ -245,6 +253,7 @@ export function useSignalsFeed(organization: string | null, fetch: Fetch): Signa
     else window.addEventListener("load", first, { once: true });
     document.addEventListener("visibilitychange", ifStale);
     window.addEventListener("focus", ifStale);
+    window.addEventListener("online", onOnline);
     return () => {
       alive = false;
       controller?.abort();
@@ -252,6 +261,7 @@ export function useSignalsFeed(organization: string | null, fetch: Fetch): Signa
       window.removeEventListener("load", first);
       document.removeEventListener("visibilitychange", ifStale);
       window.removeEventListener("focus", ifStale);
+      window.removeEventListener("online", onOnline);
       if (feedRef.current?.load === load) feedRef.current = null;
     };
   }, [organization, held]);

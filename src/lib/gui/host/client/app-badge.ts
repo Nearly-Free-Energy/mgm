@@ -4,7 +4,8 @@
  * The installed app's icon badge (the Badging API). Browsers without it, or
  * a page not running as an installed app, simply show no badge: every call
  * is feature-detected and its rejection swallowed, so the badge can never
- * break a page. No service worker is involved; the page sets it while open.
+ * break a page. No service worker is involved; the page sets it while open,
+ * so the badge is not updated while the app is closed (ADR-006 decision 9).
  *
  * Once this page has signed the person out (markSignedOut), setAppBadge does
  * nothing for the rest of the page's life, so a signals answer that lands
