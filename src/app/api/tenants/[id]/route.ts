@@ -120,7 +120,7 @@ export async function PATCH(
  * with nothing deleted. A request with no body, as the tenants page's
  * delete dialog sends (TenantTable), is not asked for one: requiring it
  * would change that page. If the page comes to send the confirmation,
- * require it.
+ * require it. docs/cordis-runtime.md tells the action catalog's clients so.
  */
 export async function DELETE(
   request: NextRequest,

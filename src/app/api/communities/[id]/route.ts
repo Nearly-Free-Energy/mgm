@@ -125,6 +125,7 @@ export async function PATCH(
  * body, as the community page's delete dialog sends after its own typed
  * check (DeleteEntityButton), is not asked for one: requiring it would
  * change that page. If the page comes to send the confirmation, require it.
+ * docs/cordis-runtime.md tells the action catalog's clients so.
  *
  * Cascade chain: communities → microgrids → (edges/devices/tenants/
  * billing_periods/billing_line_items/rate_schedules/tenant_devices), and

@@ -142,6 +142,7 @@ export async function PATCH(
  * body, as the microgrid page's delete dialog sends after its own typed
  * check (DeleteEntityButton), is not asked for one: requiring it would
  * change that page. If the page comes to send the confirmation, require it.
+ * docs/cordis-runtime.md tells the action catalog's clients so.
  *
  * Revalidation (AC-UI-6): both `/communities/<community_id>` and
  * `/microgrids` layouts are busted.

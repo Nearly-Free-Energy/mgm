@@ -326,6 +326,20 @@ key is a 400.
   organization but holds a unit, or whose rows are all tenant rows, gets no
   actions, since every action is a staff route.
 
+An entry's `confirm` is the level of the step the GUI host shows before it
+sends, and the host sends the confirmation that step asks for. Not every
+route requires one. Billing's period delete does: a request with no
+confirmation answers 428 `billing_delete_confirmation_required`. Community
+management's three typed deletes (`DELETE /api/communities/[id]`,
+`/api/microgrids/[id]` and `/api/tenants/[id]`) check the name only when a
+confirmation is sent (428 `*_delete_name_mismatch` for the wrong one), and
+still delete on a request with no body, as they did before they were
+described, since their pages send none. Its access removal's ceremony has
+nothing to tick or type, so that route has nothing to check either. A
+client other than the host sends the confirmation its entry's level asks
+for; those routes do not refuse a request that leaves it out. When the
+pages send it, the three deletes require it and this paragraph changes.
+
 An entry's `availability` lists each check that refused it in `reasons`,
 and each check not decided in `unchecked`, so `available: true` means only
 that nothing refused it:
