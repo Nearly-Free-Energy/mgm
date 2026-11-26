@@ -27,12 +27,13 @@ read a stored credential, or to send data to another origin.
 
 ## Decision
 
-1. **The contract is two TypeScript modules.**
+1. **The contract is three TypeScript modules.**
    - `src/lib/gui/contract.ts` is client-safe. It holds what an interface
      renders: formatted values, the five view kinds and their models, links,
-     action references, signals, the manifest, the kit interface
-     (`GuiKit`) and what an interface plugin implements (`GuiPlugin`,
-     `GuiMeta`). It imports only types, from `react` and the plugin catalog.
+     action references, signals, the manifest, the props and state the kit
+     hands an interface, and an interface's metadata (`GuiMeta`). It
+     imports only types, and only from the plugin catalog, so a client that
+     is not an interface type-checks it without React.
      It also carries the answers the host's routes give a client that is
      not an interface, such as the CLI, which may import only this file
      (RFC #259 §§ 3-4): the action catalog (`ActionCatalog`, served by
@@ -42,6 +43,11 @@ read a stored credential, or to send data to another origin.
      refusal into the `ActionResult` an interface always got. Each has a
      strict schema in `src/lib/gui/host/server/model-schema.ts`, as every
      shape a browser receives does.
+   - `src/lib/gui/contract-react.ts` is client-safe too. It holds the types
+     that name React types: the kit interface (`GuiKit`), what an interface
+     plugin implements (`GuiPlugin`), and the kit's component props
+     (`LinkProps`, `ShellProps`, `OverlayProps`, `SyncComponent`). It
+     imports only types, from `react` and `contract.ts`.
    - `src/lib/gui/surface.ts` is server-only. It holds what a capability
      contributes: views with loaders, actions bound to its existing API
      routes with a confirmation level, navigation entries, signals, status
@@ -70,8 +76,14 @@ read a stored credential, or to send data to another origin.
    amount and is sent in integer minor units.
 5. **Import boundaries follow where code runs.**
    `src/lib/gui/__tests__/gui-boundary.test.ts` enforces them:
-   - `contract.ts` imports only types, from `react` and
-     `@/lib/plugins/bundled`.
+   - `contract.ts` imports only types, and only from
+     `@/lib/plugins/bundled`; no npm package is reached through its imports,
+     even as types; and it type-checks with no `@types` package loaded,
+     loading no file outside `src/` and TypeScript's own libraries. So a
+     client that is not an interface type-checks it without React.
+     `contract-react.ts` holds `GuiKit`, `GuiPlugin` and the kit's props,
+     imports only types, from `react` and `contract.ts`, and re-exports
+     nothing.
    - `surface.ts`, `fmt.ts` and everything under `src/lib/gui/host/server/`
      start with `import "server-only"`.
    - Everything under `src/lib/gui/host/client/` starts with `"use client"`.
@@ -103,6 +115,9 @@ read a stored credential, or to send data to another origin.
      shape an interface receives changed, so a patch was enough. It also
      covers `Signals.attention` (#230), an optional field added while the
      contract read 0.2.0.
+   - A1-5 on #133 moved the types that name React types to
+     `contract-react.ts` (decision 1). No shape changed and interfaces are
+     compiled in (decision 2), so `GUI_CONTRACT` stayed 0.2.1.
    - Each view kind records the version it arrived in (`GUI_KINDS_SINCE`),
      so a kind newer than an interface's range can be shown by a generic
      fallback.
@@ -189,8 +204,11 @@ read a stored credential, or to send data to another origin.
      per microgrid however many are offline, and so is a microgrid whose
      gateways' status could not be read because the read failed, timed out
      or gave no answer within the budget (`metering.edge-status`, mgm#287).
-     When more than 50 are found, offline gateways are kept ahead of
-     statuses that could not be read.
+     So is a microgrid with one or more meters on an online gateway that
+     have sent no reading for half an hour, one signal per microgrid with a
+     count, and one whose meters' history could not be read. When more than
+     50 are found, offline gateways are kept first, then quiet meters, then
+     statuses and meters that could not be read.
    - A watcher reads through the person's own client or a capability's
      reads, filters by the organization itself and throws when a read
      fails. It reads the database, since every load of the signals runs
@@ -210,9 +228,11 @@ read a stored credential, or to send data to another origin.
      2 s timeout within a 3 s budget, every microgrid of the organization
      examined up to 500 (unchecked past that), those never read or read
      longest ago first, and a read under way at the deadline kept for the
-     next load; it reports offline gateways only, since a quiet meter needs
-     per-component reads. No scheduled writer replaces it: on Vercel Hobby
-     crons run about daily.
+     next load. Beside each microgrid's status read it makes a second
+     cached read, of its meters' power history (one request per edge), which
+     shares the same cache rules and slots; a meter read with no answer by
+     the deadline is left for the next load rather than reported. No
+     scheduled writer replaces it: on Vercel Hobby crons run about daily.
    - A watcher aggregates (one signal per period or site, not per bill),
      writes fixed copy with values formatted on the server, and names no
      tenant, because an assistant may read signals later (#133's data
@@ -370,7 +390,8 @@ Worse, or to watch:
 
 ## References
 
-- `src/lib/gui/contract.ts`, `src/lib/gui/surface.ts`
+- `src/lib/gui/contract.ts`, `src/lib/gui/contract-react.ts`,
+  `src/lib/gui/surface.ts`
 - `src/lib/gui/host/client/action-host.tsx`,
   `src/lib/gui/host/server/prepare.ts` (decision 10)
 - `src/lib/gui/__tests__/repeat.db.test.ts`, `src/lib/gui/__tests__/repeat/`

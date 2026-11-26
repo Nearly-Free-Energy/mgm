@@ -25,7 +25,8 @@
  * measure the budgets again.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { GuiKit, LiveState, ModelOf, RowOf, ActionRef, SyncNode, ViewProps } from "@/lib/gui/contract";
+import type { LiveState, ModelOf, RowOf, ActionRef, ViewProps } from "@/lib/gui/contract";
+import type { GuiKit, SyncNode } from "@/lib/gui/contract-react";
 import { CONTROL, ControlList, TONE, ValueText } from "../period-review/controls";
 import { copyFigure } from "../period-review/copy";
 import { cls } from "../period-review/ext";

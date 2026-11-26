@@ -3493,7 +3493,8 @@
               "billing",
               "payments",
               "pesapal",
-              "tenant-app"
+              "tenant-app",
+              "operations"
             ]
           },
           "target": {

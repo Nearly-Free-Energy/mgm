@@ -1,20 +1,22 @@
 # Images the Test job pre-pulls and caches (one per line, ghcr.io/supabase/<name>:<tag>).
-# Derived from the pinned Supabase CLI 2.122.1: tags from
-# apps/cli-go/pkg/config/templates/Dockerfile, names from
-# apps/cli-go/internal/utils.GetRegistryImageUrl (registry + "/supabase/" + last
-# path segment), set from apps/cli-go/internal/utils.GetServices for
-# supabase/config.toml (analytics and pooler are disabled, so vector,
-# logflare and supavisor are not pulled).
+# Derived from the pinned Supabase CLI 3.4.0: tags from
+# apps/cli/src/shared/services/Dockerfile, names from
+# apps/cli/src/command-internal/docker-registry.ts getRegistryImageUrl
+# (registry + "/supabase/" + last path segment), set from
+# apps/cli/src/commands/start/start.gates.ts resolveStartGates for
+# supabase/config.toml, plus postgres and edge-runtime, which start.handler.ts
+# starts outside those gates. Analytics, the pooler and image transformation
+# are disabled, so vector, logflare, supavisor and imgproxy are not pulled.
+# The restore target (scripts/tests/restore-target.config.toml) uses a subset.
 # When the CLI version in package-lock.json changes, regenerate this file;
 # the Test job warns if a running Supabase container is not listed here.
-ghcr.io/supabase/postgres:17.11.0.006
+ghcr.io/supabase/postgres:17.12.0.002
 ghcr.io/supabase/kong:2.8.1
-ghcr.io/supabase/postgrest:v16.5
-ghcr.io/supabase/gotrue:v2.197.0
+ghcr.io/supabase/postgrest:v16.6
+ghcr.io/supabase/gotrue:v2.198.0
 ghcr.io/supabase/mailpit:v1.31.3
-ghcr.io/supabase/realtime:v2.147.1
-ghcr.io/supabase/storage-api:v1.84.19
-ghcr.io/supabase/imgproxy:v3.26.0
-ghcr.io/supabase/edge-runtime:v1.77.8
-ghcr.io/supabase/studio:2026.10.19-sha-b375769
-ghcr.io/supabase/postgres-meta:v0.100.0
+ghcr.io/supabase/realtime:v2.177.1
+ghcr.io/supabase/storage-api:v1.98.8
+ghcr.io/supabase/edge-runtime:v1.79.5
+ghcr.io/supabase/studio:2026.11.23-sha-4a73166
+ghcr.io/supabase/postgres-meta:v1.0.0

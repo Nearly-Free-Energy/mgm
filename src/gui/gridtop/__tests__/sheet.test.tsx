@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { MANIFEST_FIXTURES, renderShell, settle, type Rendered } from "@/lib/gui/conformance";
-import type { GuiPlugin } from "@/lib/gui/contract";
+import type { GuiPlugin } from "@/lib/gui/contract-react";
 import { kit } from "@/lib/gui/kit";
 import { GridtopGui } from "..";
 import { Sheet } from "../ui/sheet";

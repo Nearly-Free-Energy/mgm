@@ -590,6 +590,13 @@ describe("assistant reading", () => {
     // on purpose; one missing here is refused at registration.
     expect(Object.keys(ASSISTANT_READING).sort()).toEqual(MGM_BUNDLED_PLUGINS.map((p) => p.name).sort());
   });
+
+  it("refuses the operations plugin until its investigation view decides it", () => {
+    // ADR-007 decision 9 is settled by the pull request that builds the
+    // investigation view; until then no operations view may be marked. When
+    // that pull request moves the plugin to "per view", change this.
+    expect(ASSISTANT_READING.operations).toBe("refused");
+  });
 });
 
 describe("strictProblems", () => {

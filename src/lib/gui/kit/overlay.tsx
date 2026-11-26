@@ -11,11 +11,11 @@
  * it as its own.
  *
  * Like any Overlay it frames only what it is given: the host's empty slot,
- * into which the host portals the step (OverlayProps in ../contract.ts).
+ * into which the host portals the step (OverlayProps in ../contract-react.ts).
  */
 import * as Dialog from "@radix-ui/react-dialog";
 import { DialogOverlay, DialogPanel } from "@/components/ui/dialog";
-import type { OverlayProps } from "../contract";
+import type { OverlayProps } from "../contract-react";
 
 export function Overlay({ title, tone, role, onDismiss, children }: OverlayProps) {
   return (

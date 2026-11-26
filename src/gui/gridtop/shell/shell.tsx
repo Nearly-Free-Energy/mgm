@@ -13,7 +13,7 @@
  * dock pads the bottom one.
  */
 import { useEffect, useRef, useState } from "react";
-import type { ShellProps } from "@/lib/gui/contract";
+import type { ShellProps } from "@/lib/gui/contract-react";
 import { kit } from "@/lib/gui/kit";
 import { GRIDTOP_RENDERERS } from "../renderers";
 import { BottomDock } from "./bottom-dock";

@@ -8,7 +8,8 @@
  * holding it, inside a button that names no currency, so a bare figure
  * never sits next to its column label.
  */
-import type { ActionRef, GuiKit, LiveState, ModelOf, RowOf } from "@/lib/gui/contract";
+import type { ActionRef, LiveState, ModelOf, RowOf } from "@/lib/gui/contract";
+import type { GuiKit } from "@/lib/gui/contract-react";
 import { RowControls, ValueText } from "./controls";
 import type { Copier } from "./copy";
 import { tenantOf } from "./copy-table";
