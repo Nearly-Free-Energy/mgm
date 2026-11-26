@@ -254,7 +254,9 @@ read a stored credential, or to send data to another origin.
      manifest shows after the first paint, never in the manifest
      (`src/lib/gui/host/client/signals-feed.ts`): again every five minutes
      while the page is visible, on focus or coming back into view when the
-     last fetch is 30 s old, and after an action whose route answers
+     last fetch is two minutes old, on coming back online after a fetch
+     that failed (once shown, if the page is hidden then; a failure of
+     that fetch is not counted), and after an action whose route answers
      `signals: true`. A view that takes signals carries them in its model
      (`signals`), and the shell takes those instead of fetching again.
      `useSignals()` returns them, and the installed app's badge shows their
@@ -267,7 +269,10 @@ read a stored credential, or to send data to another origin.
      badge is cleared for it, when the organization changes, on sign-out
      (after which the page sets it no more) and whenever /login shows.
      The badge belongs to the installed app, not to a window: two windows
-     on different organizations show whichever fetched last.
+     on different organizations show whichever fetched last. Only an open
+     page sets it (no service worker or push), so the badge is not updated
+     while the app is closed: where the platform keeps it, it shows the
+     count from when the app was last open.
 
 10. **The host's confirmation steps.**
    - A step's tone, and an `ActionRef`'s `tone`, come from the action's

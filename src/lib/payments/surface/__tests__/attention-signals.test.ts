@@ -1,13 +1,14 @@
 /**
  * The payments watchers: the attempts come from the capability's
  * listAttention after composePayments, the bills through the person's own
- * client; one signal per period with fixed copy and no tenant, amount,
- * reference or provider detail; a link to the bill when only one is
- * concerned; reconciliation critical only when an attempt in the period
- * reached the provider; settled bills and bills held for reconciliation left
- * out of failures; checkouts never submitted reported per community from
- * three in a day, and a truncated listing of them throws; any refusal or
- * failed read throws; the composition is always disposed.
+ * client, filtered to the organization; one signal per period with fixed
+ * copy and no tenant, amount, reference or provider detail; a link to the
+ * bill when only one is concerned; reconciliation critical only when an
+ * attempt in the period reached the provider; failures counted by bill, with
+ * settled bills and bills held for reconciliation left out; checkouts never
+ * submitted reported per community from three in a day; a truncated listing
+ * throws in every watcher; any refusal or failed read throws; the
+ * composition is always disposed.
  */
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -105,7 +106,8 @@ describe("loadReconcileSignals", () => {
       {
         table: "billing_line_items",
         ops: [
-          ["select", ["id, payment_status, billing_periods!inner(id, start_date, end_date, microgrid_id, microgrids!inner(id, name))"]],
+          ["select", ["id, payment_status, billing_periods!inner(id, start_date, end_date, microgrid_id, microgrids!inner(id, name, communities!inner(org_id)))"]],
+          ["eq", ["billing_periods.microgrids.communities.org_id", ORG]],
           ["in", ["id", [bill(1), bill(2)]]],
         ],
       },
@@ -178,7 +180,15 @@ describe("loadReconcileSignals", () => {
     composeWith({ needs_reconciliation: Array.from({ length: 250 }, (_, i) => ({ ...attempt(1, 1, "needs_reconciliation"), id: `a${i}`, lineItemId: `b${i}` })) });
     const { client, calls } = tableClient({ billing_line_items: { data: [] } });
     await loadReconcileSignals(req(client));
-    expect(calls.map((c) => (c.ops[1][1][1] as string[]).length)).toEqual([100, 100, 50]);
+    expect(calls.map((c) => (c.ops[2][1][1] as string[]).length)).toEqual([100, 100, 50]);
+  });
+
+  it("throws when the listing is truncated, so the watcher is listed as unchecked rather than losing the oldest", async () => {
+    composeWith({ needs_reconciliation: [attempt(1, 1, "needs_reconciliation")] }, true);
+    const { client, calls } = tableClient({ billing_line_items: { data: [billRow(1, OCT)] } });
+    await expect(loadReconcileSignals(req(client))).rejects.toThrow("payments.reconcile: more attempts than one read returns");
+    expect(calls).toEqual([]);
+    expect(dispose).toHaveBeenCalledOnce();
   });
 });
 
@@ -191,8 +201,22 @@ describe("loadFailedSignals", () => {
     expect(composePayments).toHaveBeenCalledOnce();
     expect(dispose).toHaveBeenCalledOnce();
     expect(out.map((s) => [s.severity, s.title, s.href])).toEqual([
-      ["warn", "North site: 1 payment failed in November 2026", `/microgrids/${MG}/billing/${NOV}/payments?bill=${bill(3)}`],
+      ["warn", "North site: 1 bill has a failed payment in November 2026", `/microgrids/${MG}/billing/${NOV}/payments?bill=${bill(3)}`],
     ]);
+  });
+
+  it("throws when either listing is truncated: a held list cut short could show a held bill as failed", async () => {
+    for (const cut of ["failed", "needs_reconciliation"]) {
+      composeWith({ failed: [attempt(3, 3, "failed")], needs_reconciliation: [] });
+      listAttention.mockImplementation(async (q: { status: string }) => ({
+        ok: true,
+        data: { attempts: q.status === "failed" ? [attempt(3, 3, "failed")] : [], truncated: q.status === cut },
+      }));
+      const { client, calls } = tableClient({ billing_line_items: { data: [billRow(3, NOV)] } });
+      await expect(loadFailedSignals(req(client)), cut).rejects.toThrow("payments.failed: more attempts than one read returns");
+      expect(calls).toEqual([]);
+      expect(dispose).toHaveBeenCalledOnce();
+    }
   });
 });
 
@@ -285,6 +309,19 @@ describe("the payments signal models", () => {
     ]);
   });
 
+  it("counts failures by bill, so retries of one bill read as one", () => {
+    const retries = [attempt(1, 1, "failed", "2026-11-19T08:00:00Z"), attempt(2, 1, "failed", "2026-11-19T08:05:00Z"), attempt(3, 1, "failed", "2026-11-19T08:10:00Z")];
+    const [one] = buildFailedSignals(fmt, retries, [], bills);
+    expect([one.title, one.href, one.at]).toEqual([
+      "North site: 1 bill has a failed payment in October 2026",
+      `/microgrids/${MG}/billing/${OCT}/payments?bill=${bill(1)}`,
+      "2026-11-19T08:10:00.000Z",
+    ]);
+    const twoBills = new Map([...bills, [bill(5), { ...bills.get(bill(1))!, id: bill(5) }]]);
+    const [two] = buildFailedSignals(fmt, [...retries, attempt(4, 5, "failed")], [], twoBills);
+    expect([two.title, two.href]).toEqual(["North site: 2 bills have failed payments in October 2026", `/microgrids/${MG}/billing/${OCT}/payments`]);
+  });
+
   it("lists periods by their newest attempt and stops at the host's cap", () => {
     const many = new Map<string, AttentionBill>();
     const held: AttentionAttempt[] = [];
@@ -303,6 +340,11 @@ describe("the payments signal models", () => {
     expect(out.map((s) => [s.id, s.severity])).toEqual([
       [OCT, "critical"],
       [NOV, "warn"],
+    ]);
+    // Reconciliation counts attempts, not bills: two held on one bill are two payments, and link to that bill.
+    expect([out[0].title, out[0].href]).toEqual([
+      "North site: 2 payments in October 2026 need reconciliation",
+      `/microgrids/${MG}/billing/${OCT}/payments?bill=${bill(1)}`,
     ]);
   });
 
@@ -328,7 +370,7 @@ describe("the payments signal models", () => {
     expect(examples.map((s) => [s.severity, s.title])).toEqual([
       ["critical", "Kiwumu: 2 payments in October 2026 need reconciliation"],
       ["warn", "Kiwumu: 1 checkout in November 2026 needs reconciliation"],
-      ["warn", "Kiwumu: 1 payment failed in November 2026"],
+      ["warn", "Kiwumu: 1 bill has a failed payment in November 2026"],
       ["warn", "Kiwumu village: 4 checkouts did not reach Pesapal in the last 24 hours"],
     ]);
     expect(JSON.stringify(examples)).not.toMatch(/trk|tracking/i);

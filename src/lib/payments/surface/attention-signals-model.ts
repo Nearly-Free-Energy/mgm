@@ -3,7 +3,8 @@ import "server-only";
 /**
  * The signals of the payments watchers (./attention-signals.ts), built from
  * rows already read: `payments.reconcile`, attempts held for a manager to
- * reconcile, and `payments.failed`, recent failures on bills still unpaid,
+ * reconcile, counted by attempt, and `payments.failed`, recent failures on
+ * bills still unpaid, counted by bill, so retries of one bill read as one;
  * one signal per billing period, leading to the period's payments, or
  * straight to the bill when only one is concerned; and
  * `payments.not-submitted`, one signal per community where several
@@ -77,7 +78,7 @@ function byPeriod(attempts: readonly AttentionAttempt[], bills: ReadonlyMap<stri
 const payments = (n: number) => (n === 1 ? "1 payment" : `${n} payments`);
 const checkouts = (n: number) => (n === 1 ? "1 checkout" : `${n} checkouts`);
 
-function signal(fmt: Fmt, g: Group, o: { severity: "warn" | "critical"; title: (name: string, n: number) => string }): SignalOut {
+function signal(fmt: Fmt, g: Group, o: { severity: "warn" | "critical"; title: (name: string) => string }): SignalOut {
   const { bill } = g;
   const label = periodLabel(fmt, bill.startDate, bill.endDate);
   const name = periodName(bill.startDate, bill.endDate) ?? label;
@@ -87,7 +88,7 @@ function signal(fmt: Fmt, g: Group, o: { severity: "warn" | "critical"; title: (
     id: bill.periodId,
     kind: "your-move",
     severity: o.severity,
-    title: `${bill.microgridName}: ${o.title(name, g.attempts.length)}`,
+    title: `${bill.microgridName}: ${o.title(name)}`,
     facts: [fmt.text(label)],
     entity: { kind: "microgrid", id: bill.microgridId, label: bill.microgridName },
     href: g.bills.size === 1 ? `${page}?${BILL_PARAM}=${only}` : page,
@@ -103,18 +104,20 @@ function signal(fmt: Fmt, g: Group, o: { severity: "warn" | "critical"; title: (
  */
 export function buildReconcileSignals(fmt: Fmt, attempts: readonly AttentionAttempt[], bills: ReadonlyMap<string, AttentionBill>): SignalOut[] {
   const need = (n: number) => (n === 1 ? "needs" : "need");
-  return byPeriod(attempts, bills).map((g) =>
-    g.attempts.some((a) => a.reachedProvider)
-      ? signal(fmt, g, { severity: "critical", title: (name, n) => `${payments(n)} in ${name} ${need(n)} reconciliation` })
-      : signal(fmt, g, { severity: "warn", title: (name, n) => `${checkouts(n)} in ${name} ${need(n)} reconciliation` }),
-  );
+  return byPeriod(attempts, bills).map((g) => {
+    const n = g.attempts.length;
+    return g.attempts.some((a) => a.reachedProvider)
+      ? signal(fmt, g, { severity: "critical", title: (name) => `${payments(n)} in ${name} ${need(n)} reconciliation` })
+      : signal(fmt, g, { severity: "warn", title: (name) => `${checkouts(n)} in ${name} ${need(n)} reconciliation` });
+  });
 }
 
 /**
  * One signal per period with recent failures on bills still to be paid,
- * newest first. A failure on a bill since paid or refunded, or on a bill
- * that also has an attempt held for reconciliation (`payments.reconcile`
- * reports that bill), is left out.
+ * newest first, counting the bills, not the attempts: three failed retries
+ * of one bill are one bill with a failed payment. A failure on a bill since
+ * paid or refunded, or on a bill that also has an attempt held for
+ * reconciliation (`payments.reconcile` reports that bill), is left out.
  */
 export function buildFailedSignals(
   fmt: Fmt,
@@ -127,7 +130,10 @@ export function buildFailedSignals(
     const bill = bills.get(a.lineItemId);
     return bill !== undefined && !SETTLED.has(bill.paymentStatus) && !reconciling.has(a.lineItemId);
   });
-  return byPeriod(open, bills).map((g) => signal(fmt, g, { severity: "warn", title: (name, n) => `${payments(n)} failed in ${name}` }));
+  return byPeriod(open, bills).map((g) => {
+    const n = g.bills.size;
+    return signal(fmt, g, { severity: "warn", title: (name) => (n === 1 ? `1 bill has a failed payment in ${name}` : `${n} bills have failed payments in ${name}`) });
+  });
 }
 
 /**
