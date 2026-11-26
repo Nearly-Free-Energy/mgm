@@ -48,7 +48,8 @@
  *      and test code. So a GUI's components reach the pages that render it
  *      and no other module.
  *  12. contract-react: src/lib/gui/contract-react.ts, the kit and GUI-plugin
- *      types, imports only types, and only from react and ./contract.
+ *      types, imports only types, and only from react and ./contract, and
+ *      re-exports nothing (no `export … from`), so each name has one home.
  *
  * Apart from the rules, the npm packages a GUI imports must equal both its
  * REVIEWED_PACKAGES entry and its GuiMeta.dependencies (packageListProblems).
@@ -395,6 +396,16 @@ function boundaryViolations(
             "contract-react",
             file,
             `imports ${imported.specifier || "a computed module"}${imported.declaredTypeOnly ? "" : " as a value"}; contract-react.ts may only \`import type\` from ${CONTRACT_REACT_TYPE_SOURCES.join(" or ")}`,
+          );
+        }
+      }
+      for (const statement of source.statements) {
+        if (ts.isExportDeclaration(statement) && statement.moduleSpecifier) {
+          const from = ts.isStringLiteral(statement.moduleSpecifier) ? statement.moduleSpecifier.text : "a module";
+          report(
+            "contract-react",
+            file,
+            `re-exports from ${from}; contract-react.ts re-exports nothing, so each name has one home`,
           );
         }
       }
@@ -882,9 +893,19 @@ describe("the boundary checker catches each violation (self-tests)", () => {
         'import type { Root } from "react-dom/client";',
         'import type { Fmt } from "./surface";',
         'import type { CoreEntityKind } from "@/lib/plugins/bundled";',
-        'export type { Href } from "./contract";\nexport type { Fmt } from "./surface";',
+        'export type { Fmt } from "./surface";',
       ]) {
         expect(rulesOf(check({ [CONTRACT_REACT]: source })), source).toContain("contract-react");
+      }
+    });
+
+    it("refuses a re-export, even a type re-export of contract.ts", () => {
+      for (const source of [
+        'export type { Href } from "./contract";',
+        'export type * from "./contract";',
+        'export type { ReactNode } from "react";',
+      ]) {
+        expect(rulesOf(check({ [CONTRACT_REACT]: source })), source).toEqual(["contract-react"]);
       }
     });
   });
