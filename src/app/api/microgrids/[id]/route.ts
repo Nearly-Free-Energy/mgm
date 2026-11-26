@@ -148,8 +148,9 @@ export async function PATCH(
  *     naming the microgrid to type. Nothing is deleted.
  *   - a name that is not the microgrid's, or none typed: 428
  *     `microgrid_delete_name_mismatch`.
- * The GUI host sends the name typed in its step, and the microgrid page's
- * delete dialog (DeleteEntityButton) the name it asked for.
+ * The GUI host sends the name typed in its step. No page deletes a
+ * microgrid today; if one comes to (DeleteEntityButton), it sends the name
+ * its dialog asked for.
  *
  * Revalidation (AC-UI-6): both `/communities/<community_id>` and
  * `/microgrids` layouts are busted.

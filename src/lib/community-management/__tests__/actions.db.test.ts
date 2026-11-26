@@ -332,7 +332,6 @@ describe.skipIf(shouldSkip())("community management's prepared actions (live dat
     });
     await setTenantApp(true);
     const out = await prepare("community.grant-tenant-access", { id: PLAIN });
-    expect(out).toMatchObject({ ok: true });
     expect(out).toMatchObject({ ok: true, confirm: "confirm", tone: "neutral" });
     if (out.ok) expect(out.ceremony.facts.map((f) => [f.label, f.value.text])).toEqual([["Unit", "Nakato, A1"]]);
   });

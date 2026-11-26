@@ -336,8 +336,9 @@ community management's three (`DELETE /api/communities/[id]`,
 `/api/microgrids/[id]` and `/api/tenants/[id]`) answer 428
 `*_delete_confirmation_required`, each naming the record to type; a
 confirmation with another name, or none typed, answers 428
-`*_delete_name_mismatch`. Nothing is deleted on either. Their pages send
-the name their dialogs ask for. Community management's access removal is a
+`*_delete_name_mismatch`. Nothing is deleted on either. The community
+page and the tenants list send the name their dialogs ask for; no page
+deletes a microgrid, which only the GUI host's typed step does. Community management's access removal is a
 ceremony with nothing to tick or type, so its route has nothing in it to
 check.
 
