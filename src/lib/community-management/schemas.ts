@@ -174,7 +174,9 @@ const COMMUNITY_ID = "Invalid community_id — expected UUID.";
  * POST /api/microgrids. `community_id` is the community it goes under,
  * bound from the action's entity; the route answered a malformed one itself,
  * with no code. A second send with the same name is refused: a microgrid's
- * name is unique in its community (microgrids_community_name_unique).
+ * name is unique in its community (microgrids_community_name_unique). If a
+ * migration drops that constraint, a second send adds a second microgrid,
+ * and community.create-microgrid is "unsafe".
  */
 export const CreateMicrogridBody = z.strictObject(
   {

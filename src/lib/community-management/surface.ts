@@ -58,9 +58,10 @@ const SHARED = { humanOnly: true, targeted: false } as const;
 
 /**
  * The actions. All human-only: no assistant proposes a change to an
- * organization's records, and no view or watcher of this plugin carries the
- * assistant mark (ADR-007). The tenant actions' steps name a tenant and an
- * address, which #133's data boundary keeps from any model.
+ * organization's records, and this plugin has no view or watcher, so none
+ * carries the assistant mark (ADR-007). If one of its views comes to be
+ * marked, revisit each action's humanOnly. The tenant actions' steps name a
+ * tenant and an address, which #133's data boundary keeps from any model.
  *
  * What a repeat does: every "safe" action is sent twice to its route by
  * src/lib/gui/__tests__/repeat.db.test.ts (./repeat/community-management.ts
@@ -122,7 +123,8 @@ const ACTIONS: ActionDef[] = [
 
   // ── Microgrids ──
   // A second send is refused: a microgrid's name is unique in its community
-  // (microgrids_community_name_unique).
+  // (microgrids_community_name_unique). If a migration drops that
+  // constraint, a second send adds a second microgrid: declare "unsafe".
   {
     id: "community.create-microgrid",
     title: "Add microgrid",
@@ -137,6 +139,15 @@ const ACTIONS: ActionDef[] = [
     repeat: "safe",
     ...SHARED,
   },
+  // Write, with no confirmation, as the microgrid's edit page (EntityForm)
+  // sends it. Its currency and time zone reach billing differently. Bills
+  // store no currency: every bill and invoice of the microgrid, closed ones
+  // included, is shown in the microgrid's, so a currency change relabels
+  // them. A period stamps its own time zone when it is made
+  // (billing_periods.timezone), so a time zone change moves only periods
+  // made after it. If bills come to store their currency, the relabelling
+  // goes; if a currency change is to be confirmed, this becomes money, with
+  // a step that names the closed periods it relabels.
   {
     id: "community.update-microgrid",
     title: "Edit microgrid",
@@ -226,7 +237,10 @@ const ACTIONS: ActionDef[] = [
   // organization's sender. Prepare runs before the address is typed, so its
   // step says who in words, and refuses while the tenant app is off. A
   // second send for the same address answers 409 already_has_access and
-  // sends no second notice.
+  // sends no second notice, because the route reads the unit's access list
+  // (fn_tenant_access_list) before it makes an account, grants or emails.
+  // Two sends at once may both email (that route's step 4). If the route
+  // stops reading the list first, revisit "safe".
   {
     id: "community.grant-tenant-access",
     title: "Give access",
