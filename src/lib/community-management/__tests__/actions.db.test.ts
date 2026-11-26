@@ -2,9 +2,11 @@
  * Community management's prepared actions against the local database, as
  * the GUI host prepares them (prepareAction) for a manager, with the real
  * runtime: each step's facts and name to type, the refusals it shares with
- * its route, and the `community.tenant-access` entity kind, which resolves
- * an access only beside the tenant whose list holds it, through the
- * manager's own client.
+ * its route (billing the database keeps, a record with no name to type, the
+ * tenant app off), and the `community.tenant-access` entity kind, which
+ * resolves an access only beside the tenant whose list holds it, through
+ * the manager's own client. Also the microgrid update's currency lock,
+ * through the capability the route composes.
  *
  * Requires a running local Supabase (same harness as rls.test.ts).
  */
@@ -14,6 +16,7 @@ import type { Ceremony } from "@/lib/gui/contract";
 import { createFmt } from "@/lib/gui/fmt";
 import { hostContext, surfaceRequest } from "@/lib/gui/host/server/access";
 import { prepareAction } from "@/lib/gui/host/server/prepare";
+import { composeCommunityManagement } from "@/lib/community-management";
 import { COMMUNITY_MANAGEMENT_SURFACE } from "@/lib/community-management/surface";
 import { TENANT_APP_PLUGIN_NAME, TENANT_APP_PLUGIN_VERSION } from "@/lib/plugins/bundled";
 import { resetMgmRuntimeForTests } from "@/lib/runtime/root";
@@ -43,6 +46,15 @@ const OTHERS = "e2781000-0000-4000-8004-000000000003";
 const SPACED_COMMUNITY = "e2781000-0000-4000-8001-000000000003";
 const SPACED_MG = "e2781000-0000-4000-8002-000000000003";
 const SPACED_TENANT = "e2781000-0000-4000-8004-000000000004";
+/** A community and microgrid holding a closed billing period, which the database keeps. */
+const KEPT_COMMUNITY = "e2781000-0000-4000-8001-000000000004";
+const KEPT_MG = "e2781000-0000-4000-8002-000000000004";
+const KEPT_SCHEDULE = "e2781000-0000-4000-8006-000000000002";
+const CLOSED_PERIOD = "e2781000-0000-4000-8003-000000000002";
+/** A community, microgrid and tenant whose names are blank: nothing to type. */
+const BLANK_COMMUNITY = "e2781000-0000-4000-8001-000000000005";
+const BLANK_MG = "e2781000-0000-4000-8002-000000000005";
+const BLANK_TENANT = "e2781000-0000-4000-8004-000000000005";
 const ACCESS = "e2781000-0000-4000-800a-000000000001";
 const OTHER_ACCESS = "e2781000-0000-4000-800a-000000000002";
 const EMAILS = {
@@ -103,6 +115,8 @@ beforeAll(async () => {
         { id: COMMUNITY, org_id: ORG, name: "Kisakye East" },
         { id: OTHER_COMMUNITY, org_id: OTHER_ORG, name: "Elsewhere" },
         { id: SPACED_COMMUNITY, org_id: ORG, name: "  Spaced Community " },
+        { id: KEPT_COMMUNITY, org_id: ORG, name: "Kept Community" },
+        { id: BLANK_COMMUNITY, org_id: ORG, name: "   " },
       ],
     ],
     [
@@ -111,11 +125,16 @@ beforeAll(async () => {
         { id: MG, community_id: COMMUNITY, name: "Kisakye Site", currency: "UGX", timezone: "Africa/Kampala" },
         { id: OTHER_MG, community_id: OTHER_COMMUNITY, name: "Elsewhere Site", currency: "UGX", timezone: "Africa/Kampala" },
         { id: SPACED_MG, community_id: SPACED_COMMUNITY, name: " Spaced Site  ", currency: "UGX", timezone: "Africa/Kampala" },
+        { id: KEPT_MG, community_id: KEPT_COMMUNITY, name: "Kept Site", currency: "UGX", timezone: "Africa/Kampala" },
+        { id: BLANK_MG, community_id: BLANK_COMMUNITY, name: " ", currency: "UGX", timezone: "Africa/Kampala" },
       ],
     ],
     [
       "rate_schedules",
-      { id: SCHEDULE, microgrid_id: MG, tiers: [{ label: "Flat", min_kwh: 1, max_kwh: null, rate_per_kwh: 500 }], service_charge: 0, tax_rate: 0 },
+      [
+        { id: SCHEDULE, microgrid_id: MG, tiers: [{ label: "Flat", min_kwh: 1, max_kwh: null, rate_per_kwh: 500 }], service_charge: 0, tax_rate: 0 },
+        { id: KEPT_SCHEDULE, microgrid_id: KEPT_MG, tiers: [{ label: "Flat", min_kwh: 1, max_kwh: null, rate_per_kwh: 500 }], service_charge: 0, tax_rate: 0 },
+      ],
     ],
     [
       "tenants",
@@ -124,19 +143,32 @@ beforeAll(async () => {
         tenant(BILLED, MG, "Okello", 2),
         tenant(OTHERS, OTHER_MG, "Elsewhere tenant", 3),
         tenant(SPACED_TENANT, SPACED_MG, "  Spaced Tenant ", 4),
+        tenant(BLANK_TENANT, KEPT_MG, "  ", 5),
       ],
     ],
     [
       "billing_periods",
-      {
-        id: PERIOD,
-        microgrid_id: MG,
-        start_date: "2026-10-01",
-        end_date: "2026-10-31",
-        timezone: "Africa/Kampala",
-        status: "draft",
-        rate_schedule_id: SCHEDULE,
-      },
+      [
+        {
+          id: PERIOD,
+          microgrid_id: MG,
+          start_date: "2026-10-01",
+          end_date: "2026-10-31",
+          timezone: "Africa/Kampala",
+          status: "draft",
+          rate_schedule_id: SCHEDULE,
+        },
+        {
+          id: CLOSED_PERIOD,
+          microgrid_id: KEPT_MG,
+          start_date: "2026-09-01",
+          end_date: "2026-09-30",
+          timezone: "Africa/Kampala",
+          status: "closed",
+          closed_at: "2026-10-02T09:00:00Z",
+          rate_schedule_id: KEPT_SCHEDULE,
+        },
+      ],
     ],
     [
       "billing_line_items",
@@ -227,6 +259,65 @@ describe.skipIf(shouldSkip())("community management's prepared actions (live dat
       expect(out.ceremony.statement, action).toContain(` ${name}`);
       expect(out.ceremony.statement, action).not.toMatch(/\s{2}/);
     }
+  });
+
+  it("refuses a community or microgrid that holds closed billing before the name is typed, with the delete preview's copy", async () => {
+    expect(await prepare("community.delete-community", { id: KEPT_COMMUNITY })).toMatchObject({
+      ok: false,
+      status: 409,
+      message:
+        "This community has 1 closed billing period. Closed billing and billing with recorded payments are kept, so this community cannot be deleted.",
+    });
+    expect(await prepare("community.delete-microgrid", { id: KEPT_MG })).toMatchObject({
+      ok: false,
+      status: 409,
+      message:
+        "This microgrid has 1 closed billing period. Closed billing and billing with recorded payments are kept, so this microgrid cannot be deleted.",
+    });
+  });
+
+  it("refuses a community, microgrid or tenant with no name to type, with the delete routes' copy", async () => {
+    for (const [action, id] of [
+      ["community.delete-community", BLANK_COMMUNITY],
+      ["community.delete-microgrid", BLANK_MG],
+      ["community.delete-tenant", BLANK_TENANT],
+    ] as const) {
+      expect(await prepare(action, { id }), action).toMatchObject({
+        ok: false,
+        status: 409,
+        message: "Unnamed entity cannot be typed-to-confirm.",
+      });
+    }
+  });
+
+  it("keeps a microgrid's currency once a period is closed, through the capability the route composes", async () => {
+    const composed = await composeCommunityManagement({ supabase: manager.client, organizationId: ORG });
+    if (!composed.ok) throw new Error(`[actions.db] compose: ${composed.code}`);
+    try {
+      const cm = composed.data.communityManagement;
+      expect(await cm.updateMicrogrid(KEPT_MG, { currency: "USD" })).toEqual({
+        ok: false,
+        status: 409,
+        code: "microgrid_currency_locked",
+        message:
+          "The currency cannot change once a billing period is closed: this microgrid has 1 closed billing period, and its bills are shown in UGX.",
+        field: "currency",
+      });
+      expect(await cm.updateMicrogrid(KEPT_MG, { currency: "UGX", address_city: "Jinja" })).toMatchObject({
+        ok: true,
+        data: { currency: "UGX", address_city: "Jinja" },
+      });
+      // SPACED_MG has no billing period: its currency may change.
+      expect(await cm.updateMicrogrid(SPACED_MG, { currency: "USD" })).toMatchObject({ ok: true, data: { currency: "USD" } });
+    } finally {
+      await composed.data.dispose();
+    }
+    const svc = await serviceClient();
+    const { data } = await svc.from("microgrids").select("id, currency").in("id", [KEPT_MG, SPACED_MG]).order("id");
+    expect(data).toEqual([
+      { id: SPACED_MG, currency: "USD" },
+      { id: KEPT_MG, currency: "UGX" },
+    ]);
   });
 
   it("refuses to give access while the tenant app is off, and names the unit once it is on", async () => {
