@@ -95,7 +95,13 @@ export const ASSISTANT_READS: readonly AssistantRead[] = [
    * stop reading `devices.name`
    * (src/lib/metering/infrastructure/supabase-repository.ts, getManagedDevices)
    * and the microgrid's `address_country, lat, lng` (the loader's select in
-   * src/lib/metering/surface/site-day.ts) under that role; and add the
+   * src/lib/metering/surface/site-day.ts) under that role; stop reading the
+   * microgrid's OpenEMS connection settings under it too
+   * (getMicrogridEmsConfig in src/lib/openems/config.ts, reached through
+   * resolveOpenEmsConfig in src/lib/metering/openems-provider.ts when no
+   * MGM_OPENEMS_* setting is set, and the microgrids row read
+   * getEmsSecretForMicrogrid makes before it decrypts), for example by
+   * reading them on the server after the getUser()-backed check; and add the
    * grants, policy twins and agent-token test ADR-008 decision 7 names.
    * When #274 lands, or any agent client can reach this view, revisit this
    * entry before it is served.

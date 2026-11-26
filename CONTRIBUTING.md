@@ -101,7 +101,9 @@ breaks these rules, so the maintainer who merges checks each one by hand
 
 Changes to the areas listed in `.github/CODEOWNERS` (migrations and RLS
 helpers, roles, the runtime gate and plugin catalog, the GUI contract and host (`src/lib/gui/`),
-request middleware, workflows, the release build script) also need approval
+request middleware, workflows, the release build script, the surface and
+model files of the views and watchers on the assistant read list (ADR-007
+decision 8)) also need approval
 from a code owner other than the person who pushed the change, on the final
 head commit. After you push again, ask for the approval again. Reviewers
 suggest changes rather than pushing to your branch. Other changes can be
