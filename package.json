@@ -23,6 +23,7 @@
     "db:types": "sh scripts/db-types.sh write",
     "db:types:linked": "sh scripts/db-types.sh print",
     "db:types:check": "sh scripts/db-types.sh check",
+    "api:openapi": "MGM_WRITE_OPENAPI=1 vitest run --project lib src/lib/gui/host/server/__tests__/openapi.test.ts",
     "prepare": "husky"
   },
   "dependencies": {

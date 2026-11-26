@@ -138,8 +138,9 @@ export type SiteSamples = {
   /**
    * How many distinct timestamps the source sent that could not be read as
    * instants, dropped with their values. Set only by a provider that counts
-   * them; absent means not counted (a generated source makes its own
-   * instants), never that none were dropped.
+   * them; absent means not counted, never that none were dropped. A
+   * generated source makes its own instants, so the fixture sets it only on
+   * a window that holds a pinned day dropping some (fixture/pinned-days.ts).
    */
   unreadableTimestamps?: number;
 };

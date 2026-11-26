@@ -230,7 +230,7 @@ browser bundle or the image. The decision is recorded in
 | `MGM_SMTP_ALLOW_PLAINTEXT_LOCAL` | no | no | `1` allows `MGM_SMTP_URL` to be plaintext `smtp://` to a name with no dot, such as docker compose's `smtp://mailpit:1025`. Set it only where that name is a mail catcher in the same container network, never in production: sign-in links are credentials, and a dotless name may resolve to another machine |
 | `MGM_GUI` | no | no | Which compiled-in interface (`src/gui/meta.ts`) serves this installation's pages. Unset or blank means `gridtop`, the default. The interface pages read it and link that interface's stylesheet; payment and sign-in pages do not |
 | `MGM_METERING_FIXTURES` | no | no | `on` (or `1`, `true`) lets the fixture metering provider generate synthetic site data and meter energy for edges whose id starts with `SYNTHETIC-EDGE-` ([Synthetic site data](#synthetic-site-data)). Unset, blank, `off`, `0` or `false` means off. Read when the server's runtime starts, so a change needs a restart |
-| `MGM_CLIENT_TOKENS` | no | no | Whether MGM's `/api` routes accept a client's bearer token (the CLI, the assistant bridge; [Clients that are not a browser](#clients-that-are-not-a-browser)). Unset, blank, `on`, `1` or `true` accepts them; `off`, `0` or `false` refuses every one with `403 client_tokens_off`, and so does any other value, so a mistyped value never leaves them on. Browser sessions are unaffected. Read on every request |
+| `MGM_CLIENT_TOKENS` | no | no | Whether MGM's `/api` routes accept a client's bearer token (the CLI, the assistant bridge; [Clients that are not a browser](#clients-that-are-not-a-browser)). Unset, blank, `on`, `1` or `true` accepts them; `off`, `0` or `false` refuses every one with `403 client_tokens_off`, and so does any other value, so a mistyped value never leaves them on. Browser sessions are unaffected. A running server keeps the environment it started with, so a change takes effect only after a redeploy or restart, never on the next request |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | no | Privileged server key; never serialized. It also keys the mark middleware puts on a client's accepted bearer token, so without it every bearer token is refused with `503 client_tokens_unavailable` |
 
 How it works: the root layout renders per request (it is never prerendered or
@@ -470,20 +470,43 @@ release that ships the CLI lists them in `src/lib/mgm/released-routes.ts`.
 **Removing a client.** `DELETE FROM public.mgm_clients WHERE client_id =
 '<id>';` refuses its next sign-in and its next refresh. It ends no session:
 tokens already issued keep working at MGM's routes and at the database
-until they expire (`jwt_expiry`, one hour by default). A person who
-revokes the app from Connected apps ends its sessions, and MGM's routes
-refuse its token on the next request, since middleware asks Supabase Auth
-about every bearer token. Deleting the client
-in Supabase is the same. To replace a client, list the new one before
-removing the old. An installation that wants no assistant at all leaves the
-agent client out of the table.
+until they expire (`jwt_expiry`, one hour by default). Deleting the client
+in Supabase is the same: it ends no session either. To replace a client,
+list the new one before removing the old. An installation that wants no
+assistant at all leaves the agent client out of the table.
+
+Only a revoke ends a client's sessions (ADR-008 decision 4): a person who
+revokes the app ends its sessions for them, and MGM's routes refuse its
+token on the next request, since middleware asks Supabase Auth about every
+bearer token. A person will revoke from MGM's Connected apps page, which
+has not shipped yet. Until it does, MGM offers no page that ends one
+client's sessions (Supabase Auth's own `DELETE /user/oauth/grants`, called
+with the person's browser session, still does); to stop every client at
+MGM's routes, turn client tokens off.
 
 **Turning client tokens off** (ADR-008 decision 9). Set
-`MGM_CLIENT_TOKENS=off` on the server: from the next request MGM's routes
-refuse every bearer token, before any route runs. Then remove both clients
-from `public.mgm_clients`, so the token hook refuses every refresh. Tokens
-already issued keep working at the database API until they expire. The
-browser is unaffected and nothing stored is lost.
+`MGM_CLIENT_TOKENS=off` on the server and redeploy or restart it (on
+Vercel, a new deployment of the same release asset), since a running server
+keeps the environment it started with. From then on MGM's routes refuse
+every bearer token, before any route runs. Check that before going on: a
+bearer request to any `/api` route, such as `curl -sS -H "Authorization:
+Bearer x" <MGM_APP_URL>/api/mgm/health`, answers `403` with
+`"code":"client_tokens_off"`; while client tokens are still on, the same
+request answers `401` with `"code":"unauthenticated"`. Then remove both
+clients from `public.mgm_clients`, so the token hook refuses every refresh.
+Tokens already issued keep working at the database API until they expire.
+The browser is unaffected and nothing stored is lost.
+
+**Every client request answers `401` after a Supabase Auth upgrade.** MGM
+checks each bearer token at Supabase Auth's `GET /user`, which Auth
+v2.198.0 still answers for a client's token as a temporary exception. When
+an Auth version stops answering it, every bearer request is refused with
+`401 unauthenticated`, closed, and browser sessions are unaffected. On a
+hosted project, which upgrades Auth without a release of MGM, that is the
+likely cause; the fix is a release of MGM that checks tokens at `GET
+/oauth/userinfo` instead (ADR-008 decision 6). A `503` with
+`"code":"auth_unavailable"` is different: Supabase Auth did not answer in
+time or answered with an error of its own, and the client may try again.
 
 ### Upgrading from v0.0.1 or v0.0.2
 
@@ -541,7 +564,11 @@ day always give the same samples. Each day follows one of five scenarios:
 a clear day, an evening power cut, a long cut in which the battery reaches
 its floor and the houses go dark, a battery at its floor before dawn, and a
 45-minute gateway gap. Time bins follow the microgrid's time zone, so a day
-with a daylight-saving change has 23 or 25 hours of bins.
+with a daylight-saving change has 23 or 25 hours of bins. A few days of the
+investigation cases' own microgrids are pinned with masks on top of their
+scenario, such as a silent meter or a refused read
+(`src/lib/metering/fixture/pinned-days.ts`, docs/investigation-cases.md §1);
+no other microgrid has a pinned day.
 
 It also generates each meter's energy per local day and hour for the
 tenant app's usage views (`src/lib/metering/fixture/meter-energy.ts`), from

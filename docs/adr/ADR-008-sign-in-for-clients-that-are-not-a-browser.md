@@ -156,6 +156,12 @@ MGM now also depends on the shape of a third Supabase Auth table. The functions 
 
 So the Consequences' "the shape of two Supabase Auth tables" is three, and when a hosted project runs a newer Auth version than CI (decision 9), this table's columns and status labels are among what is checked by hand, with `auth.sessions` and `auth.oauth_consents`.
 
+## Amendment (26 Nov 2026): a bearer token must name a client (#272)
+
+Decision 6 says a request carries a cookie session or a bearer token, and that the caller's kind comes from the verified claims. It does not say what a bearer token with no `client_id` is. That is a browser session's token, copied out of the browser and sent from a script: Supabase Auth v2.198.0 sets `client_id` only on a session an OAuth client started, and the hook returns a browser's token unchanged.
+
+The resolver refuses it: a bearer token must carry `client_id` (a uuid), a kind and the role that kind runs as, or middleware answers `401 unauthenticated` before asking Supabase Auth (`callerFromClaims` in `src/lib/runtime/caller.ts`). So every bearer request comes from a registered client the person approved and can revoke on its own, and a browser session is used only through its cookie. A token with `client_id` and no kind stays refused as decision 2 says. `docs/cordis-runtime.md` ("Who is calling: the session resolver") states the same rule. If Supabase Auth ever sets `client_id` on a browser session, or MGM wants scripts to use a browser session, revisit this together with the resolver.
+
 ## Amendment (26 Nov 2026): the function that ends a client, and `mgm logout` (#297)
 
 Decision 5's function is `fn_client_sessions_end(_user_id, _client_id, _session_id)`, added by `20261126170000_client_sessions_end.sql` with its database tests in the same commit. It is `SECURITY DEFINER`, and only `service_role` may run it; revoking it from `PUBLIC` also keeps `mgm_agent` out (decision 7).

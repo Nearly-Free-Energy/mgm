@@ -150,7 +150,8 @@ with these docs.
 **Code owners.** The owned areas are database migrations (including the RLS
 helpers), roles, the Cordis runtime gate and plugin catalog, the GUI contract,
 host and kit under `src/lib/gui/` with their type and import-boundary tests,
-request middleware, CI workflows, and the release build script. The paths live
+request middleware and the session resolver (RFC #259 § 2) with the files it
+depends on, CI workflows, and the release build script. The paths live
 in `.github/CODEOWNERS`, which is the single list;
 `src/lib/__tests__/codeowners.test.ts` checks that each pattern still matches
 a tracked file. Other changes may be merged by their author once the checks
