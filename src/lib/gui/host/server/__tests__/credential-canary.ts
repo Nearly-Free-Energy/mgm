@@ -114,12 +114,30 @@ export type CanaryIds = {
    */
   paymentAttemptId: string;
   /**
+   * The Basic path's microgrid's edge and that edge's house meter, so each
+   * action on an edge or a device (metering's) has a row to be prepared for.
+   */
+  edgeId: string;
+  deviceId: string;
+  /**
    * A person's access to `tenantId`'s pages: the id of their tenant role
    * row, which is the `community.tenant-access` entity the access removal's
    * path names, so its prepare runs. The test creates the person and the
    * row, since seedCanaries creates no account.
    */
   tenantAccessId: string;
+  /**
+   * A colleague of the manager the test signs in as: another org manager of
+   * `orgId`, whose invitation is not yet accepted. It is the `org.user`
+   * entity the user actions' paths name, so their available() and prepare
+   * run against a person the caller's own list shows, and the resend's step
+   * is built in full. Removing them and changing their role, like deleting
+   * the organization, are refused to an org manager before anyone is read,
+   * so the test prepares every action again as a super admin, which builds
+   * those steps in full. The test fills it in once it creates the account,
+   * since seedCanaries creates none.
+   */
+  staffUserId: string;
   /**
    * One tenant unit per seeded microgrid, in canaryMicrogrids order: tenant
    * views are dispatched as a tenant holding every one of them. Each unit
@@ -146,6 +164,22 @@ export const canaryMicrogrids = (ids: CanaryIds): string[] => [
 ];
 
 /**
+ * The ids `ids` gives more than once. Each seeded row needs its own: the
+ * rows of one kind or table would otherwise collide, and seededParams keys
+ * each row's parent by the row's id, so a repeated id leaves a parent out
+ * without failing.
+ */
+export function repeatedCanaryIds(ids: CanaryIds): string[] {
+  const all: string[] = [];
+  const walk = (value: unknown): void => {
+    if (typeof value === "string") all.push(value);
+    else if (value !== null && typeof value === "object") Object.values(value).forEach(walk);
+  };
+  walk(ids);
+  return [...new Set(all.filter((id, i) => all.indexOf(id) !== i))];
+}
+
+/**
  * Seeds an organization, a community, one microgrid per OpenEMS credential
  * path, a synthetic microgrid with the Basic path's configuration, a mixed
  * one with the bearer path's, and a merchant account. Each credential column holds a new canary,
@@ -154,7 +188,8 @@ export const canaryMicrogrids = (ids: CanaryIds): string[] => [
  * Each microgrid has an edge with a battery and a grid meter, so a view that
  * reads the site reaches its metering source: the edges of the synthetic
  * microgrid carry the reserved `SYNTHETIC-EDGE-` id, the others a real-looking
- * one, and the mixed microgrid has one edge of each. The Basic path's
+ * one, and the mixed microgrid has one edge of each. The Basic path's edge
+ * and its house meter take `edgeId` and `deviceId`. The Basic path's
  * microgrid also gets a tariff, a tenant with no meter and a draft billing
  * period pinned to that tariff: a draft with one unpaid bill and no recorded
  * payment, so delete's available() and prepare run, and every bill action
@@ -167,6 +202,8 @@ export const canaryMicrogrids = (ids: CanaryIds): string[] => [
  * meter on its first edge, and the tenant app turned on.
  */
 export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise<Canary[]> {
+  const repeated = repeatedCanaryIds(ids);
+  if (repeated.length > 0) throw new Error(`[canary] ids given to more than one row: ${repeated.join(", ")}`);
   const canaries: Canary[] = [];
   const secret = async (table: string, field: string, rowId: string) => {
     const plaintext = `CANARY-${field}-${randomBytes(16).toString("hex")}`;
@@ -204,13 +241,13 @@ export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise
     const row = { id, community_id: ids.communityId, name: `GUI Canary Microgrid ${name}`, currency: "UGX", timezone: "Africa/Kampala", ems_backend_url: NOWHERE, ...config };
     rows.push(["microgrids", { ...row, ...(await secret("microgrids", field, id)) }]);
     for (const edgePrefix of edgePrefixes) {
-      const edge = randomUUID();
+      const edge = id === ids.microgridIds.basic ? ids.edgeId : randomUUID();
       site.push(["edges", { id: edge, microgrid_id: id, name: `Canary edge ${edgePrefix}`, openems_edge_id: `${edgePrefix}${id}` }]);
       for (const [type, component] of [["battery", "ess0"], ["grid_meter", "meter0"]]) {
         site.push(["devices", { edge_id: edge, name: `Canary ${type}`, device_type: type, openems_component_id: component }]);
       }
       if (!houseMeters.has(id)) {
-        const meter = randomUUID();
+        const meter = id === ids.microgridIds.basic ? ids.deviceId : randomUUID();
         houseMeters.set(id, meter);
         site.push(["devices", { id: meter, edge_id: edge, name: "Canary house meter", device_type: "consumption_meter", openems_component_id: TENANT_METER_COMPONENT }]);
       }
@@ -390,7 +427,10 @@ function seededParams(ids: CanaryIds, kinds: Record<string, EntityKind>, what: s
     lineItem: [ids.lineItemId],
     tenant: [ids.tenantId],
     paymentAttempt: [ids.paymentAttemptId],
+    edge: [ids.edgeId],
+    device: [ids.deviceId],
     "community.tenant-access": [ids.tenantAccessId],
+    "org.user": [ids.staffUserId],
   };
   /** Each seeded row's parent, by the parent's kind. */
   const parentOf: Record<string, { kind: EntityKind; id: string }> = {
@@ -398,6 +438,8 @@ function seededParams(ids: CanaryIds, kinds: Record<string, EntityKind>, what: s
     [ids.lineItemId]: { kind: "billingPeriod", id: ids.billingPeriodId },
     [ids.paymentAttemptId]: { kind: "lineItem", id: ids.lineItemId },
     [ids.tenantId]: { kind: "microgrid", id: ids.microgridIds.basic },
+    [ids.edgeId]: { kind: "microgrid", id: ids.microgridIds.basic },
+    [ids.deviceId]: { kind: "edge", id: ids.edgeId },
     [ids.tenantAccessId]: { kind: "tenant", id: ids.tenantId },
   };
   let combos: Record<string, string>[] = [{}];

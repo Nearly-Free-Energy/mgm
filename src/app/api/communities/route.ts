@@ -31,7 +31,7 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *     stricter invariant — see POST /api/organizations).
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const parsed = await parseJsonBody(request, CreateCommunityBody, CREATE_COMMUNITY_REFUSALS);
+  const parsed = await parseJsonBody(request, CreateCommunityBody, { refusals: CREATE_COMMUNITY_REFUSALS });
   if (!parsed.ok) return parsed.response;
   const body = parsed.data;
 

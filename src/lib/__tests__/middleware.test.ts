@@ -22,6 +22,11 @@
  *     folder and each file in public/ by name, and each skipped folder has
  *     a 404 route; a static-looking path with no file answers 404 before
  *     the session check and forwards nothing.
+ *   - A bearer token (RFC #259 § 2, ADR-008 decision 6): never with a
+ *     session cookie, never on a page, refused while MGM_CLIENT_TOKENS is
+ *     off, checked with Supabase Auth on every request, a client token in
+ *     the cookie counts as signed out, and an agent client reaches only
+ *     AGENT_ROUTES; every /api refusal is { error, code }.
  *
  * Located in src/lib/__tests__ so it runs under the `lib` vitest
  * project (vitest.config.ts only globs src/lib, src/components, src/app
@@ -34,6 +39,14 @@ import { NextRequest } from "next/server";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { renderNotReleasedPage } from "@/lib/public-html/not-released";
 import { PUBLIC_PAGE_SECURITY_HEADERS } from "@/lib/public-html/page";
+import { credentialMarkMatches } from "@/lib/runtime/credential";
+import {
+  USER_ID,
+  agentClaims,
+  browserClaims,
+  operatorClaims,
+  tokenWith,
+} from "@/lib/runtime/__tests__/token-fixtures";
 
 const REPO_ROOT = path.resolve(__dirname, "../../..");
 const PUBLIC_DIR = path.join(REPO_ROOT, "public");
@@ -99,11 +112,78 @@ describe("middleware PUBLIC_PATHS", () => {
   });
   it.each([
     "/api/openems/status",
+    // Sign-in for clients that are not a browser (#271), released with the CLI.
+    "/oauth/consent?authorization_id=Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4z",
+    "/oauth/code?code=3f1d2c4b-5a6e-4f70-8a9b-0c1d2e3f4a5b&state=s",
+    "/api/auth/oauth/approvals",
+    "/api/auth/discovery",
   ])("returns 404 for unreleased route %s even when signed in", async (path) => {
     signedIn();
     const middleware = await loadMiddleware();
     const res = await middleware(makeRequest(path));
     expect(res.status).toBe(404);
+  });
+
+  // The sign-in routes for clients that are not a browser (#271) are not
+  // released yet, so the 404 above answers before PUBLIC_PATHS is read.
+  // These pretend they are released, so the session check they will meet
+  // then is pinned now: the code page and discovery pass through signed
+  // out, the consent page and the approvals route still ask for a session.
+  // Once released-routes.ts lists them, the doMock is redundant, not wrong.
+  describe("once the sign-in routes for other clients are released", () => {
+    const SIGN_IN_ROUTES = new Set([
+      "/oauth/consent",
+      "/oauth/code",
+      "/api/auth/oauth/approvals",
+      "/api/auth/discovery",
+    ]);
+
+    beforeEach(() => {
+      vi.doMock("@/lib/mgm/released-routes", async (importOriginal) => {
+        const actual = await importOriginal<typeof import("@/lib/mgm/released-routes")>();
+        return {
+          ...actual,
+          isReleasedRoute: (pathname: string) =>
+            SIGN_IN_ROUTES.has(pathname) || actual.isReleasedRoute(pathname),
+        };
+      });
+    });
+
+    afterEach(() => {
+      vi.doUnmock("@/lib/mgm/released-routes");
+    });
+
+    it.each([
+      "/oauth/code?code=3f1d2c4b-5a6e-4f70-8a9b-0c1d2e3f4a5b&state=s",
+      "/api/auth/discovery",
+    ])("passes %s through without a session", async (path) => {
+      signedOut();
+      const middleware = await loadMiddleware();
+      const res = await middleware(makeRequest(path));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("location")).toBeNull();
+    });
+
+    it("sends a signed-out visit to the consent page to /login", async () => {
+      signedOut();
+      const middleware = await loadMiddleware();
+      const res = await middleware(
+        makeRequest("/oauth/consent?authorization_id=Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4z"),
+      );
+      expect(res.status).toBe(307);
+      const location = new URL(res.headers.get("location")!);
+      expect(location.pathname).toBe("/login");
+    });
+
+    it("answers a signed-out approval with 401", async () => {
+      signedOut();
+      const middleware = await loadMiddleware();
+      const res = await middleware(
+        new NextRequest("http://localhost/api/auth/oauth/approvals", { method: "POST" }),
+      );
+      expect(res.status).toBe(401);
+      expect(res.headers.get("location")).toBeNull();
+    });
   });
 
   it.each([
@@ -1118,5 +1198,299 @@ describe("middleware runtime configuration (#46)", () => {
       /MGM_PUBLIC_SUPABASE_URL/
     );
     expect(createServerClientMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("middleware for a bearer token (RFC #259 § 2)", () => {
+  const OPERATOR = tokenWith(operatorClaims());
+  const AGENT = tokenWith(agentClaims());
+  /** The session cookie's name for MGM_PUBLIC_SUPABASE_URL http://localhost:54321. */
+  const SESSION_COOKIE = "sb-localhost-auth-token";
+  const MARK_KEY = "service-role-key-for-the-mark";
+  let authCalls: { path: string; authorization: string | null }[];
+  let authAnswer: { status: number; body: object };
+
+  /** The mark middleware passed on is the token's, under the server-only key. */
+  function expectMarked(res: Response, token: string) {
+    const mark = res.headers.get("x-middleware-request-x-mgm-credential");
+    expect(mark).not.toBeNull();
+    expect(mark).not.toBe("bearer");
+    expect(credentialMarkMatches(token, mark, { SUPABASE_SERVICE_ROLE_KEY: MARK_KEY })).toBe(true);
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", MARK_KEY);
+    authCalls = [];
+    authAnswer = {
+      status: 200,
+      body: { id: USER_ID, aud: "authenticated", role: "authenticated", app_metadata: {}, user_metadata: {}, created_at: "" },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        authCalls.push({ path: new URL(String(input)).pathname, authorization: new Headers(init?.headers).get("authorization") });
+        return new Response(JSON.stringify(authAnswer.body), { status: authAnswer.status, headers: { "content-type": "application/json" } });
+      }),
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  function bearerRequest(pathname: string, token: string, init: { method?: string; headers?: Record<string, string> } = {}) {
+    return new NextRequest(`http://localhost${pathname}`, {
+      method: init.method ?? "GET",
+      headers: { authorization: `Bearer ${token}`, ...init.headers },
+    });
+  }
+
+  async function refusal(res: Response, status: number, code: string) {
+    expect(res.status).toBe(status);
+    expect(await res.json()).toEqual({ error: expect.any(String), code });
+  }
+
+  it("passes an operator client's request to an /api route, checked with Supabase Auth, marked, with no cookie work", async () => {
+    const middleware = await loadMiddleware();
+    const res = await middleware(bearerRequest("/api/communities", OPERATOR, { method: "POST" }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+    expectMarked(res, OPERATOR);
+    expect(res.headers.get("x-middleware-request-authorization")).toBe(`Bearer ${OPERATOR}`);
+    expect(res.headers.get("set-cookie")).toBeNull();
+    expect(createServerClientMock).not.toHaveBeenCalled();
+    expect(authCalls).toEqual([{ path: "/auth/v1/user", authorization: `Bearer ${OPERATOR}` }]);
+  });
+
+  it("refuses a client whose grant was revoked at once: Supabase Auth no longer answers for its token", async () => {
+    authAnswer = { status: 403, body: { code: 403, error_code: "session_not_found", msg: "Session not found" } };
+    const middleware = await loadMiddleware();
+    await refusal(await middleware(bearerRequest("/api/communities", OPERATOR)), 401, "unauthenticated");
+  });
+
+  it.each([
+    ["client_id with no kind", tokenWith(operatorClaims({ mgm_client_kind: undefined }))],
+    ["a browser session's token", tokenWith(browserClaims())],
+    ["an agent kind that runs as authenticated", tokenWith(agentClaims({ role: "authenticated" }))],
+    ["a token that is not a JWT", "abc"],
+  ])("refuses %s with 401, without asking Supabase Auth", async (_label, token) => {
+    const middleware = await loadMiddleware();
+    await refusal(await middleware(bearerRequest("/api/communities", token)), 401, "unauthenticated");
+    expect(authCalls).toEqual([]);
+  });
+
+  it.each([
+    ["/api/communities", true],
+    ["/settings/plugins", false],
+  ])("refuses a bearer token sent with a session cookie on %s, before anything is checked", async (pathname, isApi) => {
+    const middleware = await loadMiddleware();
+    for (const cookie of [`${SESSION_COOKIE}=x`, `${SESSION_COOKIE}.0=x; ${SESSION_COOKIE}.1=y`]) {
+      const res = await middleware(bearerRequest(pathname, OPERATOR, { headers: { cookie } }));
+      expect(res.status).toBe(400);
+      if (isApi) expect(await res.json()).toMatchObject({ code: "credentials_conflict" });
+    }
+    expect(authCalls).toEqual([]);
+    expect(createServerClientMock).not.toHaveBeenCalled();
+  });
+
+  it("is not a session cookie when only another cookie is sent", async () => {
+    const middleware = await loadMiddleware();
+    const res = await middleware(bearerRequest("/api/communities", OPERATOR, { headers: { cookie: "mgm_org=x" } }));
+    expect(res.status).toBe(200);
+  });
+
+  it.each(["/settings/plugins", "/login", "/", "/microgrids/grid-1/operations"])(
+    "does not open the page %s with a bearer token",
+    async (pathname) => {
+      const middleware = await loadMiddleware();
+      const res = await middleware(bearerRequest(pathname, OPERATOR));
+      expect(res.status).toBe(400);
+      expect(res.headers.get("x-middleware-next")).toBeNull();
+      expect(res.headers.get("x-middleware-request-x-mgm-path")).toBeNull();
+      expect(authCalls).toEqual([]);
+    },
+  );
+
+  it.each(["off", "0", "false", "nonsense"])("refuses every bearer token while MGM_CLIENT_TOKENS is %s", async (value) => {
+    vi.stubEnv("MGM_CLIENT_TOKENS", value);
+    const middleware = await loadMiddleware();
+    await refusal(await middleware(bearerRequest("/api/communities", OPERATOR)), 403, "client_tokens_off");
+    expect(authCalls).toEqual([]);
+  });
+
+  it("refuses every bearer token, without asking Supabase Auth, while the key for its mark is not set", async () => {
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "");
+    const middleware = await loadMiddleware();
+    const res = await middleware(bearerRequest("/api/communities", OPERATOR));
+    await refusal(res, 503, "client_tokens_unavailable");
+    expect(res.headers.get("x-middleware-next")).toBeNull();
+    expect(authCalls).toEqual([]);
+  });
+
+  it("replaces a mark the client sent with its own on an accepted bearer request", async () => {
+    const middleware = await loadMiddleware();
+    const res = await middleware(bearerRequest("/api/communities", OPERATOR, { headers: { "x-mgm-credential": "bearer" } }));
+    expect(res.status).toBe(200);
+    expectMarked(res, OPERATOR);
+  });
+
+  it("leaves a browser session unaffected while MGM_CLIENT_TOKENS is off", async () => {
+    vi.stubEnv("MGM_CLIENT_TOKENS", "off");
+    signedIn();
+    const middleware = await loadMiddleware();
+    expect((await middleware(makeRequest("/api/communities"))).status).toBe(200);
+  });
+
+  it("lets an agent client read a view", async () => {
+    const middleware = await loadMiddleware();
+    const res = await middleware(bearerRequest("/api/gui/view?href=%2F", AGENT));
+    expect(res.status).toBe(200);
+    expectMarked(res, AGENT);
+  });
+
+  it.each([
+    ["POST", "/api/gui/view"],
+    ["POST", "/api/gui/prepare"],
+    ["GET", "/api/gui/search"],
+    ["GET", "/api/gui/signals"],
+    ["GET", "/api/communities"],
+    ["POST", "/api/communities"],
+    ["PATCH", "/api/microgrids/grid-1"],
+    ["DELETE", "/api/microgrids/grid-1"],
+    ["PUT", "/api/tenants/with-meter"],
+    ["GET", "/api/organizations/x/plugins"],
+    // Public paths too: an agent client reaches nothing but its routes.
+    ["GET", "/api/mgm/health"],
+    ["POST", "/api/auth/sign-in-link"],
+    ["POST", "/api/payments/ipn"],
+  ])("refuses an agent client %s %s before any route runs", async (method, pathname) => {
+    const middleware = await loadMiddleware();
+    const res = await middleware(bearerRequest(pathname, AGENT, { method }));
+    await refusal(res, 403, "agent_route_refused");
+    expect(res.headers.get("x-middleware-next")).toBeNull();
+  });
+
+  it("answers a path outside the release with its 404 before the token is looked at", async () => {
+    const middleware = await loadMiddleware();
+    expect((await middleware(bearerRequest("/api/openems/status", AGENT))).status).toBe(404);
+    expect(authCalls).toEqual([]);
+  });
+
+  it("drops a credential mark the client sent, on a cookie request and on one with no session", async () => {
+    signedIn();
+    const middleware = await loadMiddleware();
+    const marked = (pathname: string) => makeRequest(pathname, { "x-mgm-credential": "bearer" });
+    const res = await middleware(marked("/api/communities"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-middleware-request-x-mgm-credential")).toBeNull();
+    // Next.js passes on exactly the headers this lists, so the mark is gone.
+    expect(res.headers.get("x-middleware-override-headers")).not.toBeNull();
+    expect(res.headers.get("x-middleware-override-headers")).not.toContain("x-mgm-credential");
+    signedOut();
+    const health = await (await loadMiddleware())(marked("/api/mgm/health"));
+    expect(health.status).toBe(200);
+    expect(health.headers.get("x-middleware-request-x-mgm-credential")).toBeNull();
+  });
+
+  it("treats a client's token in the session cookie as signed out", async () => {
+    getClaimsMock.mockResolvedValue({ data: { claims: operatorClaims() }, error: null });
+    const middleware = await loadMiddleware();
+    await refusal(await middleware(makeRequest("/api/communities")), 401, "unauthenticated");
+    const page = await (await loadMiddleware())(makeRequest("/settings/plugins"));
+    expect(page.status).toBe(307);
+    expect(page.headers.get("location")).toContain("/login");
+  });
+
+  it("answers an /api request with no session with a code", async () => {
+    signedOut();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/api/communities"));
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "Authentication required", code: "unauthenticated" });
+  });
+
+  // The sign-in routes for clients that are not a browser (#271), as they
+  // will meet a bearer token once released (the doMock is redundant, not
+  // wrong, once released-routes.ts lists them). Middleware answers first;
+  // the approvals route's own refusal of any Authorization header and of a
+  // client's token in the cookie stays as a second fence
+  // (src/app/api/auth/oauth/approvals/__tests__/route.test.ts).
+  describe("on the sign-in routes for other clients (#271), once released", () => {
+    const SIGN_IN_ROUTES = new Set([
+      "/oauth/consent",
+      "/oauth/code",
+      "/api/auth/oauth/approvals",
+      "/api/auth/discovery",
+    ]);
+    const APPROVALS = "/api/auth/oauth/approvals";
+
+    beforeEach(() => {
+      vi.doMock("@/lib/mgm/released-routes", async (importOriginal) => {
+        const actual = await importOriginal<typeof import("@/lib/mgm/released-routes")>();
+        return {
+          ...actual,
+          isReleasedRoute: (pathname: string) =>
+            SIGN_IN_ROUTES.has(pathname) || actual.isReleasedRoute(pathname),
+        };
+      });
+    });
+
+    afterEach(() => {
+      vi.doUnmock("@/lib/mgm/released-routes");
+    });
+
+    it("refuses an agent client's approval before the route runs", async () => {
+      const middleware = await loadMiddleware();
+      const res = await middleware(bearerRequest(APPROVALS, AGENT, { method: "POST" }));
+      await refusal(res, 403, "agent_route_refused");
+      expect(res.headers.get("x-middleware-next")).toBeNull();
+    });
+
+    it("refuses an approval that sends a bearer token with the session cookie, before anything is checked", async () => {
+      const middleware = await loadMiddleware();
+      const res = await middleware(
+        bearerRequest(APPROVALS, OPERATOR, { method: "POST", headers: { cookie: `${SESSION_COOKIE}=x` } }),
+      );
+      await refusal(res, 400, "credentials_conflict");
+      expect(authCalls).toEqual([]);
+    });
+
+    it("refuses an approval with a token Supabase Auth does not accept, and while client tokens are off", async () => {
+      authAnswer = { status: 403, body: { code: 403, error_code: "session_not_found", msg: "Session not found" } };
+      await refusal(await (await loadMiddleware())(bearerRequest(APPROVALS, OPERATOR, { method: "POST" })), 401, "unauthenticated");
+      vi.stubEnv("MGM_CLIENT_TOKENS", "off");
+      await refusal(await (await loadMiddleware())(bearerRequest(APPROVALS, OPERATOR, { method: "POST" })), 403, "client_tokens_off");
+    });
+
+    it("passes an operator client's approval on, so the route's own refusal of any Authorization header decides", async () => {
+      const middleware = await loadMiddleware();
+      const res = await middleware(bearerRequest(APPROVALS, OPERATOR, { method: "POST" }));
+      expect(res.headers.get("x-middleware-next")).toBe("1");
+      expect(res.headers.get("x-middleware-request-authorization")).toBe(`Bearer ${OPERATOR}`);
+    });
+
+    it("answers an approval whose session cookie holds a client's token with 401", async () => {
+      getClaimsMock.mockResolvedValue({ data: { claims: operatorClaims() }, error: null });
+      const middleware = await loadMiddleware();
+      await refusal(
+        await middleware(new NextRequest(`http://localhost${APPROVALS}`, { method: "POST" })),
+        401,
+        "unauthenticated",
+      );
+    });
+
+    it.each(["/oauth/code?code=3f1d2c4b-5a6e-4f70-8a9b-0c1d2e3f4a5b&state=s", "/oauth/consent?authorization_id=Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4z"])(
+      "does not open the page %s with a bearer token",
+      async (path) => {
+        const middleware = await loadMiddleware();
+        const res = await middleware(bearerRequest(path, OPERATOR));
+        expect(res.status).toBe(400);
+        expect(res.headers.get("x-middleware-next")).toBeNull();
+        expect(authCalls).toEqual([]);
+      },
+    );
+
+    it("checks a bearer token sent to discovery like any other, though discovery needs none", async () => {
+      await refusal(await (await loadMiddleware())(bearerRequest("/api/auth/discovery", AGENT)), 403, "agent_route_refused");
+      const res = await (await loadMiddleware())(makeRequest("/api/auth/discovery"));
+      expect(res.status).toBe(200);
+    });
   });
 });

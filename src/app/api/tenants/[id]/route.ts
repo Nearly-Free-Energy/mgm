@@ -56,7 +56,7 @@ export async function PATCH(
     );
   }
 
-  const parsed = await parseJsonBody(request, UpdateTenantBody, UPDATE_TENANT_REFUSALS);
+  const parsed = await parseJsonBody(request, UpdateTenantBody, { refusals: UPDATE_TENANT_REFUSALS });
   if (!parsed.ok) return parsed.response;
   const body = parsed.data;
 

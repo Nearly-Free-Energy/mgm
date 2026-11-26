@@ -35,7 +35,8 @@ vi.mock("@/lib/supabase/server", () => ({
 
 import { getCurrentUserAccess } from "@/lib/auth/access";
 import { readForAssistant, WITHHELD_NOTE } from "../assistant-read";
-import { routeHostContext } from "../http";
+import { createFmt } from "../../../fmt";
+import { hostContext } from "../access";
 
 const ORG = "e7ad0000-0000-4000-8000-000000000001";
 const COMMUNITY = "e7ad0000-0000-4000-8001-000000000001";
@@ -88,7 +89,11 @@ afterAll(async () => {
 
 describe.skipIf(shouldSkip())("readForAssistant: metering.site-day against a database", () => {
   async function read(href: string) {
-    const host = routeHostContext(await getCurrentUserAccess(manager!.client), new Headers({ "accept-language": "en-GB" }));
+    const client = manager!.client;
+    const host = hostContext(await getCurrentUserAccess(client), new Headers({ "accept-language": "en-GB" }), {
+      newClient: async () => client,
+      makeFmt: (locale) => createFmt({ locale }),
+    });
     if (!host.ok) throw new Error(`[assistant-read.db] context refused: ${host.code}`);
     return readForAssistant(host.ctx, { type: "view", href, org: ORG });
   }

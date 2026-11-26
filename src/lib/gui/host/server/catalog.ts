@@ -46,6 +46,7 @@ import {
 import { byCatalogOrder, fillPath, idFits } from "../shared/merge-actions";
 import { tenantUnitIds } from "../shared/tenant-units";
 import { requireIssued, surfaceRequest, type HostContext } from "./access";
+import { AGENT_REFUSED, assistantGate, isAgentCaller } from "./agent";
 import { gateRefusal, releaseFailure } from "./availability";
 import { resolveSegments } from "./entities";
 import { pluginGate } from "./gate-state";
@@ -234,29 +235,36 @@ function entryOf({ registered: { plugin, def }, params, reasons, unchecked }: Dr
  * the unit's gate (unitPluginGate in ./gate-state.ts).
  *
  * The entities asked about are echoed by kind and id, never by label, and
- * each reason is the host's or the action's own copy. Before the catalog
- * joins the agent clients' allow-list (RFC #259 § 2: Track A and D1), refuse
- * an agent client `entity=` of the tenant, billingPeriod, lineItem and
- * paymentAttempt kinds and community management's `community.tenant-access`
- * (a tenant's access to its unit, whose step names the address), or give it
- * the organization's catalog only: #133's A0 data boundary keeps tenant,
- * billing and payment references from any model. A plugin kind added later
- * that names a tenant, a tenant's access, a bill or a payment joins this
- * list.
+ * each reason is the host's or the action's own copy.
  *
- * The catalog is not given to an assistant: the assistant read interface
- * (./assistant-read.ts) serves marked and listed views and watchers only,
- * because ADR-007 decision 6 admits only what those emit, and a reason here
- * is an action's own copy, which a refused plugin's available() writes. If
- * an assistant is to be given the catalog, decision 6 is read for it first,
- * and refused plugins' reasons become codes.
+ * An agent client (RFC #259 § 2) gets the organization's catalog only: any
+ * `entity=` is refused (403 `gui_agent_refused`) before anything is read,
+ * so it is never told about a tenant, a bill, a payment, a tenant's access
+ * or a person (`org.user`) by id, which #133's A0 data boundary keeps from
+ * any model, whatever plugin kinds are added later. Without entities no
+ * action's available() is asked (draftOf asks it only with every bound
+ * field given), so none of their copy reaches it either. Once the
+ * organization is resolved and checked, and before any action's gate or
+ * available() is asked, the assistant plugin's gate is asked for the
+ * organization (assistantGate in ./agent.ts). A person whose rows are all
+ * tenant rows gets a 404 rather than an empty catalog: tenant agent clients
+ * are #259 § 5's to design.
+ *
+ * The assistant read interface (./assistant-read.ts) does not serve the
+ * catalog: it serves marked and listed views and watchers only, because
+ * ADR-007 decision 6 admits only what those emit, and a reason here is an
+ * action's own copy, which a refused plugin's available() writes. If it is
+ * to serve the catalog, decision 6 is read for it first, and refused
+ * plugins' reasons become codes.
  */
 export async function buildActionCatalog(ctx: HostContext, input: CatalogQuery): Promise<HostOutcome<ActionCatalog>> {
   requireIssued(ctx);
   const query = checkedQuery(input);
   if (!query) return BAD_REQUEST;
   const { org, entities } = query;
-  if (!rolesIncludeStaff(ctx.access.roles)) return org !== null || entities.length > 0 ? NOT_FOUND : none();
+  const agent = isAgentCaller(ctx);
+  if (agent && entities.length > 0) return AGENT_REFUSED;
+  if (!rolesIncludeStaff(ctx.access.roles)) return org !== null || entities.length > 0 || agent ? NOT_FOUND : none();
 
   const snapshot = await surfaceSnapshot();
   let organizationId: string | null;
@@ -273,9 +281,13 @@ export async function buildActionCatalog(ctx: HostContext, input: CatalogQuery):
       return UNAVAILABLE;
     }
     if (org !== null && organizationId !== org) return NOT_FOUND;
-    if (organizationId === null) return tenantUnitIds(ctx.access.roles).length > 0 ? none() : NO_ACCESS;
+    if (organizationId === null) return tenantUnitIds(ctx.access.roles).length > 0 && !agent ? none() : NO_ACCESS;
   }
   const orgId = organizationId;
+  if (agent) {
+    const refused = await assistantGate(ctx, orgId);
+    if (refused) return refused;
+  }
 
   const byKind = new Map(entities.map((e) => [e.kind, e.id]));
   const gate = pluginGate(ctx, orgId);

@@ -6,9 +6,12 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { TENANT_ACCESS_KIND } from "@/lib/community-management/surface";
+import { USER_KIND } from "@/lib/organization-directory/surface";
 import type { MgmPluginName } from "@/lib/plugins/bundled";
+import { getMgmRuntime } from "@/lib/runtime/root";
 import type { ViewDef } from "../../../surface";
 import { findRefusedReference, hrefRefusal, refusedKind } from "../assistant-references";
+import { ASSISTANT_READING } from "../contribution-schema";
 import { entityRefSchema, hrefSchema, linkRefSchema, loadedModelSchemas, outHrefSchema, signalsSchema, viewModelSchema } from "../model-schema";
 import { DATA_KEYS, HREF_KEYS } from "../parse";
 import type { RegisteredView } from "../surface-registry";
@@ -23,6 +26,13 @@ const registered = (plugin: MgmPluginName, def: Partial<ViewDef>): RegisteredVie
 const VIEWS: RegisteredView[] = [
   registered("metering", { id: "metering.site-day", path: "/microgrids/[id]/operations", params: { id: "microgrid" }, query: ["date"] }),
   registered("billing", { id: "billing.period", path: "/microgrids/[id]/billing/[periodId]", params: { id: "microgrid", periodId: "billingPeriod" } }),
+  // A refused plugin's view whose segments are all allowed and whose query
+  // names a billing period, as a later billing view might.
+  registered("billing", { id: "billing.periods", path: "/microgrids/[id]/billing", params: { id: "microgrid" }, query: ["period"] }),
+  // A tenant view, contributed by a "per view" plugin, so only its scope refuses it.
+  registered("metering", { id: "metering.my-day", path: "/my/day", scope: "tenant", params: {}, query: ["tenant"] } as Partial<ViewDef>),
+  // A "per view" plugin's organization view with a declared parameter.
+  registered("community-management", { id: "community.roster", path: "/microgrids/[id]/roster", params: { id: "microgrid" }, query: ["sort"] }),
 ];
 const refused = (value: unknown) => findRefusedReference(value, VIEWS);
 
@@ -278,7 +288,7 @@ describe("findRefusedReference", () => {
 
 describe("hrefRefusal", () => {
   it.each([
-    ["a billing page with no segment", "/billing", null],
+    ["a billing page with no segment", "/billing", "refused plugin"],
     ["a view with its declared query and org", `${DAY}&org=${ID}`, null],
     ["a catalog page no view serves", `/microgrids/${MG}/setup/edges`, null],
     ["a phone number", "tel:+256700000000", "outside link"],
@@ -299,8 +309,29 @@ describe("hrefRefusal", () => {
     ["a query on a catalog page no view serves", `/microgrids/${MG}/setup/edges?x=1`, "search parameter"],
     ["a view segment of a refused kind", `/microgrids/${MG}/billing/${ID}`, "billingPeriod"],
     ["a catalog segment of a refused kind", `/microgrids/${MG}/setup/tenants/${ID}`, "tenant"],
+    ["a refused plugin's view, bare", `/microgrids/${MG}/billing`, "refused plugin"],
+    ["a refused plugin's view with its declared parameter", `/microgrids/${MG}/billing?period=${ID}`, "refused plugin"],
+    ["a refused plugin's view with org only", `/microgrids/${MG}/billing?org=${ID}`, "refused plugin"],
+    ["a tenant view, bare", "/my/day", "tenant view"],
+    ["a tenant view with its declared parameter", `/my/day?tenant=${ID}`, "tenant view"],
+    ["a per-view plugin's view with its declared parameter", `/microgrids/${MG}/roster?sort=name&org=${ID}`, null],
+    ["a per-view plugin's view with an undeclared parameter", `/microgrids/${MG}/roster?period=${ID}`, "search parameter"],
+    ["a refused plugin's catalog page no view serves", `/microgrids/${MG}/setup/rates`, "refused plugin"],
+    ["the tenant app's catalog page no view serves", "/my/usage", "refused plugin"],
   ])("answers %s", (_name, href, why) => {
     expect(hrefRefusal(href, VIEWS)).toBe(why);
+  });
+
+  it("refuses every refused plugin's and every tenant view in the real surface, bare and with each declared parameter", async () => {
+    const { views } = (await getMgmRuntime()).mgmSurface.snapshot();
+    const shut = views.filter((v) => ASSISTANT_READING[v.plugin] === "refused" || v.def.scope === "tenant");
+    // The surface has such views with declared parameters (billing's ?tenant_id=, payments' ?bill=).
+    expect(shut.filter((v) => (v.def.query ?? []).length > 0).length).toBeGreaterThan(0);
+    for (const v of shut) {
+      const path = v.def.path.replace(/\[([^\]]+)\]/g, (_m, name: string) => (v.def.params[name] === "microgrid" ? MG : ID));
+      const hrefs = [path, ...(v.def.query ?? []).map((q) => `${path}?${q}=${ID}`)];
+      for (const href of hrefs) expect(hrefRefusal(href, views), `${v.def.id} ${href}`).not.toBeNull();
+    }
   });
 });
 
@@ -313,5 +344,9 @@ describe("refusedKind", () => {
   it("refuses community management's tenant access, and not its other kinds", () => {
     expect(refusedKind(TENANT_ACCESS_KIND)).toBe(true);
     expect(refusedKind("community.other")).toBe(false);
+  });
+
+  it("refuses the organization directory's person", () => {
+    expect(refusedKind(USER_KIND)).toBe(true);
   });
 });

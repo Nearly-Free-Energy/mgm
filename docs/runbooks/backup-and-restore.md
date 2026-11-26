@@ -658,7 +658,11 @@ export holds no Vault secrets for the key to unlock.
    and redirect URLs. Configure SMTP only on a production replacement, so a
    rehearsal cannot email your users. Users and their password hashes come
    with the data, so existing users sign in with their current passwords.
-   Sessions do not, so every user signs in again.
+   Sessions do not, so every user signs in again. Turn the custom access
+   token hook on before the OAuth server, and the OAuth server on last, only
+   if your record has it on: while the hook is off, Supabase Auth issues
+   client tokens with none of MGM's checks (`docs/setup.md`, "Rolling back,
+   or changing the function").
 
 10. **Set passwords for custom login roles**, if you have any. `roles.sql`
     carries none. On a production replacement, once it takes over, point the

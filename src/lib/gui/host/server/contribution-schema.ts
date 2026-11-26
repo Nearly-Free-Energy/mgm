@@ -17,7 +17,9 @@ import "server-only";
  * describe, with no part that accepts any value (unconstrainedNodes in
  * ./input-spec.ts: so strict objects, and no z.json()), since the host
  * serves that schema (describeInput) and an empty one describes nothing,
- * each refusal naming the action's id;
+ * and whose root is an object with properties (hasRootProperties there),
+ * since describeInput removes bound fields and `confirmation` from the root
+ * alone, each refusal naming the action's id;
  * examples against the model schemas and the declared keys, and a
  * watcher's examples against the signal schema; no
  * assistant reading of a view or watcher that is not on the list, of views
@@ -57,7 +59,7 @@ import {
   routePattern,
   signalOutSchema,
 } from "./model-schema";
-import { unconstrainedNodes } from "./input-spec";
+import { hasRootProperties, unconstrainedNodes } from "./input-spec";
 
 /** What the parse reads from the catalog: the plugins, their aliases and routes. */
 export type SurfaceCatalog = Pick<MgmCatalog, "plugins">;
@@ -314,9 +316,9 @@ export function withholdMode(schema: z.ZodType, path: string): "null" | "omit" |
  *   and payment references; the tenant app is about a tenant's own unit;
  *   the operations plugin contributes nothing yet;
  * - a view whose path names a tenant, a device, a billing or payment
- *   record, or a tenant's access to its unit (community management's
+ *   record, a tenant's access to its unit (community management's
  *   `community.tenant-access`, whose label and step name the person's
- *   address) (ASSISTANT_REFUSED_KINDS);
+ *   address), or a person (ASSISTANT_REFUSED_KINDS);
  * - a view that takes signals, which carries every watcher's answer;
  * - a view that declares a key prefix, whose keys the list's review cannot
  *   see.
@@ -363,22 +365,29 @@ export const ASSISTANT_READING: Readonly<Record<MgmPluginName, "per view" | "ref
 /**
  * The entity kinds whose records an assistant may never read: through a
  * view's path here, and as a reference in what a view or watcher emits
- * (./assistant-references.ts). Besides the core kinds, community
- * management's `community.tenant-access`, a tenant's access to its unit,
- * whose label and step name the person's address. It is spelled here
- * rather than imported, so the host imports nothing from a capability;
- * assistant-references.test.ts pins it to TENANT_ACCESS_KIND. A plugin
- * kind added later that names a tenant, a tenant's access, a bill or a
- * payment joins this list, as it joins the action catalog's (./catalog.ts).
+ * (./assistant-references.ts). Besides the core kinds, two plugins' kinds,
+ * named here as ASSISTANT_READING names plugins, so the host imports
+ * nothing from a capability: community management's
+ * `community.tenant-access`, a tenant's access to its unit, whose label and
+ * step name the person's address (assistant-references.test.ts pins it to
+ * TENANT_ACCESS_KIND), and `org.user`, the organization directory's person,
+ * whose address and role #133's data boundary keeps from any model
+ * (organization-directory/__tests__/person-boundary.test.ts reads it from
+ * the plugin's USER_KIND and fails if the two differ). A plugin kind added
+ * later that names a tenant, a tenant's access, a person, a bill or a
+ * payment joins this list.
  */
-export const ASSISTANT_REFUSED_KINDS: ReadonlySet<string> = new Set<CoreEntityKind | "community.tenant-access">([
-  "tenant",
-  "device",
-  "rateSchedule",
-  "billingPeriod",
-  "lineItem",
-  "paymentAttempt",
+export const ASSISTANT_REFUSED_KINDS: ReadonlySet<string> = new Set<string>([
+  ...([
+    "tenant",
+    "device",
+    "rateSchedule",
+    "billingPeriod",
+    "lineItem",
+    "paymentAttempt",
+  ] satisfies CoreEntityKind[]),
   "community.tenant-access",
+  "org.user",
 ]);
 
 const READS_LIST = "src/lib/gui/assistant-reads.ts";
@@ -640,6 +649,9 @@ const actionSchema = z
     }
     for (const at of described === undefined ? [] : unconstrainedNodes(described)) {
       add(ctx, ["input"], `${a.id}: the input accepts any value at ${at || "its root"}; describe what it takes`);
+    }
+    if (described !== undefined && !hasRootProperties(described)) {
+      add(ctx, ["input"], `${a.id}: the input's root is not an object with properties; make it a z.strictObject`);
     }
   });
 
