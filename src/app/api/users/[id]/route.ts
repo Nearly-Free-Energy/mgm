@@ -93,10 +93,7 @@ export async function DELETE(
   }
 
   // A DELETE often has no body; an empty one is read as `{}`, which asks for the address.
-  const empty = (await request.clone().text()).trim() === "";
-  const parsed = empty
-    ? ({ ok: true, data: RemoveUserBody.parse({}) } as const)
-    : await parseJsonBody(request, RemoveUserBody);
+  const parsed = await parseJsonBody(request, RemoveUserBody, { whenEmpty: {} });
   if (!parsed.ok) return parsed.response;
 
   const supabase = await createClient();

@@ -52,7 +52,7 @@ export async function PATCH(
     );
   }
 
-  const parsed = await parseJsonBody(request, UpdateOrganizationBody, UPDATE_ORGANIZATION_REFUSALS);
+  const parsed = await parseJsonBody(request, UpdateOrganizationBody, { refusals: UPDATE_ORGANIZATION_REFUSALS });
   if (!parsed.ok) return parsed.response;
   const body = parsed.data;
 
@@ -193,10 +193,7 @@ export async function DELETE(
   }
 
   // A DELETE often has no body; an empty one is read as `{}`, which asks for the name.
-  const empty = (await request.clone().text()).trim() === "";
-  const parsed = empty
-    ? ({ ok: true, data: DeleteOrganizationBody.parse({}) } as const)
-    : await parseJsonBody(request, DeleteOrganizationBody);
+  const parsed = await parseJsonBody(request, DeleteOrganizationBody, { whenEmpty: {} });
   if (!parsed.ok) return parsed.response;
 
   const supabase = await createClient();

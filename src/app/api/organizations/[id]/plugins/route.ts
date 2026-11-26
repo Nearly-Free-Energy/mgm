@@ -109,7 +109,7 @@ export async function PATCH(
       { status: 400 }
     );
   }
-  const parsed = await parseJsonBody(request, SetPluginBody, SET_PLUGIN_REFUSALS);
+  const parsed = await parseJsonBody(request, SetPluginBody, { refusals: SET_PLUGIN_REFUSALS });
   if (!parsed.ok) return parsed.response;
   const body = parsed.data;
 

@@ -64,6 +64,7 @@ import {
   OPENEMS_PATHS,
   ROW_KEY,
   prepareEveryAction,
+  repeatedCanaryIds,
   seedCanaries,
   TENANT_METER_COMPONENT,
   type Canary,
@@ -90,6 +91,8 @@ const IDS: CanaryIds = {
   // The manager's invited colleague's account id, filled in beforeAll once it is created.
   staffUserId: "",
   rateScheduleId: "e7400000-0000-4000-8006-000000000001",
+  edgeId: "e7400000-0000-4000-800c-000000000001",
+  deviceId: "e7400000-0000-4000-800b-000000000001",
   unitIds: [1, 2, 3, 4, 5, 6].map((n) => `e7400000-0000-4000-8003-00000000000${n}`),
 };
 const MICROGRIDS = canaryMicrogrids(IDS);
@@ -239,6 +242,14 @@ async function decrypted(c: Canary): Promise<string> {
 }
 
 describe.skipIf(shouldSkip())("credential canary", () => {
+  it("gives every seeded row its own id", () => {
+    // seedCanaries refuses a repeated id too; a repeat would leave a row's
+    // parent out of seededParams without failing.
+    expect(repeatedCanaryIds(IDS)).toEqual([]);
+    expect(repeatedCanaryIds({ ...IDS, edgeId: IDS.tenantId })).toEqual([IDS.tenantId]);
+    expect(repeatedCanaryIds({ ...IDS, unitIds: [...IDS.unitIds, IDS.microgridIds.basic] })).toEqual([IDS.microgridIds.basic]);
+  });
+
   it("seeds every encrypted credential column the schema has", () => {
     expect(encryptedColumnsInSchema()).toEqual([...COLUMNS].sort());
     // The synthetic and mixed microgrids hold a second Basic password and a second bearer token.
@@ -538,9 +549,10 @@ describe.skipIf(shouldSkip())("credential canary", () => {
       expect(scanAll(results)).toThrow(basic);
     });
 
+    // A plugin's own kind, which the canary never seeds, so this holds whatever core kinds it comes to seed.
     it("refuses a view whose path names a kind with no seeded row", async () => {
-      const fixture = surface([view("acme.house", "/devices/[id]", { id: "device" }, () => ok("Battery"))]);
-      await expect(dispatchEveryView(ctx(), fixture, IDS, serve)).rejects.toThrow('no canary row for entity kind "device"');
+      const fixture = surface([view("acme.widgets", "/widgets/[id]", { id: "acme.widget" }, () => ok("Battery"))]);
+      await expect(dispatchEveryView(ctx(), fixture, IDS, serve)).rejects.toThrow('no canary row for entity kind "acme.widget"');
     });
 
     it("refuses a view whose loader did not run", async () => {

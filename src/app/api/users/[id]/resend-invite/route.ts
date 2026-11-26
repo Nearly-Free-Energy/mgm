@@ -106,10 +106,9 @@ export async function POST(
       { status: 400 }
     );
   }
-  if ((await request.clone().text()).trim() !== "") {
-    const parsed = await parseJsonBody(request, ResendInviteBody);
-    if (!parsed.ok) return parsed.response;
-  }
+  // The page sends no body; the host sends `{}`. Both are read as `{}`.
+  const parsed = await parseJsonBody(request, ResendInviteBody, { whenEmpty: {} });
+  if (!parsed.ok) return parsed.response;
 
   const userClient = await createClient();
 

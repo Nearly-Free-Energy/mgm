@@ -459,6 +459,86 @@ describe("PUT /api/microgrids/[id]/openems-backend", () => {
     expect(json.error).toContain("does not match");
   });
 
+  // metering.save-connection's ceremony sends the typed name as
+  // confirmation.typed (the GUI host's Confirmation), not confirmed_name.
+  it("Branch (b) from the GUI host: confirmation.typed confirms as confirmed_name does", async () => {
+    registerFrom(mgSelectHandler({ id: MG_ID, name: MG_NAME }));
+    registerFrom(billingPeriodsHandler([{ id: "bp-1", status: "closed" }]));
+    registerFrom(mgUpdateHandler(null)); // persist config
+    registerFrom(edgesSelectHandler([])); // no existing edges
+    registerFrom(mgUpdateHandler(null)); // health update
+    getEdgesStatusMock.mockResolvedValue([{ edgeId: "edge0", online: true }]);
+
+    const { PUT } = await import("../route");
+    const body = { type: "direct_url", backendUrl: "http://localhost:8075", known_edge_ids: ["edge0"] };
+    const ok = await PUT(makePutRequest({ ...body, confirmation: { acknowledged: [], typed: MG_NAME } }), {
+      params: Promise.resolve({ id: MG_ID }),
+    });
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).status).toBe("success");
+
+    registerFrom(mgSelectHandler({ id: MG_ID, name: MG_NAME }));
+    registerFrom(billingPeriodsHandler([{ id: "bp-1", status: "closed" }]));
+    const wrong = await PUT(makePutRequest({ ...body, confirmation: { acknowledged: [], typed: "WrongName" } }), {
+      params: Promise.resolve({ id: MG_ID }),
+    });
+    expect(wrong.status).toBe(400);
+    expect((await wrong.json()).error).toContain("does not match");
+
+    // A confirmation with no name typed asks for it, as no confirmation does.
+    registerFrom(mgSelectHandler({ id: MG_ID, name: MG_NAME }));
+    registerFrom(billingPeriodsHandler([{ id: "bp-1", status: "closed" }]));
+    const untyped = await PUT(makePutRequest({ ...body, confirmation: { acknowledged: [] } }), {
+      params: Promise.resolve({ id: MG_ID }),
+    });
+    expect(untyped.status).toBe(409);
+    // Its code is the one save-connection prepares again on, so the host shows the typed step.
+    expect(await untyped.json()).toMatchObject({
+      code: "metering_connection_name_required",
+      requires_typed_confirmation: { entity_name: MG_NAME },
+    });
+  });
+
+  // A form drawn from the catalog may send confirmed_name, even blank,
+  // beside the host's confirmation: the confirmation alone is read.
+  it("Branch (b): a confirmation is read alone, whatever confirmed_name says beside it", async () => {
+    registerFrom(mgSelectHandler({ id: MG_ID, name: MG_NAME }));
+    registerFrom(billingPeriodsHandler([{ id: "bp-1", status: "closed" }]));
+    registerFrom(mgUpdateHandler(null)); // persist config
+    registerFrom(edgesSelectHandler([])); // no existing edges
+    registerFrom(mgUpdateHandler(null)); // health update
+    getEdgesStatusMock.mockResolvedValue([{ edgeId: "edge0", online: true }]);
+
+    const { PUT } = await import("../route");
+    const body = { type: "direct_url", backendUrl: "http://localhost:8075", known_edge_ids: ["edge0"] };
+    const ok = await PUT(
+      makePutRequest({ ...body, confirmed_name: "", confirmation: { acknowledged: [], typed: MG_NAME } }),
+      { params: Promise.resolve({ id: MG_ID }) }
+    );
+    expect(ok.status).toBe(200);
+
+    // And a confirmed_name that matches does not stand in for a confirmation that does not.
+    registerFrom(mgSelectHandler({ id: MG_ID, name: MG_NAME }));
+    registerFrom(billingPeriodsHandler([{ id: "bp-1", status: "closed" }]));
+    const wrong = await PUT(
+      makePutRequest({ ...body, confirmed_name: MG_NAME, confirmation: { acknowledged: [], typed: "WrongName" } }),
+      { params: Promise.resolve({ id: MG_ID }) }
+    );
+    expect(wrong.status).toBe(400);
+    expect((await wrong.json()).error).toContain("does not match");
+  });
+
+  it("refuses a field SaveConnectionBody does not take, before any read", async () => {
+    const { PUT } = await import("../route");
+    const res = await PUT(
+      makePutRequest({ type: "direct_url", backendUrl: "http://localhost:8075", known_edge_ids: [], password: "x" }),
+      { params: Promise.resolve({ id: MG_ID }) }
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Unknown field: password", code: "invalid_body" });
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
   it("Branch (c): no periods → save + discover succeeds (direct_url)", async () => {
     registerFrom(mgSelectHandler({ id: MG_ID, name: MG_NAME }));
     registerFrom(billingPeriodsHandler([]));

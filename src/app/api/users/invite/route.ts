@@ -103,7 +103,7 @@ const UUID_RE =
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // ── Validate shape ────────────────────────────────────────────────────
   // The schema trims the address and checks it, then the role.
-  const parsed = await parseJsonBody(request, InviteUserBody, INVITE_USER_REFUSALS);
+  const parsed = await parseJsonBody(request, InviteUserBody, { refusals: INVITE_USER_REFUSALS });
   if (!parsed.ok) return parsed.response;
   const body = parsed.data;
   const email = body.email;

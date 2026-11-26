@@ -49,7 +49,7 @@ type Answer = { status: number; body: Record<string, unknown> } | { ok: unknown 
 
 /** The route's answer to `raw` through parseJsonBody, or the parsed body. */
 async function answer(raw: string, schema: z.ZodType, refusals?: BodyRefusals): Promise<Answer> {
-  const parsed = await parseJsonBody(new Request("http://localhost", { method: "POST", body: raw }), schema, refusals);
+  const parsed = await parseJsonBody(new Request("http://localhost", { method: "POST", body: raw }), schema, { refusals });
   if (parsed.ok) return { ok: parsed.data };
   return { status: parsed.response.status, body: (await parsed.response.json()) as Record<string, unknown> };
 }

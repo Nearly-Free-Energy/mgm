@@ -56,7 +56,7 @@ function mapError(error: CommunityManagementError): NextResponse {
  *   500 unexpected
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const parsed = await parseJsonBody(request, CreateTenantBody, CREATE_TENANT_REFUSALS);
+  const parsed = await parseJsonBody(request, CreateTenantBody, { refusals: CREATE_TENANT_REFUSALS });
   if (!parsed.ok) return parsed.response;
   const body = parsed.data;
   const microgridId = body.microgrid_id;

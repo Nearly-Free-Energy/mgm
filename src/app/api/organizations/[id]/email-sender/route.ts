@@ -90,7 +90,7 @@ export async function PUT(request: NextRequest, { params }: RouteContext): Promi
   const { id: orgId } = await params;
   // The schema refuses what parseSenderInput refuses, in its words
   // (SAVE_EMAIL_SENDER_REFUSALS); parseSenderInput still makes the values.
-  const body = await parseJsonBody(request, SaveEmailSenderBody, SAVE_EMAIL_SENDER_REFUSALS);
+  const body = await parseJsonBody(request, SaveEmailSenderBody, { refusals: SAVE_EMAIL_SENDER_REFUSALS });
   if (!body.ok) return body.response;
   const parsed = parseSenderInput(body.data);
   if (!parsed.ok) {
@@ -261,10 +261,7 @@ export async function DELETE(request: NextRequest, { params }: RouteContext): Pr
   const { supabase, response } = await authorize(orgId);
   if (!supabase) return response;
   // A DELETE often has no body; an empty one is read as `{}`, which asks for the name.
-  const empty = (await request.clone().text()).trim() === "";
-  const parsed = empty
-    ? ({ ok: true, data: RemoveEmailSenderBody.parse({}) } as const)
-    : await parseJsonBody(request, RemoveEmailSenderBody);
+  const parsed = await parseJsonBody(request, RemoveEmailSenderBody, { whenEmpty: {} });
   if (!parsed.ok) return parsed.response;
 
   const { data: saved, error: readError } = await supabase

@@ -47,7 +47,7 @@ export async function PATCH(
     );
   }
 
-  const parsed = await parseJsonBody(request, ChangeRoleBody, CHANGE_ROLE_REFUSALS);
+  const parsed = await parseJsonBody(request, ChangeRoleBody, { refusals: CHANGE_ROLE_REFUSALS });
   if (!parsed.ok) return parsed.response;
   const body = parsed.data;
   const role = body.role;

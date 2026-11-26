@@ -273,20 +273,25 @@ export type DecidingReading = { series: "gridV" | "soc"; pos: number; v: number 
 /** [start, end) in elapsed minutes after the day's start. */
 export type MinuteRange = [start: number, end: number];
 /**
- * What decided a day's dark and no-data time, which SiteDayOperations does
- * not keep. The keys are the item keys of the investigation evidence
- * snapshot (docs/investigation-evidence.md §4), which maps them one to one;
- * if a key or a cause changes there, revisit these. Each list's ranges are
- * one per gap (a maximal run of offline bins), in order, and its
- * `decidedBy` or `ruledOut` entry `i` is about range `i`.
+ * What decided a day's dark and no-data time, and what the tenant meters'
+ * evening figures were read from: the window searched, each meter's
+ * readings and why a meter was left out. SiteDayOperations keeps none of
+ * this. The keys are the item keys of the investigation evidence snapshot
+ * (docs/investigation-evidence.md §4), which maps them one to one; if a key
+ * or a cause changes there, revisit these. Each range list's ranges are one
+ * per gap (a maximal run of offline bins), in order, and its `decidedBy` or
+ * `ruledOut` entry `i` is about range `i`.
  *
- * It is worked out from the series alone and does not know which site
- * sources were readable: with no battery (C07) a floor gap comes out as
- * `no_data`, and with no grid meter (C08) a dark evening comes out as
- * `dark_lowbat` while `cutMinutes` is null. The capture (A2-3) must not
- * pass such ranges on as they are: it stores an item whose source is
- * unavailable as unavailable, with nulls (evidence §4's key table, rule Z).
- * If this detail starts reading source availability itself, revisit.
+ * The dark and no-data ranges are worked out from the series alone and do
+ * not know which site sources were readable: with no battery (C07) a floor
+ * gap comes out as `no_data`, and with no grid meter (C08) a dark evening
+ * comes out as `dark_lowbat` while `cutMinutes` is null. The capture (A2-3)
+ * must not pass such ranges on as they are: it stores an item whose source
+ * is unavailable as unavailable, with nulls (evidence §4's key table, rule
+ * Z). If the ranges start reading source availability themselves, revisit.
+ * The meter fields differ: `meter_readings` and `meter_outcomes` follow
+ * `sources.houses` and are empty when it is false, while `meter_window`
+ * depends only on the bins read.
  */
 export type SiteDayDetail = {
   /** The previous day's last voltage and SoC readings, as `[pos, v]`; null when it had none. */
@@ -310,6 +315,31 @@ export type SiteDayDetail = {
     min: number;
     ruledOut: { grid: DecidingReading | null; soc: DecidingReading | null }[];
   };
+  /**
+   * The bins searched for the tenant meters' evening readings, as inclusive
+   * bin positions: `start` the half hour before the bin before 18:00 to the
+   * window's first bin, `end` the half hour before the last bin read to that
+   * bin (the widest case: a meter's own search ends at its start reading).
+   * Present whether or not the site has tenant meters; null when no bin of
+   * the evening window has been read, as on a read that ends by 18:00.
+   */
+  meter_window: { start: [lo: number, hi: number]; end: [lo: number, hi: number] } | null;
+  /**
+   * Each tenant meter's start and end reading, as `[pos, Wh]`, by MGM
+   * device id: every meter in `houseMeterIds`, or without it every series
+   * in the samples. `start` is null when its bins held no reading, and
+   * `end` is null when its bins held none and, unsearched, whenever `start`
+   * is. Empty without tenant meters and on a read that ends by 18:00.
+   */
+  meter_readings: Record<string, { start: [pos: number, wh: number] | null; end: [pos: number, wh: number] | null }>;
+  /**
+   * The meters in `meter_readings` left out of `housesEveningKwh`: no start
+   * reading, no end reading, or an end below the start (the counter went
+   * backwards, reset or replaced). A meter in `meter_readings` without an
+   * outcome is counted. Linked meters that cannot be read are in neither;
+   * the day counts them from `sources.houseMetersUnreadable`.
+   */
+  meter_outcomes: Record<string, "no_start" | "no_end" | "backwards">;
 };
 
 /** What computeSiteDay and computeSiteDayDetail work a day out from. */
@@ -320,6 +350,13 @@ export type SiteDayInput = {
   sources: SiteSourceAvailability;
   resolutionMinutes: number;
   nowMs: number;
+  /**
+   * The tenant meters asked of the provider, by MGM device id. Each is read
+   * whether or not the samples hold its series: one the provider left out
+   * reads as all null, so it has no start and is counted as missing.
+   * Without it, the meters read are the series the samples hold.
+   */
+  houseMeterIds?: readonly string[];
 };
 
 type GapCause = "dark_cut" | "dark_lowbat" | "dark_after_lowbat" | "no_data";
@@ -427,7 +464,7 @@ export function computeSiteDay(input: SiteDayInput): SiteDayOperations {
  * positions and readings too.
  */
 export function computeSiteDayDetail(input: SiteDayInput): { day: SiteDayOperations; detail: SiteDayDetail } {
-  const { date, timezone, samples, sources, resolutionMinutes, nowMs } = input;
+  const { date, timezone, samples, sources, resolutionMinutes, nowMs, houseMeterIds } = input;
   if (!isSiteResolution(resolutionMinutes)) {
     throw new RangeError("resolutionMinutes must be a whole number of minutes that divides an hour");
   }
@@ -601,21 +638,36 @@ export function computeSiteDayDetail(input: SiteDayInput): { day: SiteDayOperati
   // bin's mean, so a counter's value in a bin is about its reading at the
   // bin's middle; reading from the bin before 18:00 to the window's last bin
   // spans the full window, shifted half a bin earlier.
+  // The window's first bin, and the latest bin read so far.
+  const firstEveningIndex = bins.findIndex((b) => b.startMs >= eveningStartMs);
+  const lastIndex = bins.length - 1;
+  const toleranceBins = Math.round(HOUSE_READING_TOLERANCE_MS / binMs);
+  // The bins the loop below searches, whatever meters there are. Null until
+  // an evening bin has been read, which at a resolution that puts 18:00 on a
+  // bin's start is exactly when readUntilMs is not past eveningStartMs.
+  const meterWindow: SiteDayDetail["meter_window"] =
+    firstEveningIndex < 0
+      ? null
+      : {
+          start: [Math.max(0, firstEveningIndex - 1 - toleranceBins), firstEveningIndex],
+          end: [Math.max(0, lastIndex - toleranceBins), lastIndex],
+        };
+  const meterReadings: SiteDayDetail["meter_readings"] = {};
+  const meterOutcomes: SiteDayDetail["meter_outcomes"] = {};
   let housesEveningKwh: number | null = null;
   let housesEveningMetersMissing = 0;
-  const houseSeries = sources.houses ? Object.values(samples.houseEnergyWh ?? {}) : [];
   if (sources.houses && readUntilMs > eveningStartMs) {
     housesEveningMetersMissing = sources.houseMetersUnreadable;
-    // The window's first bin, and the latest bin read so far.
-    const firstEveningIndex = bins.findIndex((b) => b.startMs >= eveningStartMs);
-    const lastIndex = bins.length - 1;
-    const toleranceBins = Math.round(HOUSE_READING_TOLERANCE_MS / binMs);
+    const houseEnergyWh = samples.houseEnergyWh ?? {};
+    // Each meter once, though asked for twice.
+    const meterIds = [...new Set(houseMeterIds ?? Object.keys(houseEnergyWh))];
     let total = 0;
     let counted = 0;
-    for (const series of houseSeries) {
+    for (const id of meterIds) {
+      const series = houseEnergyWh[id];
       const valueAt = (index: number) => {
         const i = byBin.get(index);
-        return i === undefined ? null : series[i] ?? null;
+        return i === undefined || series === undefined ? null : series[i] ?? null;
       };
       // Start: the latest reading in the half hour before the window, else
       // the window's first bin.
@@ -645,7 +697,12 @@ export function computeSiteDayDetail(input: SiteDayInput): { day: SiteDayOperati
       }
       const startWh = startIndex === null ? null : valueAt(startIndex);
       const endWh = endIndex === null ? null : valueAt(endIndex);
+      meterReadings[id] = {
+        start: startIndex === null || startWh === null ? null : [startIndex, startWh],
+        end: endIndex === null || endWh === null ? null : [endIndex, endWh],
+      };
       if (startWh === null || endWh === null || endWh < startWh) {
+        meterOutcomes[id] = startWh === null ? "no_start" : endWh === null ? "no_end" : "backwards";
         housesEveningMetersMissing += 1;
         continue;
       }
@@ -682,6 +739,9 @@ export function computeSiteDayDetail(input: SiteDayInput): { day: SiteDayOperati
     dark_lowbat: { ...causeRanges("dark_lowbat"), decidedBy: darkLowbatBy },
     dark_after_lowbat: { ...causeRanges("dark_after_lowbat"), decidedBy: darkAfterLowbatBy },
     no_data: { ...causeRanges("no_data"), ruledOut: noDataRuledOut },
+    meter_window: meterWindow,
+    meter_readings: meterReadings,
+    meter_outcomes: meterOutcomes,
   };
 
   let lowestSoc: SiteDayOperations["lowestSoc"] = null;

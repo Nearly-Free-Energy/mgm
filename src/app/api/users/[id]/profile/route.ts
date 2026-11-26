@@ -36,7 +36,7 @@ export async function PATCH(
     );
   }
 
-  const parsed = await parseJsonBody(request, UpdateProfileBody, UPDATE_PROFILE_REFUSALS);
+  const parsed = await parseJsonBody(request, UpdateProfileBody, { refusals: UPDATE_PROFILE_REFUSALS });
   if (!parsed.ok) return parsed.response;
   const body = parsed.data;
 

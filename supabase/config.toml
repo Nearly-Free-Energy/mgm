@@ -283,7 +283,9 @@ max_frequency = "5s"
 
 # This hook runs before a token is issued and allows you to add additional claims based on the authentication method used.
 # MGM refuses a token for a password or recovery sign-in here (RFC #186 § 6):
-# people sign in by the emailed link only.
+# people sign in by the emailed link only. It also refuses a client of the
+# OAuth server below that mgm_clients does not list, and writes a listed
+# client's kind into its token (ADR-008 decision 2).
 [auth.hook.custom_access_token]
 enabled = true
 uri = "pg-functions://postgres/public/fn_auth_access_token_hook"
@@ -365,13 +367,17 @@ enabled = false
 # Obtain from https://clerk.com/setup/supabase
 # domain = "example.clerk.accounts.dev"
 
-# OAuth server configuration
+# OAuth server configuration. Clients that are not a browser (the CLI and
+# the assistant bridge, RFC #259, ADR-008) sign in through it.
+# fn_auth_access_token_hook refuses a client mgm_clients does not list
+# (docs/setup.md, "Clients that are not a browser").
 [auth.oauth_server]
 # Enable OAuth server functionality
-enabled = false
-# Path for OAuth consent flow UI
+enabled = true
+# Path for OAuth consent flow UI: MGM's consent page (#271), under site_url.
 authorization_url_path = "/oauth/consent"
-# Allow dynamic client registration
+# Allow dynamic client registration. Off: an installation registers its two
+# clients itself.
 allow_dynamic_registration = false
 
 [edge_runtime]
