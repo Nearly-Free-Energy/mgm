@@ -17,7 +17,9 @@ import "server-only";
  * describe, with no part that accepts any value (unconstrainedNodes in
  * ./input-spec.ts: so strict objects, and no z.json()), since the host
  * serves that schema (describeInput) and an empty one describes nothing,
- * each refusal naming the action's id;
+ * and whose root is an object with properties (hasRootProperties there),
+ * since describeInput removes bound fields and `confirmation` from there
+ * alone, each refusal naming the action's id;
  * examples against the model schemas and the declared keys, and a
  * watcher's examples against the signal schema; no
  * assistant reading of a view or watcher that is not on the list, of views
@@ -56,7 +58,7 @@ import {
   routePattern,
   signalOutSchema,
 } from "./model-schema";
-import { unconstrainedNodes } from "./input-spec";
+import { hasRootProperties, unconstrainedNodes } from "./input-spec";
 
 /** What the parse reads from the catalog: the plugins, their aliases and routes. */
 export type SurfaceCatalog = Pick<MgmCatalog, "plugins">;
@@ -454,6 +456,9 @@ const actionSchema = z
     }
     for (const at of described === undefined ? [] : unconstrainedNodes(described)) {
       add(ctx, ["input"], `${a.id}: the input accepts any value at ${at || "its root"}; describe what it takes`);
+    }
+    if (described !== undefined && !hasRootProperties(described)) {
+      add(ctx, ["input"], `${a.id}: the input's root is not an object with properties; make it a z.strictObject`);
     }
   });
 
