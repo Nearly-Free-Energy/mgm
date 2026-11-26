@@ -188,6 +188,22 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-key.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-retirement.sql
 
+      # The investigation seed (docs/setup.md, "Investigation cases") against
+      # the database the migrations built, so a migration that breaks it
+      # (a new NOT NULL column on tenants or devices, say) fails here rather
+      # than on someone's next local run. Its guards pass on this runner: the
+      # stack was started with MGM_ALLOW_DEV_CREDENTIAL_KEY=1, so Vault holds
+      # the development opt-in, and no step before this one leaves an
+      # organization behind; if either stops being true, revisit.
+      - name: Investigation seed rehearsal
+        run: |
+          # The seed has no BEGIN/COMMIT, so its caller decides the transaction;
+          # unlike the other rehearsals this one wraps it, and rolls back.
+          eval "$(npx supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -v disposable=1 -c BEGIN \
+            -f supabase/scripts/seed-investigation-cases.sql \
+            -f supabase/scripts/rehearse-investigation-seed.sql -c ROLLBACK
+
       - name: Database diagnostics on rehearsal failure
         if: failure()
         run: docker logs --tail 200 supabase_db_mgm

@@ -2,9 +2,10 @@
  * The pins of #133's investigation cases (docs/investigation-cases.md §1
  * and §2): each microgrid's variant of the device set, and each case's
  * microgrid, date, scenario and expected read. A helper for
- * investigation-cases.test.ts (the regeneration test) and, once A2-5 adds
- * it, the seed's static test, not production code: the identifiers
- * themselves are in `fixture/case-ids.ts`, which the fixture may read.
+ * investigation-cases.test.ts (the regeneration test) and the seed's static
+ * test (fixture/__tests__/seed-investigation-cases.test.ts), not production
+ * code: the identifiers themselves are in `fixture/case-ids.ts`, which the
+ * fixture may read.
  *
  * The variants and cases restate docs/investigation-cases.md §1 and §2; if
  * either changes, change both. C15 to C24 run on the pinned days of

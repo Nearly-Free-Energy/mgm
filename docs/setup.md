@@ -607,6 +607,62 @@ and devices through the API:
 2. `POST /api/devices` for a battery, a grid meter, an inverter and
    consumption meters on that edge, then link the meters to tenants.
 
+### Investigation cases
+
+`scripts/seed-investigation-cases.sh` writes the fixture set of #133's
+investigation cases (`docs/investigation-cases.md` §1) into the local
+database of this checkout: two organizations, twenty synthetic microgrids
+with their edges, devices, units and meter links, and an organization
+manager of both, `investigations-manager@example.org`. It is for a
+disposable local installation only, such as the one the manual baseline
+runs on (§5 of that document).
+
+1. Start from a freshly reset local database with the development opt-in.
+   This deletes the database's data:
+
+   ```bash
+   MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset
+   ```
+
+2. Seed it:
+
+   ```bash
+   scripts/seed-investigation-cases.sh --disposable
+   ```
+
+3. Set `MGM_METERING_FIXTURES=on` in `.env.local`, start the app with
+   `npm run dev`, and sign in as `investigations-manager@example.org`
+   through the local mail catcher, as in the Quick Start.
+
+The script refuses to run without `--disposable`. It takes the database
+address only from `supabase status` in this checkout, never from an option,
+and refuses any address that is not a single loopback host. As with every
+`supabase` command, `SUPABASE_WORKDIR` chooses which project's stack that
+status describes, and the port it prints is the one in that project's
+`config.toml`, whoever listens on it: on a shared machine a loopback port
+can be another account's Docker. So the script also requires the database
+at that address to be the one inside the `supabase_db_*` container that
+publishes its Postgres port (5432 inside the container) on that host port,
+on the Docker daemon your `docker` command reaches (`DOCKER_HOST` or the
+current docker context). It reads the host side of each binding from
+`docker ps`'s Ports column (`0.0.0.0:54322->5432/tcp`), not from its
+`publish=` filter, whose side of a binding Docker's reference and its
+daemons disagree on; it requires exactly one such container, and compares
+the two databases' system identifiers. Point `docker` at your own daemon first; the check
+proves nothing about a daemon that is not yours. The SQL it runs
+(`supabase/scripts/seed-investigation-cases.sql`) then refuses a database
+with no development opt-in in Vault (the entry
+`MGM_ALLOW_DEV_CREDENTIAL_KEY=1` adds, which `docs/runbooks/dek.md` keeps
+off a production database), or with any organization besides the local
+sample one, including the two it seeded before. Those prove a fresh
+development database, not whose it is. To seed again, reset first.
+
+Three devices are written with no component id, as rows from before
+migration `00018` can still be: the trigger that refuses that is disabled
+for the one statement and enabled again, and the script checks afterwards
+that it is enabled. Nothing in the set is real; reset the database when you
+are done with it.
+
 ## Local Supabase Services
 
 After `./setup.sh` in local mode, these services are running:
