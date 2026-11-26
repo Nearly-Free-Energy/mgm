@@ -124,6 +124,7 @@ const F = {
   lineItem: "7e4a0000-0000-4000-8007-000000000001",
   merchant: "7e4a0000-0000-4000-8008-000000000001",
   attempt: "7e4a0000-0000-4000-8009-000000000001",
+  operation: "7e4a0000-0000-4000-800a-000000000001",
   unknown: "7e4a0000-0000-4000-80ff-000000000001",
 };
 /** The fixture's own keys in the staff tables that have no organization column. */
@@ -366,6 +367,19 @@ async function insertStaffRows(svc: SupabaseClient): Promise<void> {
   await insert(svc, "payment_notifications", [{ org_id: F.org, tracking_id: TRACKING, merchant_reference: REFERENCE }]);
   await insert(svc, "pilot_import_batches", [{ billing_period_id: F.period, source_label: "synthetic-pilot" }]);
   await insert(svc, "auth_sign_in_requests", [{ email_hash: SIGN_IN_HASH, outcome: "no_access" }]);
+  // No API role writes the operations tables (20261126120000), so the owner
+  // does. They go with the organization by cascade.
+  const operation = runAsDatabaseOwner(
+    `DO $$ BEGIN
+       INSERT INTO public.operations (id, microgrid_id, org_id, window_date, window_tz, window_zone)
+       VALUES ('${F.operation}', '${F.microgrid}', '${F.org}', '2026-01-01', 'Africa/Kampala', 'microgrid');
+       INSERT INTO public.operation_evidence
+         (operation_id, microgrid_id, org_id, attempt_key, schema_name, outcome, content, size)
+       VALUES ('${F.operation}', '${F.microgrid}', '${F.org}', gen_random_uuid(), 'site-day-evidence/1',
+               'refused', '{"synthetic": true}'::jsonb, 19);
+     END $$`,
+  );
+  if (!operation.ok) throw new Error(`[fixture] operations: ${operation.output}`);
 }
 
 beforeAll(async () => {
@@ -548,6 +562,8 @@ desc("a tenant reads nothing staff-only", () => {
     microgrid_savings_settings: `microgrid_id = '${F.microgrid}'`,
     microgrid_shared_devices: `microgrid_id = '${F.microgrid}'`,
     microgrids: `id = '${F.microgrid}'`,
+    operation_evidence: `operation_id = '${F.operation}'`,
+    operations: `id = '${F.operation}'`,
     organization_email_senders: `org_id = '${F.org}'`,
     organizations: `id = '${F.org}'`,
     payment_attempts: `line_item_id = '${F.lineItem}'`,

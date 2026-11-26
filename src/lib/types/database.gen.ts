@@ -809,6 +809,127 @@ export type Database = {
           },
         ]
       }
+      operation_evidence: {
+        Row: {
+          attempt_key: string
+          captured_at: string
+          captured_by: string | null
+          content: NonNullable<Json>
+          id: string
+          microgrid_id: string
+          operation_id: string
+          org_id: string
+          outcome: Database["public"]["Enums"]["operation_evidence_outcome"]
+          schema_name: string
+          size: number
+        }
+        ComputedFields: never
+        Insert: {
+          attempt_key: string
+          captured_at?: string
+          captured_by?: string | null
+          content: NonNullable<Json>
+          id?: string
+          microgrid_id: string
+          operation_id: string
+          org_id: string
+          outcome: Database["public"]["Enums"]["operation_evidence_outcome"]
+          schema_name: string
+          size: number
+        }
+        Update: {
+          attempt_key?: string
+          captured_at?: string
+          captured_by?: string | null
+          content?: NonNullable<Json>
+          id?: string
+          microgrid_id?: string
+          operation_id?: string
+          org_id?: string
+          outcome?: Database["public"]["Enums"]["operation_evidence_outcome"]
+          schema_name?: string
+          size?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operation_evidence_operation_fk"
+            columns: ["operation_id", "microgrid_id", "org_id"]
+            isOneToOne: false
+            referencedRelation: "operations"
+            referencedColumns: ["id", "microgrid_id", "org_id"]
+          },
+        ]
+      }
+      operations: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          ended_at: string | null
+          ended_by: string | null
+          failure_code:
+            Database["public"]["Enums"]["operation_failure_code"] | null
+          id: string
+          microgrid_id: string
+          org_id: string
+          result: Json | null
+          result_size: number | null
+          status: Database["public"]["Enums"]["operation_status"]
+          window_date: string
+          window_tz: string
+          window_zone: Database["public"]["Enums"]["operation_window_zone"]
+        }
+        ComputedFields: never
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          ended_at?: string | null
+          ended_by?: string | null
+          failure_code?:
+            Database["public"]["Enums"]["operation_failure_code"] | null
+          id?: string
+          microgrid_id: string
+          org_id: string
+          result?: Json | null
+          result_size?: number | null
+          status?: Database["public"]["Enums"]["operation_status"]
+          window_date: string
+          window_tz: string
+          window_zone: Database["public"]["Enums"]["operation_window_zone"]
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          ended_at?: string | null
+          ended_by?: string | null
+          failure_code?:
+            Database["public"]["Enums"]["operation_failure_code"] | null
+          id?: string
+          microgrid_id?: string
+          org_id?: string
+          result?: Json | null
+          result_size?: number | null
+          status?: Database["public"]["Enums"]["operation_status"]
+          window_date?: string
+          window_tz?: string
+          window_zone?: Database["public"]["Enums"]["operation_window_zone"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operations_microgrid_id_fkey"
+            columns: ["microgrid_id"]
+            isOneToOne: false
+            referencedRelation: "microgrids"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operations_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_email_senders: {
         Row: {
           created_at: string
@@ -1955,6 +2076,67 @@ export type Database = {
         Args: { p_community_id: string; p_year: number }
         Returns: number
       }
+      fn_operation_create: {
+        Args: {
+          _microgrid_id: string
+          _window_date: string
+          _window_tz: string
+          _window_zone: Database["public"]["Enums"]["operation_window_zone"]
+        }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          ended_at: string | null
+          ended_by: string | null
+          failure_code:
+            Database["public"]["Enums"]["operation_failure_code"] | null
+          id: string
+          microgrid_id: string
+          org_id: string
+          result: Json | null
+          result_size: number | null
+          status: Database["public"]["Enums"]["operation_status"]
+          window_date: string
+          window_tz: string
+          window_zone: Database["public"]["Enums"]["operation_window_zone"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "operations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      fn_operation_transition: {
+        Args: {
+          _failure_code?: Database["public"]["Enums"]["operation_failure_code"]
+          _operation_id: string
+          _to: Database["public"]["Enums"]["operation_status"]
+        }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          ended_at: string | null
+          ended_by: string | null
+          failure_code:
+            Database["public"]["Enums"]["operation_failure_code"] | null
+          id: string
+          microgrid_id: string
+          org_id: string
+          result: Json | null
+          result_size: number | null
+          status: Database["public"]["Enums"]["operation_status"]
+          window_date: string
+          window_tz: string
+          window_zone: Database["public"]["Enums"]["operation_window_zone"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "operations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       fn_organization_email_sender_password: {
         Args: {
           _host: string
@@ -2338,6 +2520,16 @@ export type Database = {
         | "ev_charger"
         | "other"
       microgrid_ems_type: "cloud_aws" | "direct_url"
+      operation_evidence_outcome: "read" | "refused"
+      operation_failure_code:
+        | "access_refused"
+        | "no_successful_read"
+        | "window_changed"
+        | "evidence_too_large"
+        | "evidence_budget_full"
+        | "expired"
+      operation_status: "running" | "completed" | "failed" | "cancelled"
+      operation_window_zone: "microgrid" | "fallback"
       payment_provider_type: "pesapal"
       role_scope_type: "org" | "microgrid" | "tenant"
       tenant_device_role:
@@ -2505,6 +2697,17 @@ export const Constants = {
         "other",
       ],
       microgrid_ems_type: ["cloud_aws", "direct_url"],
+      operation_evidence_outcome: ["read", "refused"],
+      operation_failure_code: [
+        "access_refused",
+        "no_successful_read",
+        "window_changed",
+        "evidence_too_large",
+        "evidence_budget_full",
+        "expired",
+      ],
+      operation_status: ["running", "completed", "failed", "cancelled"],
+      operation_window_zone: ["microgrid", "fallback"],
       payment_provider_type: ["pesapal"],
       role_scope_type: ["org", "microgrid", "tenant"],
       tenant_device_role: [

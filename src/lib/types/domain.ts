@@ -53,6 +53,15 @@ export type UserProfile = Database["public"]["Tables"]["user_profiles"]["Row"];
 export type MgmPlugin = Database["public"]["Tables"]["mgm_plugins"]["Row"];
 export type MgmPluginAuditLog =
   Database["public"]["Tables"]["mgm_plugin_audit_log"]["Row"];
+/**
+ * An investigation of one microgrid's finished day (migration 20261126120000;
+ * docs/investigation-evidence.md § 3). Written only by the fn_operation_*
+ * functions.
+ */
+export type Operation = Database["public"]["Tables"]["operations"]["Row"];
+/** One captured read of an operation's day: a site-day-evidence/1 snapshot. Immutable. */
+export type OperationEvidence =
+  Database["public"]["Tables"]["operation_evidence"]["Row"];
 
 /**
  * A row from the `fn_list_visible_users` RPC — the joined return shape over
@@ -91,6 +100,9 @@ export type MicrogridRecentActivityRow =
 /** Runtime tuple of all valid microgrid_ems_type enum values (Postgres enum order). */
 export const MICROGRID_EMS_TYPE_VALUES = Constants.public.Enums.microgrid_ems_type;
 
+/** Operation failure codes (Postgres enum order). Only ever added (investigation-evidence.md § 6). */
+export const OPERATION_FAILURE_CODE_VALUES = Constants.public.Enums.operation_failure_code;
+
 // ── Enums (literal-union types) ───────────────────────────────────────────────
 
 export type UserRole = Database["public"]["Enums"]["user_role"];
@@ -117,6 +129,14 @@ export type BillingLineItemPaymentStatus =
  *  `billing_line_item_reading_source` Postgres enum (migration 00029, BC1). */
 export type ReadingSource =
   Database["public"]["Enums"]["billing_line_item_reading_source"];
+
+export type OperationStatus = Database["public"]["Enums"]["operation_status"];
+export type OperationFailureCode =
+  Database["public"]["Enums"]["operation_failure_code"];
+export type OperationWindowZone =
+  Database["public"]["Enums"]["operation_window_zone"];
+export type OperationEvidenceOutcome =
+  Database["public"]["Enums"]["operation_evidence_outcome"];
 
 // ── Shared helper types ───────────────────────────────────────────────────────
 
