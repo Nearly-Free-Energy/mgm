@@ -55,6 +55,18 @@
 
 # Request middleware and the released-route allowlist it enforces.
 /src/middleware.ts                     @tushabe @arindahills @dismasfriday
+# The session resolver's other side (RFC #259 § 2, ADR-008 decision 6):
+# createClient, which builds a request's client on the bearer token
+# middleware accepted; the MGM_CLIENT_TOKENS switch and which values count as
+# on; the session cookie's name, which decides credentials_conflict; the
+# constant-time compare that checks the token's mark; and the session checks
+# every route runs (getCurrentUserAccess and the staff helpers). The rest of
+# the resolver is under /src/lib/runtime/ and /src/middleware.ts above.
+/src/lib/supabase/server.ts            @tushabe @arindahills @dismasfriday
+/src/lib/config/client-tokens.ts       @tushabe @arindahills @dismasfriday
+/src/lib/config/cookie-options.ts      @tushabe @arindahills @dismasfriday
+/src/lib/security/constant-time.ts     @tushabe @arindahills @dismasfriday
+/src/lib/auth/access.ts                @tushabe @arindahills @dismasfriday
 /src/lib/mgm/released-routes.ts        @tushabe @arindahills @dismasfriday
 # The content security policy middleware sets on every page.
 /src/lib/mgm/content-security-policy.ts @tushabe @arindahills @dismasfriday

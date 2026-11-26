@@ -29,6 +29,7 @@ import {
   type TestUser,
 } from "@/lib/supabase/__tests__/rls.helpers";
 import type { UserRoleRecord } from "@/lib/types/domain";
+import { BROWSER } from "@/lib/runtime/caller";
 
 const ORG = "e2781000-0000-4000-8000-000000000001";
 const OTHER_ORG = "e2781000-0000-4000-8000-000000000002";
@@ -70,6 +71,7 @@ function ctx() {
   const made = hostContext({ user: { id: manager.userId, email: EMAILS.manager } as User, roles }, new Headers({ "accept-language": "en-GB" }), {
     newClient: async () => manager.client,
     makeFmt: (locale) => createFmt({ locale }),
+    caller: BROWSER,
   });
   if (!made.ok) throw new Error("[actions.db] context refused");
   return made.ctx;
