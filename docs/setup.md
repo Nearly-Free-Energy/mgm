@@ -376,10 +376,17 @@ the version a project runs with `curl <supabase-url>/auth/v1/health -H
   `enabled = true`, `authorization_url_path = "/oauth/consent"`,
   `allow_dynamic_registration = false`). Supabase Auth sends the person to
   the consent page at `site_url` plus that path. The CLI's built-in signing
-  key is enough; no key setup is needed.
+  key is enough; no key setup is needed. The clients' return address is
+  `MGM_APP_URL` plus `/oauth/code` (the discovery answer gives the CLI that
+  address), and the consent page follows Supabase Auth only to the code page
+  of its own origin, so `MGM_APP_URL` must have `site_url`'s origin. Locally
+  that is `http://127.0.0.1:3000`, not the `http://localhost:3000` that
+  `./setup.sh` and `.env.local.example` write: to sign a client in locally,
+  set `MGM_APP_URL=http://127.0.0.1:3000` in `.env.local` and open MGM at
+  that address.
 - *Hosted:* leave the OAuth server off until the release you run includes
-  MGM's consent and code pages (#271), the resolver's check of client tokens
-  (#272) and the CLI. Before then no client can complete a sign-in, and a
+  MGM's consent and code pages (#271, released with the CLI), the
+  resolver's check of client tokens (#272) and the CLI. Before then no client can complete a sign-in, and a
   server that is on adds the turn-it-off-first step to every later change of
   the hook. Once they ship: in the dashboard's Authentication settings for
   the OAuth server, turn it on, set the authorization path to
@@ -394,22 +401,24 @@ the version a project runs with `curl <supabase-url>/auth/v1/health -H
 - *Docker mode:* the OAuth server stays off, so no client can sign in.
 
 If the access-token hook is not on, or the migrations up to
-`20261126090100` are not pushed, leave the OAuth server off.
+`20261126150000` are not pushed, leave the OAuth server off.
 
 **2. Register each client** with Supabase Auth's admin endpoint, as a
 public client: no secret, the grant types `authorization_code` and
-`refresh_token`, and one return address, MGM's sign-in code page,
-`/oauth/code`. #271 serves that page; if it ships at another path, register
-the clients again with that one. Return addresses must match exactly, port
-included. Locally:
+`refresh_token`, and one return address, MGM's sign-in code page:
+`MGM_APP_URL` plus `/oauth/code`, the address the discovery answer gives
+the CLI. Supabase Auth compares return addresses as exact strings, so
+`localhost` and `127.0.0.1` differ, and so do ports. Locally, with
+`MGM_APP_URL` set as in step 1:
 
 ```bash
 eval "$(supabase status -o env | grep '^SERVICE_ROLE_KEY=')"
+MGM_APP_URL=http://127.0.0.1:3000   # as in .env.local: site_url's origin
 curl -sS -X POST http://127.0.0.1:54321/auth/v1/admin/oauth/clients \
   -H "apikey: $SERVICE_ROLE_KEY" -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
   -H "Content-Type: application/json" \
   -d '{"client_name": "MGM CLI",
-       "redirect_uris": ["http://127.0.0.1:3000/oauth/code"],
+       "redirect_uris": ["'"$MGM_APP_URL"'/oauth/code"],
        "grant_types": ["authorization_code", "refresh_token"],
        "token_endpoint_auth_method": "none"}'
 ```
@@ -417,9 +426,8 @@ curl -sS -X POST http://127.0.0.1:54321/auth/v1/admin/oauth/clients \
 The answer's `client_id` is the client's id, and its `client_type` must be
 `public`. For a hosted project, send the same request to
 `https://<ref>.supabase.co/auth/v1/admin/oauth/clients` with the project's
-service-role key, and `MGM_APP_URL` in place of `http://127.0.0.1:3000`; or
-add the client in the dashboard as a public client with the same return
-address. For the assistant bridge, repeat with `"client_name": "MGM
+service-role key and `MGM_APP_URL` set to MGM's address; or add the client
+in the dashboard as a public client with the same return address. For the assistant bridge, repeat with `"client_name": "MGM
 assistant bridge"`.
 
 **3. List each client in MGM's table.** Locally with `supabase db query`,
@@ -436,7 +444,30 @@ VALUES ('<client_id>', 'agent', 'MGM assistant bridge');
 ```
 
 Only the service role and the database owner can write the table; no
-browser or client token reads or writes it through the database API.
+browser or client token reads or writes it through the database API. The
+label is the name MGM's consent page shows the person.
+
+**What the person sees** (#271). These pages and routes answer 404 until the
+release that ships the CLI lists them in `src/lib/mgm/released-routes.ts`.
+
+- `mgm login --url <MGM's address>` first asks `GET /api/auth/discovery`,
+  which needs no session and answers with the public Supabase URL and anon
+  key, Supabase Auth's authorize and token endpoints, the code page's
+  address (`MGM_APP_URL` plus `/oauth/code`) and the id and kind of each
+  client in `mgm_clients`.
+- Supabase Auth sends the browser to `/oauth/consent`, signing the person in
+  first if needed. The page names the client (its label), its kind and what
+  that kind may do, and warns that a program on the computer that ran the
+  command will act as them. It asks Supabase Auth nothing until the person
+  clicks Connect, even for a client they approved before, which Supabase
+  Auth would approve on its first look. Connect records the approval through
+  `POST /api/auth/oauth/approvals`, which refuses a bearer token and a
+  cross-site request and checks the cookie session with Supabase Auth before
+  it writes one record for that sign-in (`mgm_client_approvals.authorization_id`);
+  only then does the page ask Supabase Auth for the code. Don't connect asks
+  nothing, and the sign-in expires on its own.
+- Supabase Auth then sends the browser to `/oauth/code`, which shows one
+  string, `<state>.<code>`, to paste into the terminal that asked for it.
 
 **Removing a client.** `DELETE FROM public.mgm_clients WHERE client_id =
 '<id>';` refuses its next sign-in and its next refresh. It ends no session:
@@ -512,7 +543,11 @@ day always give the same samples. Each day follows one of five scenarios:
 a clear day, an evening power cut, a long cut in which the battery reaches
 its floor and the houses go dark, a battery at its floor before dawn, and a
 45-minute gateway gap. Time bins follow the microgrid's time zone, so a day
-with a daylight-saving change has 23 or 25 hours of bins.
+with a daylight-saving change has 23 or 25 hours of bins. A few days of the
+investigation cases' own microgrids are pinned with masks on top of their
+scenario, such as a silent meter or a refused read
+(`src/lib/metering/fixture/pinned-days.ts`, docs/investigation-cases.md §1);
+no other microgrid has a pinned day.
 
 It also generates each meter's energy per local day and hour for the
 tenant app's usage views (`src/lib/metering/fixture/meter-energy.ts`), from
@@ -711,6 +746,17 @@ one of its days, checks that
 neither scrolls sideways and that every link and button in `main` is at
 least 44 × 44 px, and follows the links from the month to a day, to the
 day before and back up to the month.
+
+`e2e/oauth.spec.ts` signs a client in through the consent and code pages
+(#271), once as the organization manager and once as the tenant: it
+registers a client of its own with Supabase Auth, whose return address is
+the code page on port 3100, lists it in `mgm_clients`, answers Connect,
+exchanges the string the code page shows for a token, opens a second
+sign-in and answers Don't connect, and opens an unknown sign-in and the
+code page with no code, checking each at 360 px. Connect's record is the
+one write it allows. It is skipped until `src/lib/mgm/released-routes.ts`
+lists `/oauth/consent`, `/oauth/code` and `/api/auth/oauth/approvals`, and
+runs from the release that does.
 
 ```bash
 npx playwright install chromium        # once

@@ -680,6 +680,8 @@ describe.skipIf(skip)("access-token hook: clients that are not a browser (#270)"
         read("mgm_client_approvals", "client_id", true),
         read("mgm_client_approvals", "created_at", true),
         read("mgm_client_approvals", "used_at", true, true),
+        // Added by 20261126150000 for the consent page; the hook does not read it.
+        read("mgm_client_approvals", "authorization_id", false),
         read("mgm_clients", "client_id", true),
         read("mgm_clients", "kind", true),
         read("mgm_clients", "label", false),

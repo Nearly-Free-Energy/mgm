@@ -4,9 +4,11 @@ import { defineConfig, type PlaywrightTestOptions } from "@playwright/test";
 // a tenant record's app access, a community's invoice branding page (logo
 // and PDF preview), a billing period's close checklist with its confirmation
 // step, its send queue and a bill's payments on a 360 px touch screen, as an
-// organization manager; and a tenant's sign-in and their usage month and day
-// on a synthetic meter. Against the production build (`npm run build` first)
-// and a local Supabase. docs/setup.md, "Browser smoke test".
+// organization manager; a tenant's sign-in and their usage month and day
+// on a synthetic meter; and, once released, a client sign-in through the
+// consent and code pages as each of them. Against the production build
+// (`npm run build` first) and a local Supabase. docs/setup.md, "Browser
+// smoke test".
 // Chromium only; CI installs it in its own step.
 const PORT = 3100;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
@@ -44,11 +46,12 @@ export default defineConfig({
       use: { ...phone, storageState: "e2e/.auth/manager.json" },
     },
     // The tenant signs in with the rows the setup project created, and the
-    // setup project's teardown runs after this one too.
+    // setup project's teardown runs after this one too. oauth.spec.ts runs
+    // in both projects: a client sign-in as the manager and as the tenant.
     { name: "tenant-setup", testMatch: /tenant\.setup\.ts/, dependencies: ["setup"], use: phone },
     {
       name: "tenant",
-      testMatch: /tenant\.spec\.ts/,
+      testMatch: /(tenant|oauth)\.spec\.ts/,
       dependencies: ["setup", "tenant-setup"],
       use: { ...phone, storageState: "e2e/.auth/tenant.json" },
     },
