@@ -437,8 +437,10 @@ says so.
   period, line item and payment attempt) or of a plugin kind whose plugin
   is unknown or refused; an href that leaves the origin, names no view or
   catalog page, has a segment of a refused kind, carries a search
-  parameter its view does not declare, or is the API route of a refused
-  plugin; and a link's share or download. A listed view that emits one is
+  parameter its view does not declare or a fragment, or is any API route
+  (an assistant is given no action or download, and an API path can name
+  a tenant or device whatever plugin owns it); and a link's share or
+  download. A listed view that emits one is
   refused whole, as a review failure. `ext.data` is not read by name:
   the list's review and its pin cover it (decision 8).
 - That goes beyond decision 7's tenant, billing-period and payment

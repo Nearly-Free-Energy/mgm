@@ -19,12 +19,15 @@ import "server-only";
  *   out of every staff view;
  * - an href (HREF_KEYS in ./parse.ts: `href`, `link`, `next`) that is not a
  *   same-origin path, so every OutHref (wa.me, tel:, sms:), which is
- *   contact detail; an /api path the catalog gives to no plugin or to one
- *   ASSISTANT_READING refuses; a page path that names no contributed view and
- *   no catalog page; a page path with a segment of a refused kind; and a page
- *   path with a search parameter other than its view's declared `query`
- *   names and `org` (a catalog page that no view serves takes none), since
- *   a parameter such as `?tenant=` names a record the path does not;
+ *   contact detail; every /api path, since an assistant is given no action
+ *   and no download and an API path can name a tenant or device in a
+ *   segment whatever plugin owns it (`/api/tenants/<id>`); a page path that
+ *   names no contributed view and no catalog page; a page path with a
+ *   segment of a refused kind; a page path with a search parameter other
+ *   than its view's declared `query` names and `org` (a catalog page that
+ *   no view serves takes none), since a parameter such as `?tenant=` names
+ *   a record the path does not; and a page path with a fragment, which can
+ *   name one too;
  * - a LinkRef's `share` or `download`, which carry free text.
  *
  * Not covered: `ext.data`, whose fields only the view's own schema names
@@ -37,7 +40,7 @@ import "server-only";
  * name. If a model shape gains one there, or ASSISTANT_REFUSED_KINDS or
  * ASSISTANT_READING changes, revisit this rule.
  */
-import { CORE_ENTITY_KINDS, getPluginByAlias, getRouteOwner, matchCatalogPage } from "@/lib/plugins/bundled";
+import { CORE_ENTITY_KINDS, getPluginByAlias, matchCatalogPage } from "@/lib/plugins/bundled";
 import { isSameOriginPath } from "../shared/href";
 import { ASSISTANT_READING, ASSISTANT_REFUSED_KINDS } from "./contribution-schema";
 import { matchView } from "./match-view";
@@ -73,10 +76,10 @@ export function hrefRefusal(href: string, views: readonly RegisteredView[]): str
   const url = new URL(href, "https://host.invalid");
   const path = url.pathname;
   const names = [...new Set(url.searchParams.keys())];
-  if (path === "/api" || path.startsWith("/api/")) {
-    const owner = getRouteOwner(path);
-    return owner !== undefined && ASSISTANT_READING[owner.name] === "per view" ? null : "api route";
-  }
+  if (path === "/api" || path.startsWith("/api/")) return "api route";
+  // isSameOriginPath allows a fragment; `#` is never part of a path, so any
+  // `#` starts one (an empty one too, which url.hash reads as "").
+  if (href.includes("#")) return "fragment";
   const view = matchView(views, path);
   if (view) {
     for (const kind of Object.values(view.view.def.params)) if (refusedKind(kind)) return kind;
