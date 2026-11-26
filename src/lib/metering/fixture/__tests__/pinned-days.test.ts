@@ -136,7 +136,7 @@ describe("the table", () => {
     for (const { key, microgridId, date } of ENTRIES) {
       expect(siteScenario(SITE_FIXTURE_SEED, microgridId, date), key).toBe("clear");
     }
-    // Every pending case's day is pinned, on the case's own microgrid.
+    // Every case on microgrids 0b to 14 (C15 to C24) has its day pinned, on its own microgrid.
     for (const c of CASES.filter((x) => PINNABLE.includes(x.microgrid))) {
       expect(PINNED_DAYS[pinnedDayKey(caseMicrogridId(c.microgrid), c.date)], c.id).toBeDefined();
     }
