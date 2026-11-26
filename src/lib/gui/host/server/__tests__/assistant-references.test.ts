@@ -75,21 +75,29 @@ describe("the positions the rule reads", () => {
     innerType?: z.ZodType;
     valueType?: z.ZodType;
     getter?: () => z.ZodType;
+    values?: unknown[];
   };
   const defOf = (s: z.ZodType) => s._zod.def as unknown as Def;
   const LEAVES = new Set(["string", "number", "boolean", "literal", "enum", "template_literal", "null", "int"]);
-  const REF_PROPS = new Set(["entity", "related", "ref"]);
+
+  /** Whether an object schema is the Value with `t: "ref"`, the only object whose `ref` the rule reads. */
+  const isRefValue = (shape: Record<string, z.ZodType>) => {
+    const t = shape.t === undefined ? undefined : defOf(shape.t);
+    return t?.type === "literal" && t.values!.length === 1 && t.values![0] === "ref";
+  };
 
   /** Every EntityRef and href position in a schema, checked against the names the rule reads them by. */
   function audit(schema: z.ZodType) {
     const problems: string[] = [];
     const found = { refs: 0, hrefs: 0 };
-    const seen = new Set<z.ZodType>();
-    // `prop` is the nearest property holding this schema; `direct` is false once an array or record intervenes.
-    const visit = (s: z.ZodType, prop: string, direct: boolean, at: string): void => {
+    const seen = new Set<string>();
+    const ids = new Map<z.ZodType, number>();
+    // `prop` is the nearest property holding this schema; `direct` is false once an array or record intervenes;
+    // `onRefValue` is whether that property is `ref` on the `t: "ref"` Value.
+    const visit = (s: z.ZodType, prop: string, direct: boolean, onRefValue: boolean, at: string): void => {
       if (s === entityRefSchema) {
         found.refs++;
-        const fits = prop === "related" ? !direct : direct && REF_PROPS.has(prop);
+        const fits = prop === "related" ? !direct : direct && (prop === "entity" || (prop === "ref" && onRefValue));
         if (!fits) problems.push(`${at}: an EntityRef the rule would not read`);
       }
       if (s === hrefSchema || s === outHrefSchema) {
@@ -97,38 +105,42 @@ describe("the positions the rule reads", () => {
         if (!direct || !HREF_KEYS.has(prop)) problems.push(`${at}: an href the rule would not read`);
         return;
       }
-      if (seen.has(s)) return;
-      seen.add(s);
+      // A schema is visited once per position the rule could read it in, not once in all.
+      if (!ids.has(s)) ids.set(s, ids.size);
+      const state = `${ids.get(s)}:${prop}:${direct}:${onRefValue}`;
+      if (seen.has(state)) return;
+      seen.add(state);
       const d = defOf(s);
       switch (d.type) {
         case "object": {
           const keys = Object.keys(d.shape!);
           if (s !== entityRefSchema && ["kind", "id", "label"].every((k) => keys.includes(k)))
             problems.push(`${at}: a copy of EntityRef the rule would not recognise`);
+          const refValue = isRefValue(d.shape!);
           for (const [key, child] of Object.entries(d.shape!)) {
             if (DATA_KEYS.has(key)) continue;
-            visit(child, key, true, `${at}.${key}`);
+            visit(child, key, true, key === "ref" && refValue, `${at}.${key}`);
           }
           return;
         }
         case "optional":
         case "nullable":
-          return visit(d.innerType!, prop, direct, at);
+          return visit(d.innerType!, prop, direct, onRefValue, at);
         case "lazy":
-          return visit(d.getter!(), prop, direct, at);
+          return visit(d.getter!(), prop, direct, onRefValue, at);
         case "union":
-          return d.options!.forEach((o) => visit(o, prop, direct, at));
+          return d.options!.forEach((o) => visit(o, prop, direct, onRefValue, at));
         case "array":
-          return visit(d.element!, prop, false, `${at}[]`);
+          return visit(d.element!, prop, false, false, `${at}[]`);
         case "tuple":
-          return [...d.items!, ...(d.rest ? [d.rest] : [])].forEach((i) => visit(i, prop, false, `${at}[]`));
+          return [...d.items!, ...(d.rest ? [d.rest] : [])].forEach((i) => visit(i, prop, false, false, `${at}[]`));
         case "record":
-          return visit(d.valueType!, prop, false, `${at}.*`);
+          return visit(d.valueType!, prop, false, false, `${at}.*`);
         default:
           if (!LEAVES.has(d.type)) problems.push(`${at}: a ${d.type} the audit does not know`);
       }
     };
-    visit(schema, "", true, "(value)");
+    visit(schema, "", true, false, "(value)");
     return { problems, found };
   }
 
@@ -142,6 +154,19 @@ describe("the positions the rule reads", () => {
     expect(problems).toEqual([]);
     expect(found.refs).toBeGreaterThan(0);
     expect(found.hrefs).toBeGreaterThan(0);
+  });
+
+  it("reports an EntityRef under `ref` on anything but the `t: \"ref\"` Value, and one in a position it does not read", () => {
+    const at = (schema: z.ZodType) => audit(schema).problems;
+    expect(at(z.strictObject({ t: z.literal("ref"), ref: entityRefSchema }))).toEqual([]);
+    expect(at(z.strictObject({ type: z.literal("entity"), ref: entityRefSchema }))).toEqual(["(value).ref: an EntityRef the rule would not read"]);
+    expect(at(z.strictObject({ t: z.literal("text"), ref: entityRefSchema }))).toEqual(["(value).ref: an EntityRef the rule would not read"]);
+    expect(at(z.strictObject({ t: z.literal("ref"), body: z.strictObject({ ref: entityRefSchema }) }))).toEqual(["(value).body.ref: an EntityRef the rule would not read"]);
+    expect(at(z.strictObject({ owner: entityRefSchema }))).toEqual(["(value).owner: an EntityRef the rule would not read"]);
+    expect(at(z.strictObject({ entity: z.array(entityRefSchema) }))).toEqual(["(value).entity[]: an EntityRef the rule would not read"]);
+    // And the rule agrees: it reads the first, and lets the second through.
+    expect(refused({ t: "ref", text: "x", ref: ref("tenant") })).toEqual({ path: "ref", kind: "tenant" });
+    expect(refused({ type: "entity", ref: ref("tenant") })).toBeNull();
   });
 
   it("finds LinkRef's share and download only on a LinkRef", () => {

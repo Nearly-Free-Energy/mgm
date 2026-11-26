@@ -27,7 +27,9 @@ import "server-only";
  *   than its view's declared `query` names and `org` (a catalog page that
  *   no view serves takes none), since a parameter such as `?tenant=` names
  *   a record the path does not; and a page path with a fragment, which can
- *   name one too;
+ *   name one too. A declared parameter is allowed whatever record it
+ *   names, so this holds only while no view's `query` names a refused
+ *   record (see the revisit condition below);
  * - a LinkRef's `share` or `download`, which carry free text.
  *
  * Not covered: `ext.data`, whose fields only the view's own schema names
@@ -37,8 +39,11 @@ import "server-only";
  * The positions are found by property name, as parse.ts finds hrefs, and
  * assistant-references.test.ts walks the model and signal schemas
  * (./model-schema.ts) and fails if an EntityRef or href sits under another
- * name. If a model shape gains one there, or ASSISTANT_REFUSED_KINDS or
- * ASSISTANT_READING changes, revisit this rule.
+ * name, or an EntityRef under `ref` on anything but the `t: "ref"` Value.
+ * If a model shape gains one there, ASSISTANT_REFUSED_KINDS or
+ * ASSISTANT_READING changes, or a view whose segments are all allowed
+ * declares a `query` parameter naming a tenant, device, billing or payment
+ * record, revisit this rule.
  */
 import { CORE_ENTITY_KINDS, getPluginByAlias, matchCatalogPage } from "@/lib/plugins/bundled";
 import { isSameOriginPath } from "../shared/href";
