@@ -255,7 +255,8 @@ read a stored credential, or to send data to another origin.
      (`src/lib/gui/host/client/signals-feed.ts`): again every five minutes
      while the page is visible, on focus or coming back into view when the
      last fetch is two minutes old, on coming back online after a fetch
-     that failed, and after an action whose route answers
+     that failed (once shown, if the page is hidden then; a failure of
+     that fetch is not counted), and after an action whose route answers
      `signals: true`. A view that takes signals carries them in its model
      (`signals`), and the shell takes those instead of fetching again.
      `useSignals()` returns them, and the installed app's badge shows their

@@ -32,10 +32,13 @@
  *   badge: there is nothing of theirs to count.
  * - Anything else (503, 500, a network error, a body that is not signals)
  *   keeps what was shown, signals and badge, and doubles the wait before
- *   the next fetch, up to SIGNALS_MAX_BACKOFF_MS, until one answers. The
- *   browser's `online` event fetches at once while the page is visible, so a
+ *   the next fetch, up to SIGNALS_MAX_BACKOFF_MS, until one answers. After
+ *   such a failure the browser's `online` event fetches at once, or, while
+ *   the page is hidden, as soon as it comes back into view or focus, so a
  *   page that lost its network does not wait out the backoff once it is
- *   back.
+ *   back. `online` often fires before the connection works, so a failure
+ *   of that fetch is not counted and leaves the fetch already due as it
+ *   was.
  * - Once this page has signed the person out (markSignedOut), nothing is
  *   fetched and no answer is applied.
  * Nothing here throws or blocks rendering.
@@ -46,7 +49,7 @@ import { clearAppBadge, isSignedOut, setAppBadge } from "./app-badge";
 
 /** How often the signals are fetched again while the page is visible. Every fetch runs every watcher. */
 export const SIGNALS_REFRESH_MS = 5 * 60_000;
-/** Coming back into view or focus fetches again only when the last fetch is at least this old (decided on #287). */
+/** Coming back into view or focus fetches again only when the last fetch is at least this old: #287 proposed 2 to 5 minutes, and #332 chose two. */
 export const SIGNALS_MIN_GAP_MS = 2 * 60_000;
 /** The longest wait between fetches after repeated failures. */
 export const SIGNALS_MAX_BACKOFF_MS = 30 * 60_000;
@@ -182,6 +185,8 @@ export function useSignalsFeed(organization: string | null, fetch: Fetch): Signa
     let controller: AbortController | null = null;
     let last = 0;
     let failures = 0;
+    /** `online` fired while hidden after a failed fetch: the next view or focus fetches at once. */
+    let backOnline = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     /** The wait before the next fetch: doubled for each failure in a row, capped. */
     const wait = (base: number) => Math.min(base * 2 ** failures, SIGNALS_MAX_BACKOFF_MS);
@@ -200,18 +205,29 @@ export function useSignalsFeed(organization: string | null, fetch: Fetch): Signa
       if (!signals) clearAppBadge();
       else if (!nothingChecked(signals)) setAppBadge(badgeCount(signals));
     };
-    const load = () => {
+    /**
+     * Fetches now. A `probe` (on coming back online) leaves the fetch already
+     * due, and the time of the last fetch, as they were until it answers,
+     * and its failure is not counted.
+     */
+    const load = (o: { probe?: boolean } = {}) => {
       if (stopped || isSignedOut()) return;
+      backOnline = false;
       controller?.abort();
       const own = (controller = typeof AbortController === "undefined" ? null : new AbortController());
-      last = Date.now();
-      schedule();
+      const sent = Date.now();
+      if (!o.probe) {
+        last = sent;
+        schedule();
+      }
       void fetchSignals(fetchRef.current, organization, own?.signal).then((answer) => {
         if (!alive || controller !== own || isSignedOut()) return;
         if (answer.kind === "keep") {
+          if (o.probe) return;
           failures += 1;
           return schedule();
         }
+        last = sent;
         // Every source late (a slow database, say) backs off like a failed fetch.
         failures = answer.kind === "signals" && nothingChecked(answer.signals) ? failures + 1 : 0;
         if (answer.kind === "signed-out") stopped = true;
@@ -230,11 +246,16 @@ export function useSignalsFeed(organization: string | null, fetch: Fetch): Signa
       show(signals);
     };
     const ifStale = () => {
-      if (visible() && Date.now() - last >= wait(SIGNALS_MIN_GAP_MS)) load();
+      if (!visible()) return;
+      if (backOnline) load({ probe: true });
+      else if (Date.now() - last >= wait(SIGNALS_MIN_GAP_MS)) load();
     };
-    // Back online after a fetch that failed: fetch now rather than wait out the backoff.
+    // Back online after a fetch that failed: fetch now, or once the page is
+    // shown, rather than wait out the backoff.
     const onOnline = () => {
-      if (failures > 0 && visible()) load();
+      if (failures === 0) return;
+      if (visible()) load({ probe: true });
+      else backOnline = true;
     };
     feedRef.current = { load, seed };
     // The first fetch waits for the page's load event, then a turn more, so

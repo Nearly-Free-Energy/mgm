@@ -265,12 +265,6 @@ describe("useSignalsFeed", () => {
     await settle();
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(badge.set.mock.calls).toEqual([[4]]);
-    // Hidden, it waits for the page to come into view.
-    act(() => setVisibility("hidden"));
-    act(() => void window.dispatchEvent(new Event("online")));
-    await settle();
-    expect(fetch).toHaveBeenCalledTimes(2);
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
     act(() => void window.dispatchEvent(new Event("online")));
     await settle();
     expect(fetch).toHaveBeenCalledTimes(3);
@@ -279,6 +273,45 @@ describe("useSignalsFeed", () => {
     act(() => void window.dispatchEvent(new Event("online")));
     await settle();
     expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("remembers coming back online while hidden, and fetches as soon as the page is shown", async () => {
+    const fetch = fetchOf({ body: signals(4) }, { fail: true }, { body: signals(2) });
+    render(<Probe org={ORG} fetch={fetch} />);
+    await settle();
+    act(() => feed().refresh());
+    await settle();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    act(() => setVisibility("hidden"));
+    act(() => void window.dispatchEvent(new Event("online")));
+    await advance(60_000);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    // Shown as a browser shows it: visibilitychange, then focus, and no second online.
+    act(() => setVisibility("visible"));
+    act(() => void window.dispatchEvent(new Event("focus")));
+    await settle();
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(badge.set).toHaveBeenLastCalledWith(2);
+  });
+
+  it("does not count a failure of the fetch coming back online starts, and keeps the fetch already due", async () => {
+    const MINUTE = 60_000;
+    const fetch = fetchOf({ body: signals(4) }, { fail: true }, { fail: true }, { body: signals(2) });
+    render(<Probe org={ORG} fetch={fetch} />);
+    await settle();
+    // One failure: the next fetch is due in ten minutes.
+    act(() => feed().refresh());
+    await settle();
+    await advance(MINUTE);
+    act(() => void window.dispatchEvent(new Event("online")));
+    await settle();
+    expect(fetch).toHaveBeenCalledTimes(3);
+    // Still due ten minutes after the first failure, not twenty after this one.
+    await advance(9 * MINUTE - 1);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    await advance(1);
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(badge.set).toHaveBeenLastCalledWith(2);
   });
 
   it("keeps the badge as it was, and backs off, when no source answered", async () => {
