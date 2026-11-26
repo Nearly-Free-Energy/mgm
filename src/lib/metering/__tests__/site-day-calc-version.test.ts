@@ -44,7 +44,7 @@ import type { SiteSamples, SiteSamplesRequest } from "../types";
  * bumped; never edit an existing one.
  */
 const CALC_DIGESTS: Readonly<Record<number, string>> = {
-  1: "8ff71b4cb9273a73c908f14796dcfbf043b82456bc08fdcb036312903b36abca",
+  1: "f91e5d6f067a105c637091d651404ef1b95262e5c0b3efc6bbb36ce995fadf38",
 };
 
 /** The thresholds of each version, so a changed threshold fails with a clearer message. */
@@ -274,6 +274,49 @@ function randomBuilderInput(seed: number) {
   });
 }
 
+/**
+ * Fixed days the random ones may miss: a battery-less and a grid-less day
+ * without a gap (rule Z stores no range item and the summary as computed),
+ * a day whose grid meter gives no voltage at all (no known cut, so no
+ * `cutMin`), and voltages exactly at GRID_PRESENT_MIN_V, carried in and
+ * within the day, before a gap.
+ */
+function fixedBuilderInputs() {
+  const date = "2026-11-10";
+  const zone: SiteDayZone = { tz: "Africa/Kampala", zone: "microgrid" };
+  const dayStart = startOfDayInZone(date, zone.tz).getTime();
+  const nowMs = dayStart + 26 * 60 * MINUTE;
+  type Bin = { v: number | null; soc: number | null } | null;
+  const day = (available: Available, bin: (pos: number) => Bin) => {
+    const samples: SiteSamples = {
+      timestamps: [], batterySocPct: [], batteryPowerW: [], gridPowerW: [], gridVoltageV: [], loadPowerW: [],
+      pvPowerW: [], houseEnergyWh: {},
+    };
+    for (let pos = -3; pos < 288; pos++) {
+      const row = bin(pos);
+      if (row === null) continue;
+      samples.timestamps.push(dayStart + pos * BIN_MS);
+      samples.batterySocPct.push(available.battery ? row.soc : null);
+      samples.batteryPowerW.push(available.battery ? 100 : null);
+      samples.gridPowerW.push(available.grid ? 250 : null);
+      samples.gridVoltageV.push(available.grid ? row.v : null);
+      samples.loadPowerW.push(available.load ? 300 : null);
+      samples.pvPowerW.push(null);
+    }
+    return builderSnapshot({ date, zone, samples, available, meters: [], unreadable: [], nowMs });
+  };
+  const full = { battery: true, grid: true, load: true, pv: false };
+  return [
+    day({ ...full, battery: false }, () => ({ v: 230, soc: null })),
+    day({ ...full, grid: false }, () => ({ v: null, soc: 60 })),
+    day(full, () => ({ v: null, soc: 60 })),
+    // Carried in at 170 V, then a gap at the start of the day; 170 V again before a gap at 150–169.
+    day(full, (pos) =>
+      pos >= 0 && pos < 12 ? null : pos >= 150 && pos < 170 ? null : { v: pos === -1 || pos === 149 ? 170 : 230, soc: 60 }
+    ),
+  ];
+}
+
 // ---------------------------------------------------------------------------
 // The capture part
 // ---------------------------------------------------------------------------
@@ -448,6 +491,10 @@ describe("SITE_DAY_CALC_VERSION", () => {
       views.push(calculatedView(s, false));
       note(s);
     }
+    for (const s of fixedBuilderInputs()) {
+      views.push(calculatedView(s, false));
+      note(s);
+    }
     for (let i = 0; i < CAPTURE_DAYS; i++) {
       const s = await captureSnapshot(i);
       views.push(calculatedView(s, true));
@@ -466,4 +513,19 @@ describe("SITE_DAY_CALC_VERSION", () => {
     const digest = createHash("sha256").update(JSON.stringify(views)).digest("hex");
     expect(digest, FAILURE).toBe(CALC_DIGESTS[SITE_DAY_CALC_VERSION]);
   }, 240_000);
+
+  // What the fixed days cover under version 1. A bump that changes one of
+  // these figures on purpose changes this test with it.
+  it("has fixed days that are what they say", () => {
+    const [noBattery, noGrid, noVolts, atThreshold] = fixedBuilderInputs().map(
+      (s) => s.items as Record<string, ({ c: string } & Record<string, unknown>) | undefined>
+    );
+    for (const items of [noBattery, noGrid]) {
+      for (const key of ["dark_cut", "dark_lowbat", "dark_after_lowbat", "no_data"]) expect(items[key], key).toBeUndefined();
+      expect(items.summary?.knownMin).toBe(1440);
+    }
+    expect(noVolts.summary?.cutMin).toBeNull();
+    expect(atThreshold.dark_cut).toBeUndefined();
+    expect(atThreshold.no_data).toMatchObject({ c: "calculated", ranges: [[0, 60], [750, 850]] });
+  });
 });
