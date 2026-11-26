@@ -584,6 +584,61 @@ export type Database = {
           },
         ]
       }
+      mgm_client_approvals: {
+        Row: {
+          client_id: string
+          created_at: string
+          id: string
+          used_at: string | null
+          user_id: string
+        }
+        ComputedFields: never
+        Insert: {
+          client_id: string
+          created_at?: string
+          id?: string
+          used_at?: string | null
+          user_id: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          id?: string
+          used_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mgm_client_approvals_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "mgm_clients"
+            referencedColumns: ["client_id"]
+          },
+        ]
+      }
+      mgm_clients: {
+        Row: {
+          client_id: string
+          created_at: string
+          kind: string
+          label: string
+        }
+        ComputedFields: never
+        Insert: {
+          client_id: string
+          created_at?: string
+          kind: string
+          label: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          kind?: string
+          label?: string
+        }
+        Relationships: []
+      }
       mgm_plugin_audit_log: {
         Row: {
           action: string
