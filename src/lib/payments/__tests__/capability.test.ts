@@ -281,7 +281,15 @@ describe("PaymentsCapability verified payment regressions", () => {
     expect((await cap.reconcile(ATTEMPT, { action: "record_external", externalReference: "receipt" })).ok).toBe(false);
     expect(reconcile).not.toHaveBeenCalled();
     expect((await cap.reconcile(ATTEMPT, { action: "record_external", externalAmount: -500, externalReference: "refund", notes: "Completed externally", confirmation: { acknowledged: [], typed: "Aaron NFE" } })).ok).toBe(true);
-    expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({ externalAmount: -500, actorUserId: "user-1" }));
+    expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({ externalAmount: -500, actorUserId: "user-1", actorClientId: null }));
+  });
+  it("passes the client the person acts through to the reconcile write, for its payment event", async () => {
+    const clientId = "55555555-5555-4555-8555-555555555555";
+    const repo = baseRepo({ getAttempt: async () => attempt("needs_reconciliation") });
+    const reconcile = vi.spyOn(repo, "reconcileAttempt");
+    const cap = new PaymentsCapability(repo, { ...scope(), clientId }, providers(), () => true, p => p);
+    expect((await cap.reconcile(ATTEMPT, { action: "accept_exact" })).ok).toBe(true);
+    expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({ action: "accept_exact", actorUserId: "user-1", actorClientId: clientId }));
   });
 });
 

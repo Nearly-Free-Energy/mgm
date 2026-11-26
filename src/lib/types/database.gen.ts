@@ -61,6 +61,7 @@ export type Database = {
       }
       billing_audit_log: {
         Row: {
+          actor_client_id: string | null
           actor_kind: string
           actor_ref: string | null
           actor_user_id: string | null
@@ -74,6 +75,7 @@ export type Database = {
         }
         ComputedFields: never
         Insert: {
+          actor_client_id?: string | null
           actor_kind?: string
           actor_ref?: string | null
           actor_user_id?: string | null
@@ -86,6 +88,7 @@ export type Database = {
           org_id?: string | null
         }
         Update: {
+          actor_client_id?: string | null
           actor_kind?: string
           actor_ref?: string | null
           actor_user_id?: string | null
@@ -645,6 +648,7 @@ export type Database = {
       mgm_plugin_audit_log: {
         Row: {
           action: string
+          actor_client_id: string | null
           actor_user_id: string | null
           created_at: string
           id: string
@@ -656,6 +660,7 @@ export type Database = {
         ComputedFields: never
         Insert: {
           action: string
+          actor_client_id?: string | null
           actor_user_id?: string | null
           created_at?: string
           id?: string
@@ -666,6 +671,7 @@ export type Database = {
         }
         Update: {
           action?: string
+          actor_client_id?: string | null
           actor_user_id?: string | null
           created_at?: string
           id?: string
@@ -1071,6 +1077,7 @@ export type Database = {
       }
       payment_events: {
         Row: {
+          actor_client_id: string | null
           actor_kind: string
           actor_ref: string | null
           actor_user_id: string | null
@@ -1086,6 +1093,7 @@ export type Database = {
         }
         ComputedFields: never
         Insert: {
+          actor_client_id?: string | null
           actor_kind?: string
           actor_ref?: string | null
           actor_user_id?: string | null
@@ -1100,6 +1108,7 @@ export type Database = {
           to_status: Database["public"]["Enums"]["billing_line_item_payment_status"]
         }
         Update: {
+          actor_client_id?: string | null
           actor_kind?: string
           actor_ref?: string | null
           actor_user_id?: string | null
@@ -2095,6 +2104,7 @@ export type Database = {
         Args: {
           _action: string
           _actor: string
+          _actor_client_id?: string
           _attempt_id: string
           _external_amount: number
           _notes: string

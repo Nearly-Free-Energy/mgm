@@ -328,7 +328,11 @@ matches. Every other request gets the cookie client as before. Nothing else buil
 The client records who it acts for (`recordCaller`; `callerOf` reads it,
 and reads any client `createClient` did not make as a browser session).
 `openOrganizationScope` puts it on `mgmRequest.caller`, read from the
-client, never from the composer. The GUI host's routes open their request
+client, never from the composer. Audit rows record the client's id
+(`actor_client_id`): the database reads it from the token itself, and a
+write the service role makes for the person passes
+`clientIdOf(mgmRequest.caller)` (`docs/entity-model.md`, "Audit rows and the
+client"). The GUI host's routes open their request
 with `openHostRequest` (`src/lib/gui/host/server/http.ts`), which puts it
 on the host context (`HostContext.caller`) and refuses an agent client
 (`403 gui_agent_refused`) on every route but the two that opt in. There an

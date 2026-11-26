@@ -884,6 +884,7 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
       externalReference: externalReference || null,
       notes: notes || null,
       actorUserId: this.scope.userId,
+      actorClientId: this.scope.clientId,
     });
     if (error) return reconcileRefusal(error);
     const refreshed = (await this.repo.getAttempt(attemptId)) ?? attempt;

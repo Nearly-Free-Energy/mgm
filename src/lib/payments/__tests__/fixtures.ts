@@ -18,7 +18,7 @@ export const LINE_ITEM = "33333333-3333-3333-3333-333333333333";
 export const ATTEMPT = "44444444-4444-4444-4444-444444444444";
 
 export function scope(): PaymentsScope {
-  return { organizationId: ORG, userId: "user-1", roles: [] };
+  return { organizationId: ORG, userId: "user-1", roles: [], clientId: null };
 }
 
 export function baseRepo(overrides: Partial<PaymentsRepository> = {}): PaymentsRepository {
