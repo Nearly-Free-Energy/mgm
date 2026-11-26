@@ -45,6 +45,8 @@ import {
   agentClaims,
   browserClaims,
   operatorClaims,
+  jwksAnswer,
+  signedToken,
   tokenWith,
 } from "@/lib/runtime/__tests__/token-fixtures";
 
@@ -1228,6 +1230,10 @@ describe("middleware for a bearer token (RFC #259 § 2)", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        // The project's published keys, which verifyBearer checks the
+        // token's signature against before it asks Auth.
+        const keys = jwksAnswer(String(input));
+        if (keys) return keys;
         authCalls.push({ path: new URL(String(input)).pathname, authorization: new Headers(init?.headers).get("authorization") });
         return new Response(JSON.stringify(authAnswer.body), { status: authAnswer.status, headers: { "content-type": "application/json" } });
       }),
@@ -1281,6 +1287,8 @@ describe("middleware for a bearer token (RFC #259 § 2)", () => {
     ["a browser session's token", tokenWith(browserClaims())],
     ["an agent kind that runs as authenticated", tokenWith(agentClaims({ role: "authenticated" }))],
     ["a token that is not a JWT", "abc"],
+    ["a token naming a key the project does not publish", signedToken(operatorClaims(), { kid: "not-published" })],
+    ["a token claiming HS256", signedToken(operatorClaims(), { alg: "HS256" })],
   ])("refuses %s with 401, without asking Supabase Auth", async (_label, token) => {
     const middleware = await loadMiddleware();
     await refusal(await middleware(bearerRequest("/api/communities", token)), 401, "unauthenticated");
