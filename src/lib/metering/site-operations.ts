@@ -279,6 +279,14 @@ export type MinuteRange = [start: number, end: number];
  * if a key or a cause changes there, revisit these. Each list's ranges are
  * one per gap (a maximal run of offline bins), in order, and its
  * `decidedBy` or `ruledOut` entry `i` is about range `i`.
+ *
+ * It is worked out from the series alone and does not know which site
+ * sources were readable: with no battery (C07) a floor gap comes out as
+ * `no_data`, and with no grid meter (C08) a dark evening comes out as
+ * `dark_lowbat` while `cutMinutes` is null. The capture (A2-3) must not
+ * pass such ranges on as they are: it stores an item whose source is
+ * unavailable as unavailable, with nulls (evidence §4's key table, rule Z).
+ * If this detail starts reading source availability itself, revisit.
  */
 export type SiteDayDetail = {
   /** The previous day's last voltage and SoC readings, as `[pos, v]`; null when it had none. */

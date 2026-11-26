@@ -1,6 +1,6 @@
 # Investigation evidence (A0)
 
-Status: draft for #133 milestone A0. File and line references are at `6cb83bdb`. #263 has since put changes 3 and 4 (§11) on `main`, #133 A2-1 put change 1 there, and #264 gave a source without site samples its own refusal code (§6); this document takes all of these as current behaviour. #258 added `OPENEMS_ID_PATTERN` and its database check (§4).
+Status: draft for #133 milestone A0. File and line references are at `6cb83bdb`. #263 has since put changes 3 and 4 (§11) on `main`, #133 A2-1 (#313) put change 1 there, and #264 gave a source without site samples its own refusal code (§6); this document takes all of these as current behaviour. #258 added `OPENEMS_ID_PATTERN` and its database check (§4).
 
 A logical design, stated as requirements on A2, which builds the records, with a pointer to ADR-007 for the model data boundary. It contains no SQL.
 
@@ -265,7 +265,7 @@ Operation failure codes, kept on the operation since no snapshot can hold them (
 |---|---|---|
 | Dark after a known cut (`dark_known_cut`) | Dark ranges, cause `known_cut` | change 1 |
 | Dark after the battery floor (`dark_low_battery`) | Dark ranges, cause `low_battery` or `after_low_battery` (a gap while the grid is still carried as off after a low-battery gap descends from the battery floor, not from an observed cut; `summary.darkInferredMin` excludes it, as the code does) | change 1 |
-| No-data time (`no_data`) | `no_data` ranges with `ruledOut`; hypotheses `gateway_or_link_down` and `gap_from_unreadable_timestamps` (citing `timestamps`) | change 1 (dropped today, site-operations.ts:523) |
+| No-data time (`no_data`) | `no_data` ranges with `ruledOut`; hypotheses `gateway_or_link_down` and `gap_from_unreadable_timestamps` (citing `timestamps`) | change 1 |
 | Missing: no reading near start or end (`meter_no_reading`) | A `null` side in `meter_readings`, `meter_window`, outcome `no_start`/`no_end`; hypothesis `meter_comms_loss`, supported by other meters' readings in the same bins, contradicted as in §5 | change 2 |
 | Anomalous: counter went backwards (`meter_backwards`) | `meter_readings`, outcome `backwards`; hypothesis `meter_counter_reset_or_replaced` (Q3) | change 2 |
 | Anomalous: unreadable timestamps (`unreadable_timestamps`) | At most half unreadable: dropped (refusal needs more than half, openems-provider.ts:591), shown as `timestamps.dropped` > 0, and cited by the `no_data` finding's `gap_from_unreadable_timestamps` hypothesis. More than half: refused, `provider_unreadable_timestamps`; a backend that sends its instants without a zone is refused this way (§4, `timestamps`). | change 3 (required for `@1`) |
