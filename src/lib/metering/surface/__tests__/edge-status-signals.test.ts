@@ -8,7 +8,9 @@
  * online is none; every configured microgrid up to the bound is examined
  * and a read that reaches the bound throws; at most MAX_SIGNALS_PER_SOURCE
  * signals go back, offline ones first; a failed database read throws
- * without its message.
+ * without its message. Meters on online gateways with no recent reading
+ * are a signal of their own, as is a meter read that failed; a meter on an
+ * offline gateway, a battery or an inverter is not asked about.
  */
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +20,7 @@ const composeMetering = vi.fn();
 const dispose = vi.fn(async () => {});
 const getMicrogridEmsConfig = vi.fn();
 const getEdgesStatus = vi.fn();
+const queryHistoricSamples = vi.fn();
 vi.mock("../../compose", () => ({
   composeMetering: (...a: unknown[]) => {
     order.push("compose");
@@ -32,7 +35,13 @@ vi.mock("@/lib/openems/config", () => ({
 }));
 vi.mock("@/lib/openems", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/openems")>();
-  return { ...actual, createOpenEmsClient: () => ({ getEdgesStatus: (...a: unknown[]) => getEdgesStatus(...a) }) };
+  return {
+    ...actual,
+    createOpenEmsClient: () => ({
+      getEdgesStatus: (...a: unknown[]) => getEdgesStatus(...a),
+      queryHistoricSamples: (...a: unknown[]) => queryHistoricSamples(...a),
+    }),
+  };
 });
 
 import { createFmt } from "@/lib/gui/fmt";
@@ -67,7 +76,23 @@ const req = (client: SupabaseClient): SurfaceRequest =>
     fmt,
   }) as unknown as SurfaceRequest;
 
-const row = (id: string, name: string, edges: string[]) => ({ id, name, timezone: "Africa/Kampala", communities: { org_id: ORG }, edges: edges.map((e) => ({ openems_edge_id: e })) });
+type Device = { openems_component_id: string | null; device_type: string };
+const row = (id: string, name: string, edges: string[], devices: Record<string, Device[]> = {}) => ({
+  id,
+  name,
+  timezone: "Africa/Kampala",
+  communities: { org_id: ORG },
+  edges: edges.map((e) => ({ openems_edge_id: e, devices: devices[e] ?? [] })),
+});
+const meter = (component: string, type = "consumption_meter"): Device => ({ openems_component_id: component, device_type: type });
+/** Five-minute samples up to NOW, the last value of each channel at `lastAt` (or none). */
+const samples = (channels: string[], lastAt: Record<string, string | null>) => {
+  const timestamps = Array.from({ length: 24 }, (_, i) => new Date(NOW.getTime() - (23 - i) * 300_000).toISOString());
+  return {
+    timestamps,
+    data: Object.fromEntries(channels.map((c) => [c, timestamps.map((t) => (lastAt[c] !== null && lastAt[c] !== undefined && t <= lastAt[c]! ? 120 : null))])),
+  };
+};
 
 beforeEach(() => {
   order.length = 0;
@@ -76,6 +101,7 @@ beforeEach(() => {
   dispose.mockClear();
   getMicrogridEmsConfig.mockReset().mockResolvedValue({ type: "direct_url", url: "https://ems.example.test/rest" });
   getEdgesStatus.mockReset();
+  queryHistoricSamples.mockReset();
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 afterEach(() => vi.restoreAllMocks());
@@ -89,7 +115,7 @@ describe("loadEdgeStatusSignals", () => {
       {
         table: "microgrids",
         ops: [
-          ["select", ["id, name, timezone, communities!inner(org_id), edges!inner(openems_edge_id)"]],
+          ["select", ["id, name, timezone, communities!inner(org_id), edges!inner(openems_edge_id, devices(openems_component_id, device_type))"]],
           ["eq", ["communities.org_id", ORG]],
           ["not", ["ems_type", "is", null]],
           ["order", ["name", { ascending: true }]],
@@ -105,6 +131,51 @@ describe("loadEdgeStatusSignals", () => {
       [`offline:${NORTH}`, "warn", "North site: 1 gateway offline", `/microgrids/${NORTH}/setup/edges`],
     ]);
     expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports meters on an online gateway with no reading for half an hour, and asks only about meters, reading the configuration once", async () => {
+    vi.useFakeTimers({ now: NOW });
+    try {
+      const devices = {
+        edge0: [meter("meter0"), meter("meter1", "grid_meter"), meter("ess0", "battery"), meter("inv0", "inverter"), meter(null as unknown as string)],
+        edge1: [meter("meter2")],
+      };
+      const { client } = tableClient({ microgrids: { data: [row(NORTH, "North site", ["edge0", "edge1"], devices)] } });
+      getEdgesStatus.mockResolvedValue([{ edgeId: "edge0", online: true }, { edgeId: "edge1", online: false }]);
+      queryHistoricSamples.mockImplementation(async (edgeId: string, channels: string[]) =>
+        samples(channels, edgeId === "edge0" ? { "meter0/ActivePower": "2026-11-25T08:20:00.000Z", "meter1/ActivePower": "2026-11-25T08:55:00.000Z" } : {}),
+      );
+      const out = await loadEdgeStatusSignals(req(client));
+      expect(out.map((s) => [s.id, s.title, s.href])).toEqual([
+        [`offline:${NORTH}`, "North site: 1 gateway offline", `/microgrids/${NORTH}/setup/edges`],
+        [`quiet:${NORTH}`, "North site: 1 meter not reporting", `/microgrids/${NORTH}/setup/edges`],
+      ]);
+      expect(queryHistoricSamples).toHaveBeenCalledWith("edge0", ["meter0/ActivePower", "meter1/ActivePower"], "2026-11-25", "2026-11-25", "UTC", 5, { signal: expect.any(AbortSignal) });
+      expect(order).toEqual(["compose", "config"]);
+      for (const leaked of ["meter0", "edge0"]) expect(JSON.stringify(out)).not.toContain(leaked);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports a meter read that failed as meters not checked, without the backend's text, and the gateways still", async () => {
+    const { client } = tableClient({ microgrids: { data: [row(NORTH, "North site", ["edge0"], { edge0: [meter("meter0")] })] } });
+    getEdgesStatus.mockResolvedValue([{ edgeId: "edge0", online: true }]);
+    queryHistoricSamples.mockRejectedValue(new OpenEmsError(VENDOR_TEXT, "OPENEMS_HTTP_ERROR", 502));
+    const out = await loadEdgeStatusSignals(req(client));
+    expect(out.map((s) => [s.id, s.title, s.href])).toEqual([
+      [`unchecked:${NORTH}`, "North site: meter readings could not be checked", `/microgrids/${NORTH}/setup/openems-backend`],
+    ]);
+    expect(JSON.stringify(out)).not.toContain("canary");
+    expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).toContain("metering.meter_activity_edge_failed");
+  });
+
+  it("asks no meter history of a microgrid whose meters are all on offline gateways, and reports no meter then", async () => {
+    const { client } = tableClient({ microgrids: { data: [row(NORTH, "North site", ["edge0"], { edge0: [meter("meter0")] })] } });
+    getEdgesStatus.mockResolvedValue([{ edgeId: "edge0", online: false }]);
+    queryHistoricSamples.mockResolvedValue(samples(["meter0/ActivePower"], {}));
+    const out = await loadEdgeStatusSignals(req(client));
+    expect(out.map((s) => s.id)).toEqual([`offline:${NORTH}`]);
   });
 
   it("composes nothing and asks no backend when no microgrid has a backend with edges", async () => {
@@ -256,9 +327,51 @@ describe("buildEdgeStatusSignals", () => {
     expect(out[0].title).toBe("Site 001: gateway status could not be read");
   });
 
+  it("says how many meters on online gateways are not reporting, or that they could not be checked, and nothing for a meter read with no answer yet", () => {
+    const read = (meters: object) => [{ microgridId: NORTH, state: "read" as const, total: 1, offline: 0, readAt: "2026-11-25T08:58:00.000Z", meters } as never];
+    expect(buildEdgeStatusSignals(fmt, [north], read({ state: "read", total: 9, quiet: 2, readAt: "2026-11-25T08:57:00.000Z" }), NOW)).toEqual([
+      {
+        id: `quiet:${NORTH}`,
+        kind: "alarm",
+        severity: "warn",
+        title: "North site: 2 meters not reporting",
+        facts: [fmt.datetime("2026-11-25T08:57:00.000Z", "Africa/Kampala")],
+        entity: { kind: "microgrid", id: NORTH, label: "North site" },
+        href: `/microgrids/${NORTH}/setup/edges`,
+        at: "2026-11-25T08:57:00.000Z",
+      },
+    ]);
+    expect(buildEdgeStatusSignals(fmt, [north], read({ state: "read", total: 9, quiet: 0, readAt: NOW.toISOString() }), NOW)).toEqual([]);
+    expect(buildEdgeStatusSignals(fmt, [north], read({ state: "late" }), NOW)).toEqual([]);
+    expect(buildEdgeStatusSignals(fmt, [north], read({ state: "failed", readAt: NOW.toISOString() }), NOW).map((s) => [s.id, s.title])).toEqual([
+      [`unchecked:${NORTH}`, "North site: meter readings could not be checked"],
+    ]);
+  });
+
+  it("orders offline gateways, quiet meters, unread status, then unchecked meters, each by name", () => {
+    const sites = ["A", "B", "C", "D"].map((n, i) => ({ id: `m${i}`, name: `Site ${n}`, timezone: null }));
+    const at = NOW.toISOString();
+    const out = buildEdgeStatusSignals(
+      fmt,
+      sites,
+      [
+        { microgridId: "m0", state: "read", total: 1, offline: 0, readAt: at, meters: { state: "failed", readAt: at } },
+        { microgridId: "m1", state: "late" },
+        { microgridId: "m2", state: "read", total: 2, offline: 1, readAt: at, meters: { state: "read", total: 3, quiet: 1, readAt: at } },
+        { microgridId: "m3", state: "read", total: 1, offline: 0, readAt: at, meters: { state: "read", total: 3, quiet: 3, readAt: at } },
+      ],
+      NOW,
+    );
+    expect(out.map((s) => s.id)).toEqual(["offline:m2", "quiet:m2", "quiet:m3", "unread:m1", "unchecked:m0"]);
+  });
+
   it("returns signals a watcher may send, as the examples are", () => {
     const built = buildEdgeStatusSignals(fmt, [north], [{ microgridId: NORTH, state: "read", total: 1, offline: 1, readAt: NOW.toISOString() }], NOW);
     for (const s of [...built, ...EDGE_STATUS_EXAMPLES]) expect(signalOutSchema.safeParse(s).success).toBe(true);
-    expect(EDGE_STATUS_EXAMPLES.map((s) => s.title)).toEqual(["Kiwumu: 2 gateways offline", "Lwamata: gateway status could not be read"]);
+    expect(EDGE_STATUS_EXAMPLES.map((s) => s.title)).toEqual([
+      "Kiwumu: 2 gateways offline",
+      "Namulonge: 1 meter not reporting",
+      "Lwamata: gateway status could not be read",
+    ]);
   });
 });
