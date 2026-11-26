@@ -22,10 +22,12 @@ import {
   type SiteSourceAvailability,
 } from "./site-operations";
 import {
+  SITE_DAY_DEFECT_EVIDENCE,
   SITE_DAY_DEFECT_REFUSAL,
   SITE_DAY_RESOLUTION_MINUTES,
   SiteDayEvidenceDefect,
   buildRefusedSiteDaySnapshot,
+  builderDefect,
   buildSiteDaySnapshot,
   schemaDefect,
   siteDayEvidenceReadSchema,
@@ -1097,8 +1099,9 @@ export class MeteringCapability implements MeteringCapabilityContract {
       const parsed = siteDayEvidenceReadSchema.safeParse(snapshot);
       if (!parsed.success) throw schemaDefect(parsed.error);
     } catch (error) {
-      if (!(error instanceof SiteDayEvidenceDefect)) throw error;
-      return this.refusedCapture(window, SITE_DAY_DEFECT_REFUSAL, { ...known, defect: error });
+      // Any throw here is MGM's own defect, one of the builder's checks or
+      // not, and is recorded as one (cases R6, E4's tries).
+      return this.refusedCapture(window, SITE_DAY_DEFECT_REFUSAL, { ...known, defect: builderDefect(error) });
     }
     const facts: SiteDayReadFacts = { zone: opened.zone, unreadableTimestamps };
     return {
@@ -1114,9 +1117,10 @@ export class MeteringCapability implements MeteringCapabilityContract {
    * A capture's refusal: an access refusal as such, anything else as a
    * refused snapshot (evidence §4 "A refused read") in the operation's date,
    * with the zone read, or the operation's before it. A snapshot whose known
-   * parts fail the schema (a source the schema refuses, say) is MGM's defect:
-   * it is built again from the operation's window alone, keeping the
-   * refusal, and the defect is named. Throws only when that fails too.
+   * parts fail the schema (a source the schema refuses, say) is MGM's defect
+   * whatever the refusal was: it is stored as SITE_DAY_DEFECT_REFUSAL, built
+   * again from the operation's window alone (its date and zone, no sources,
+   * no provider), and the defect is named. Throws only when that fails too.
    */
   private refusedCapture(
     window: SiteDayWindow,
@@ -1149,7 +1153,7 @@ export class MeteringCapability implements MeteringCapabilityContract {
         zone: operationZone,
         provider: null,
         sources: null,
-        refusal,
+        refusal: SITE_DAY_DEFECT_EVIDENCE,
       });
       const fallback = siteDayEvidenceRefusedSchema.safeParse(snapshot);
       if (!fallback.success) throw schemaDefect(fallback.error);

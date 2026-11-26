@@ -204,6 +204,18 @@ describe("MeteringCapability.captureSiteDay — a read", () => {
     expect(s.items.timestamps).toEqual({ c: "unavailable", k: "timestamps", reason: "not_reported" });
   });
 
+  it("returns getSiteDay's day in a fallback zone, with the read's zone fallback", async () => {
+    const window: SiteDayWindow = { date: DATE, tz: "UTC", zone: "fallback" };
+    const { capability } = setup({ repo: { getMicrogridTimezone: async () => null } });
+    const capture = read(await capability.captureSiteDay(query(), window));
+    const page = await capability.getSiteDay(query());
+    if (!page.ok) throw new Error(page.code);
+    expect(capture.day).toEqual(page.data);
+    expect(capture.day.read.zone).toBe("fallback");
+    expect(capture.zoneRead).toEqual({ tz: "UTC", zone: "fallback" });
+    expect(capture.snapshot.window).toMatchObject({ tz: "UTC", zone: "fallback", caveat: ["zone_fallback"] });
+  });
+
   it("counts a meter the provider leaves out as missing", async () => {
     const { capability } = setup({
       getSiteSamples: async (request) => {
@@ -320,6 +332,28 @@ describe("MeteringCapability.captureSiteDay — refusals, by stage", () => {
     expect(getSiteSamples).not.toHaveBeenCalled();
   });
 
+  it("records a date after today as request_invalid even when it is the window's", async () => {
+    // Today is 7 November in Kampala.
+    const future: SiteDayWindow = { ...WINDOW, date: "2026-11-08" };
+    const { capability, getSiteSamples } = setup();
+    const c = refused(await capability.captureSiteDay(query("2026-11-08"), future));
+    expect(c.zoneRead).toEqual(KAMPALA);
+    expect(c.snapshot.items.read).toMatchObject({
+      reason: "request_invalid",
+      from: { status: 422, code: "metering_invalid_date" },
+    });
+    expect(c.snapshot.window.date).toBe("2026-11-08");
+    expect(getSiteSamples).not.toHaveBeenCalled();
+  });
+
+  it("records a bad date in the zone read, not the operation's", async () => {
+    const window: SiteDayWindow = { date: DATE, tz: "UTC", zone: "fallback" };
+    const { capability } = setup();
+    const c = refused(await capability.captureSiteDay(query("2026-02-30"), window));
+    expect(c.zoneRead).toEqual(KAMPALA);
+    expect(c.snapshot.window).toEqual({ date: DATE, tz: "Africa/Kampala", zone: "microgrid", res: 5 });
+  });
+
   it("returns a scope mismatch as an access refusal, with no snapshot", async () => {
     const { capability } = setup({
       repo: {
@@ -370,13 +404,18 @@ describe("MeteringCapability.captureSiteDay — refusals, by stage", () => {
     expect(c.snapshot.items.read).toMatchObject({ reason: "zone_unavailable" });
   });
 
-  it("records mixed edges as mixed_edges, with no provider", async () => {
+  it("records mixed edges as mixed_edges, with no provider, and reads no device", async () => {
+    const getManagedDevices = vi.fn(async () => SITE_DEVICES);
+    const getHouseMeterIds = vi.fn(async () => [METER_1, METER_2]);
     const { capability } = setup({
+      repo: { getManagedDevices, getHouseMeterIds },
       selectProvider: async () => {
         throw new MeteringError("mixed", "METERING_CONFIGURATION", 409);
       },
     });
     const c = refused(await capability.captureSiteDay(query(), WINDOW));
+    expect(getManagedDevices).not.toHaveBeenCalled();
+    expect(getHouseMeterIds).not.toHaveBeenCalled();
     expect(c.zoneRead).toEqual(KAMPALA);
     expect(c.snapshot.by.provider).toBeNull();
     expect(c.snapshot.items).toEqual({
@@ -392,7 +431,9 @@ describe("MeteringCapability.captureSiteDay — refusals, by stage", () => {
     expect(Object.keys(c.snapshot.items)).toEqual(["read"]);
   });
 
-  it("records a failed device read as site_devices_unavailable, with no sources", async () => {
+  it("records a failed device read as site_devices_unavailable, with no sources, in the zone read", async () => {
+    // The operation's zone differs from the one read: the snapshot keeps the read's (O2).
+    const window: SiteDayWindow = { date: DATE, tz: "UTC", zone: "fallback" };
     const { capability } = setup({
       repo: {
         getManagedDevices: async () => {
@@ -400,7 +441,9 @@ describe("MeteringCapability.captureSiteDay — refusals, by stage", () => {
         },
       },
     });
-    const c = refused(await capability.captureSiteDay(query(), WINDOW));
+    const c = refused(await capability.captureSiteDay(query(), window));
+    expect(c.zoneRead).toEqual(KAMPALA);
+    expect(c.snapshot.window).toEqual({ date: DATE, tz: "Africa/Kampala", zone: "microgrid", res: 5 });
     expect(c.snapshot.items).toEqual({
       read: {
         c: "unavailable", k: "read", reason: "site_devices_unavailable",
@@ -532,16 +575,52 @@ describe("MeteringCapability.captureSiteDay — MGM's defects are recorded", () 
 
   it("falls back to the operation's window with no sources when a source fails the schema", async () => {
     const devices = SITE_DEVICES.map((d) => (d.id === BATTERY_ID ? { ...d, id: "m-1" } : d));
+    // The operation's zone differs from the one read: the fallback takes the operation's.
+    const window: SiteDayWindow = { date: DATE, tz: "UTC", zone: "fallback" };
     const { capability } = setup({ repo: { getManagedDevices: async () => devices } });
+    const c = refused(await capability.captureSiteDay(query(), window));
+    expect(c.zoneRead).toEqual(KAMPALA);
+    expect(c.defect).toEqual({ check: "schema", path: "/items/src_battery/device", issue: "invalid_format" });
+    expect(c.snapshot.items).toEqual({
+      read: { c: "unavailable", k: "read", reason: "calculation_failed", from: { status: 500, code: "metering_site_day_failed" } },
+    });
+    expect(c.snapshot.by.provider).toBeNull();
+    expect(c.snapshot.window).toEqual({ date: DATE, tz: "UTC", zone: "fallback", res: 5, caveat: ["zone_fallback"] });
+    // Nothing from the content reaches the log.
+    expect(JSON.stringify(errorLog.mock.calls)).not.toContain("m-1");
+  });
+
+  it("stores a refusal whose sources fail the schema as calculation_failed, not its own reason", async () => {
+    const devices = SITE_DEVICES.map((d) => (d.id === BATTERY_ID ? { ...d, id: "m-1" } : d));
+    const { capability } = setup({
+      repo: { getManagedDevices: async () => devices },
+      getSiteSamples: async () => {
+        throw new MeteringError("down", "METERING_UNAVAILABLE", 502);
+      },
+    });
     const c = refused(await capability.captureSiteDay(query(), WINDOW));
     expect(c.defect).toEqual({ check: "schema", path: "/items/src_battery/device", issue: "invalid_format" });
     expect(c.snapshot.items).toEqual({
       read: { c: "unavailable", k: "read", reason: "calculation_failed", from: { status: 500, code: "metering_site_day_failed" } },
     });
     expect(c.snapshot.by.provider).toBeNull();
-    expect(c.snapshot.window).toEqual({ date: DATE, tz: "Africa/Kampala", zone: "microgrid", res: 5 });
-    // Nothing from the content reaches the log.
-    expect(JSON.stringify(errorLog.mock.calls)).not.toContain("m-1");
+    // The step's log keeps the refusal the capability gave.
+    expect(c.refusal).toEqual({ status: 503, code: "METERING_UNAVAILABLE" });
+  });
+
+  it("records any other throw from building the snapshot as a builder defect", async () => {
+    builder.override = () => {
+      throw new TypeError(`Cannot read properties of undefined (reading '${METER_1}')`);
+    };
+    const { capability } = setup();
+    const c = refused(await capability.captureSiteDay(query(), WINDOW));
+    expect(c.defect).toEqual({ check: "builder", path: "/", issue: "TypeError" });
+    expect(c.snapshot.items.read).toEqual({
+      c: "unavailable", k: "read", reason: "calculation_failed", from: { status: 500, code: "metering_site_day_failed" },
+    });
+    expect(c.snapshot.by.provider).toBe("synthetic");
+    expect(Object.keys(c.snapshot.items)).toEqual(["src_battery", "src_grid", "src_load", "src_pv", "read"]);
+    expect(JSON.stringify(errorLog.mock.calls)).not.toContain(METER_1);
   });
 
   it("throws only when the operation's window itself is not valid", async () => {

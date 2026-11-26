@@ -286,22 +286,32 @@ export type SiteDayCapture =
   | {
       outcome: "refused";
       snapshot: SiteDayEvidenceRefused;
-      /** Null when the refusal came before or at the zone read; the snapshot then carries the operation's zone. */
+      /**
+       * Null when the refusal came before or at the zone read; the snapshot
+       * then carries the operation's zone. So does a snapshot rebuilt from
+       * the operation's window after MGM's defect (`defect` set, its
+       * known parts failing the schema), whatever this holds.
+       */
       zoneRead: SiteDayZone | null;
       /** The capability's status and code as returned, for the step's log; never its message. Not stored. */
       refusal: { status: number; code: string };
       /**
-       * Set only when MGM's own defect produced or reshaped this refusal:
-       * which check failed and where, as a normalised path, and zod's issue
-       * code. Never a value, an id or zod's message. For the step's log.
-       * Not stored.
+       * Set only when MGM's own defect produced or reshaped this refusal
+       * (the snapshot then stores `calculation_failed`): which check failed
+       * and where, as a normalised path, and zod's issue code (for the
+       * `builder` check, the error's class name). Never a value, an id or
+       * an error's message. For the step's log. Not stored.
        */
       defect?: { check: SiteDayDefectCheck; path: string; issue?: string };
     }
   | { outcome: "access_refused"; status: number; code: string };
 
-/** Which of MGM's own checks on a snapshot failed (captureSiteDay records it as a defect). */
-export type SiteDayDefectCheck = "schema" | "pointer" | "meter_join" | "provider_name" | "resolution";
+/**
+ * Which of MGM's own checks on a snapshot failed (captureSiteDay records it
+ * as a defect). `builder` is a throw from building the snapshot that is not
+ * one of the other checks: an error in the builder's own code.
+ */
+export type SiteDayDefectCheck = "schema" | "pointer" | "meter_join" | "provider_name" | "resolution" | "builder";
 
 /**
  * MGM's defect in building a snapshot: which check failed, where (a path
@@ -318,6 +328,18 @@ export class SiteDayEvidenceDefect extends Error {
     super(`${check} at ${path}${issue ? ` (${issue})` : ""}`);
     this.name = "SiteDayEvidenceDefect";
   }
+}
+
+/**
+ * Any throw from building or checking a snapshot as a defect: a
+ * SiteDayEvidenceDefect as it is, anything else as the `builder` check at
+ * the root, with the error's name (a class name such as `TypeError`) as its
+ * issue and never its message, which may quote a value.
+ */
+export function builderDefect(error: unknown): SiteDayEvidenceDefect {
+  if (error instanceof SiteDayEvidenceDefect) return error;
+  const name = error instanceof Error && /^[A-Za-z]{1,32}$/.test(error.name) ? error.name : undefined;
+  return new SiteDayEvidenceDefect("builder", "/", name);
 }
 
 // ---------------------------------------------------------------------------
@@ -418,6 +440,13 @@ export function siteDayRefusal(status: number, code: string): SiteDayRefusal {
  * this pair and add the code to REFUSAL_BY_CODE.
  */
 export const SITE_DAY_DEFECT_REFUSAL = { status: 500, code: "metering_site_day_failed" } as const;
+
+/** SITE_DAY_DEFECT_REFUSAL as §6 maps it: what a defect's snapshot stores. */
+export const SITE_DAY_DEFECT_EVIDENCE = {
+  kind: "evidence",
+  reason: "calculation_failed",
+  from: { status: SITE_DAY_DEFECT_REFUSAL.status, code: SITE_DAY_DEFECT_REFUSAL.code },
+} as const satisfies Extract<SiteDayRefusal, { kind: "evidence" }>;
 
 // ---------------------------------------------------------------------------
 // Paths and pointers

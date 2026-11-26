@@ -180,11 +180,11 @@ export interface MeteringCapabilityContract {
    * date, and its zone too when the read is refused before or at its zone
    * read (then `zoneRead` is null). Every refusal but an access refusal comes
    * back as a refused snapshot, and so does MGM's own defect in building the
-   * snapshot; an access refusal comes back with no snapshot. It throws a
-   * SiteDayEvidenceDefect only when even the refused snapshot built from
+   * snapshot, whether one of the builder's checks or any other throw from
+   * building it; an access refusal comes back with no snapshot. It throws
+   * (a SiteDayEvidenceDefect) only when even the refused snapshot built from
    * constants and `window` fails its schema, which means `window` itself is
-   * not a valid operation window; any other throw is an error in the
-   * builder's own code, not one of its checks, and is not caught.
+   * not a valid operation window.
    */
   captureSiteDay(query: unknown, window: SiteDayWindow): Promise<SiteDayCapture>;
 }

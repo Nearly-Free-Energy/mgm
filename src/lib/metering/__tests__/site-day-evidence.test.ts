@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   RANGE_ITEM_KEYS,
+  SITE_DAY_DEFECT_EVIDENCE,
+  SITE_DAY_DEFECT_REFUSAL,
   SITE_DAY_EVIDENCE_SCHEMA,
   SITE_DAY_ITEM_KEYS,
   SITE_DAY_PARAMS,
@@ -9,6 +11,7 @@ import {
   SiteDayEvidenceDefect,
   buildRefusedSiteDaySnapshot,
   buildSiteDaySnapshot,
+  builderDefect,
   meterEntries,
   normaliseEvidencePath,
   resolveEvidencePointer,
@@ -731,6 +734,23 @@ describe("schemaDefect — no id or value in a defect", () => {
       expect(text).not.toContain("note");
       expect(text).not.toContain("counter replaced");
     }
+  });
+
+  it("stores a defect as §6 maps the computation's own failure", () => {
+    expect(siteDayRefusal(SITE_DAY_DEFECT_REFUSAL.status, SITE_DAY_DEFECT_REFUSAL.code)).toEqual(SITE_DAY_DEFECT_EVIDENCE);
+    expect(SITE_DAY_DEFECT_EVIDENCE.reason).toBe("calculation_failed");
+  });
+
+  it("names any other throw as the builder check, by its class name only", () => {
+    const own = new SiteDayEvidenceDefect("pointer", "/items/dark_cut/decidedBy/[]");
+    expect(builderDefect(own)).toBe(own);
+    const defect = builderDefect(new TypeError(`Cannot read properties of undefined (reading '${D1}')`));
+    expect(defect).toMatchObject({ check: "builder", path: "/", issue: "TypeError" });
+    expect(defect.message).not.toContain(D1);
+    const odd = new Error("x");
+    odd.name = `Error ${D1}`;
+    expect(builderDefect(odd).issue).toBeUndefined();
+    expect(builderDefect("a thrown string").issue).toBeUndefined();
   });
 
   it("normalises indexes and unknown keys", () => {
