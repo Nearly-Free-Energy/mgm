@@ -35,7 +35,10 @@ export function parseOpenEmsId(value: unknown): string | null {
  * `INSERT … ON CONFLICT DO UPDATE` that reaches the same row twice, so two
  * entries that differ only by surrounding spaces (`meter0`, ` meter0`) would
  * otherwise fail the whole save with a 500. Ids compare exactly, case
- * included, as the unique constraints on both columns compare them.
+ * included, as the plain TEXT unique constraints on both columns compare them
+ * (`00001_schema.sql`): if either becomes case-insensitive (citext, a
+ * nondeterministic collation, a unique index on `lower()`), compare the same
+ * way here, or `Meter0` and `meter0` reach one row again.
  */
 export function firstDuplicateOpenEmsId(values: readonly unknown[]): string | null {
   const seen = new Set<string>();
