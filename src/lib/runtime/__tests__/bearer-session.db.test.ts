@@ -25,7 +25,8 @@
  * operator client; a tenant's operator token is refused by the same staff
  * route; revoking the grant with the browser session refuses the token at
  * once, at middleware and at the route's own getUser(), and its refresh
- * fails; a request with both a session cookie and the token is refused; an
+ * fails; a token whose claims were changed after signing is refused at
+ * middleware; a request with both a session cookie and the token is refused; an
  * agent client's token is refused that route and, let on to the view route,
  * builds a client the route reads as that agent client and is refused by
  * the route's own agent check (404 for a view not marked for an
@@ -371,6 +372,18 @@ describe.skipIf(skip)("a client's bearer token at MGM's routes (#272)", { timeou
     const named = await GET(new NextRequest(`${url}?org=${F.org}`, { headers }));
     expect(named.status).toBe(409);
     expect(await named.json()).toMatchObject({ code: "assistant_disabled" });
+  });
+
+  it("refuses, at middleware, a token whose claims were changed after Supabase Auth signed it", async () => {
+    // The project's own signature over other claims: middleware checks it
+    // against the published keys before it asks Auth (verifyBearer).
+    const [head, payload, signature] = staffToken.split(".");
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString()) as Record<string, unknown>;
+    const changed = Buffer.from(JSON.stringify({ ...claims, sub: tenant.userId })).toString("base64url");
+    const { from, res } = await getPlugins(`${head}.${changed}.${signature}`);
+    expect(from).toBe("middleware");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "Authentication required", code: "unauthenticated" });
   });
 
   it("refuses a live token whose mark the client set by hand, as on a route middleware skipped", async () => {

@@ -283,11 +283,15 @@ runs, after the release allowlist:
   that kind runs as; `client_id` with no kind was issued while the hook was
   off and is refused; a token with no `client_id` is a browser session's,
   sent from a script, and is refused too: ADR-008's amendment of 26 Nov
-  2026), and Supabase Auth must answer `GET /user` for it (`verifyBearer`
-  in `src/lib/runtime/bearer.ts`), so a revoked client is refused at once;
-  otherwise `401 unauthenticated`. When Auth does not answer within five
-  seconds, cannot be reached, or answers with an error of its own (a `5xx`
-  or `429`), the request is `503 auth_unavailable` instead, still refused,
+  2026); the token must be signed with ES256 by one of the project's
+  published keys (`/auth/v1/.well-known/jwks.json`, fetched at most every
+  ten minutes, so a key id not in that set is refused without fetching it
+  again) and not have expired; and Supabase Auth must answer `GET /user`
+  for it (`verifyBearer` in `src/lib/runtime/bearer.ts`), so a revoked
+  client is refused at once; otherwise `401 unauthenticated`. When the keys
+  cannot be fetched, or Auth does not answer within five seconds, cannot be
+  reached, or answers with an error of its own (a `5xx` or `429`), the
+  request is `503 auth_unavailable` instead, still refused,
   so the client can tell an outage from a dead token and try again rather
   than sign in again;
 - an agent client may call only `AGENT_ROUTES`

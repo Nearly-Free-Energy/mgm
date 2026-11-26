@@ -91,11 +91,13 @@ function apiRefusal(status: number, code: string, error: string): NextResponse {
  * 3. While MGM_CLIENT_TOKENS is off: 403 `client_tokens_off`. Without
  *    SUPABASE_SERVICE_ROLE_KEY, which keys the mark below: 503
  *    `client_tokens_unavailable`.
- * 4. A token Supabase Auth does not accept, or whose claims name no client
- *    MGM accepts (verifyBearer, callerFromClaims): 401 `unauthenticated`.
+ * 4. A token whose claims name no client MGM accepts, that no published
+ *    key of the project signed, that has expired, or that Supabase Auth
+ *    does not accept (verifyBearer, callerFromClaims): 401 `unauthenticated`.
  *    That includes a revoked client, at once, and a token with `client_id`
  *    and no kind. When Auth gives no answer about the token (unreachable,
- *    no answer within AUTH_TIMEOUT_MS, or an error of its own): 503
+ *    no answer within AUTH_TIMEOUT_MS, or an error of its own), or the
+ *    project's keys cannot be fetched: 503
  *    `auth_unavailable`, still refused, so a client can tell an outage
  *    from a dead token.
  * 5. An agent client outside AGENT_ROUTES, public paths included: 403
