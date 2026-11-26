@@ -21,7 +21,6 @@ import ts from "typescript";
 import type { PaymentsCapabilityContract } from "@/lib/payments/repository";
 import {
   BILLING_PLUGIN_NAME,
-  METERING_PLUGIN_NAME,
   ORGANIZATION_DIRECTORY_PLUGIN_NAME,
   PAYMENTS_PLUGIN_NAME,
   PESAPAL_PLUGIN_NAME,
@@ -112,8 +111,6 @@ export const UNGATED_WRITES: Record<string, string | PaymentExemption> = {
  * under it.
  */
 export const DESCRIBING_ISSUES = {
-  /** ACM B5: describe metering's actions. */
-  "#279": [METERING_PLUGIN_NAME],
   /** ACM B7: describe the organization directory's and users' actions. */
   "#281": [ORGANIZATION_DIRECTORY_PLUGIN_NAME],
   /** ACM B9: make billing's and payments' person routes into actions. */
@@ -170,15 +167,35 @@ export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
     reason:
       "A stub that refuses every request (400 for a malformed id, 404 for a community the caller cannot see, else 409 use_organization_payment_settings) and writes nothing; no page calls it. Wrong once it does anything but refuse.",
   },
+  "POST /api/edges": {
+    kind: "permanent",
+    reason:
+      "Retired (#101): always answers 410 pointing at Discover and edge registration, which are metering.check-connection and metering.register-edges, and touches no data. Wrong once it does anything but refuse.",
+  },
   "POST /api/gui/prepare": {
     kind: "permanent",
     reason:
       "The GUI host's own step: builds an action's form and confirmation and writes nothing, and the action's write goes to the action's own route. Wrong once prepare writes.",
   },
+  "POST /api/metering/readings": {
+    kind: "permanent",
+    reason:
+      "A read: each meter's consumption over a date range, from the vendor system through the metering capability, sent as a POST for its body of ids. It writes nothing and no page calls it. Wrong once it writes a row.",
+  },
   "POST /api/mgm/bootstrap": {
     kind: "permanent",
     reason:
       "First-run setup: creates the first organization for the holder of the deployment's bootstrap token, before any organization exists to offer an action in, and answers 409 after. Wrong once it acts after the first organization exists.",
+  },
+  "POST /api/microgrids/[id]/openems-backend/test": {
+    kind: "permanent",
+    reason:
+      "A read: tests a candidate connection against the vendor system and answers what it found, persisting nothing, sent as a POST so the credentials typed travel in its body. Saving (metering.save-connection) runs the same test before it writes. Wrong once it writes a row.",
+  },
+  "POST /api/openems/channels": {
+    kind: "permanent",
+    reason:
+      "A read: live channel values from the vendor system for the microgrid's saved connection. It writes nothing, no page calls it, and /api/openems/* is not released, so no action could name it (gui-surface.test.ts, check 4). Wrong once it writes a row.",
   },
   "POST /api/payments/ipn": {
     kind: "permanent",
@@ -190,30 +207,6 @@ export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
     reason:
       "The scheduled worker that retries stored provider notifications, authenticated by its header secret with no session. Wrong once a signed-in person can run it.",
   },
-
-  // ── Not yet described: #279 (ACM B5), metering ──
-  // Two of these routes cannot become actions as they stand.
-  // `POST /api/openems/channels` is not released: released-routes.ts does not
-  // open /api/openems/*, and gui-surface.test.ts refuses an action on an
-  // unreleased route (check 4), so describing it means releasing
-  // /api/openems/* first. It is listed so #279 decides it with the rest of
-  // metering's routes. `POST /api/edges` is retired (it always answers 410)
-  // and carries a plain-string gate exemption in UNGATED_WRITES above, and
-  // gui-surface.test.ts refuses an action on such a route (check 3). If
-  // released-routes.ts opens /api/openems/*, or check 3 or 4 changes, revisit
-  // this note.
-  "POST /api/devices": { kind: "not-yet-described", issue: "#279" },
-  "PATCH /api/devices/[id]": { kind: "not-yet-described", issue: "#279" },
-  "POST /api/edges": { kind: "not-yet-described", issue: "#279" },
-  "PATCH /api/edges/[id]": { kind: "not-yet-described", issue: "#279" },
-  "DELETE /api/edges/[id]": { kind: "not-yet-described", issue: "#279" },
-  "POST /api/meter-readings/opening": { kind: "not-yet-described", issue: "#279" },
-  "POST /api/metering/readings": { kind: "not-yet-described", issue: "#279" },
-  "POST /api/microgrids/[id]/edges/register": { kind: "not-yet-described", issue: "#279" },
-  "PUT /api/microgrids/[id]/openems-backend": { kind: "not-yet-described", issue: "#279" },
-  "POST /api/microgrids/[id]/openems-backend/discover": { kind: "not-yet-described", issue: "#279" },
-  "POST /api/microgrids/[id]/openems-backend/test": { kind: "not-yet-described", issue: "#279" },
-  "POST /api/openems/channels": { kind: "not-yet-described", issue: "#279" },
 
   // ── Not yet described: #281 (ACM B7), organization directory and users ──
   "POST /api/organizations": { kind: "not-yet-described", issue: "#281" },

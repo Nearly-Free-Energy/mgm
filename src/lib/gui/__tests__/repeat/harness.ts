@@ -3,7 +3,7 @@
  * it is sent to its route, and the snapshot that shows whether a send wrote.
  *
  * Each plugin with "safe" actions has a case module beside this file
- * (./billing.ts, ./payments.ts, ./community-management.ts). A module seeds its own organization under
+ * (./billing.ts, ./payments.ts, ./community-management.ts, ./metering.ts). A module seeds its own organization under
  * its own UUID prefix and lists one or more cases for each of its "safe"
  * actions. A case names no route: it is sent to the handler its action's own
  * method and path name (handlerFor). A plugin that contributes its first
@@ -141,6 +141,9 @@ const KEYS: Readonly<Record<string, readonly string[]>> = {
   payment_attempts: ["id"],
   payment_receipts: ["id"],
   payment_notifications: ["id"],
+  edges: ["id"],
+  devices: ["id"],
+  meter_readings: ["id"],
 };
 
 /**
@@ -186,11 +189,12 @@ async function rows(
 
 /**
  * Every row of the organization's in each table a community management,
- * billing or payments write route reaches, read with the service role: its
- * communities, microgrids, tenants, their meter links, the role rows scoped
- * to it or to its tenants, and its billing and payments rows. A new "safe"
- * action whose route writes another table adds that table here, or the
- * test cannot see its writes.
+ * billing, payments or metering write route reaches, read with the service
+ * role: its communities, microgrids, tenants, edges and devices, the meter
+ * links of its tenants and of its devices, the role rows scoped to it or to
+ * its tenants, its devices' readings, and its billing and payments rows. A
+ * new "safe" action whose route writes another table adds that table here,
+ * or the test cannot see its writes.
  */
 export async function snapshot(orgId: string): Promise<Snapshot> {
   const svc = await serviceClient();
@@ -200,7 +204,15 @@ export async function snapshot(orgId: string): Promise<Snapshot> {
   out.microgrids = await rows(svc, "microgrids", [["community_id", ids(out.communities)]]);
   const mg = ids(out.microgrids);
   out.tenants = await rows(svc, "tenants", [["microgrid_id", mg]]);
-  out.tenant_devices = await rows(svc, "tenant_devices", [["tenant_id", ids(out.tenants)]]);
+  out.edges = await rows(svc, "edges", [["microgrid_id", mg]]);
+  out.devices = await rows(svc, "devices", [["edge_id", ids(out.edges)]]);
+  // One read of the meter links, by tenant (community management writes
+  // them from a tenant) and by device (metering's writes reach them from a
+  // device), each link once: a second read would replace the first.
+  out.tenant_devices = await rows(svc, "tenant_devices", [
+    ["tenant_id", ids(out.tenants)],
+    ["device_id", ids(out.devices)],
+  ]);
   out.user_roles = await rows(svc, "user_roles", [["scope_id", [orgId, ...ids(out.tenants)]]]);
   for (const table of ["billing_periods", "rate_schedules", "grid_tariffs", "microgrid_savings_settings"]) {
     out[table] = await rows(svc, table, [["microgrid_id", mg]]);
@@ -212,6 +224,7 @@ export async function snapshot(orgId: string): Promise<Snapshot> {
   for (const table of ["payment_attempts", "payment_receipts", "payment_notifications"]) {
     out[table] = await rows(svc, table, [["org_id", [orgId]]]);
   }
+  out.meter_readings = await rows(svc, "meter_readings", [["device_id", ids(out.devices)]]);
   return out;
 }
 

@@ -7,10 +7,12 @@ import "server-only";
  * Built on each call from the action's zod schema, with zod's default
  * `unrepresentable: "throw"`, so an input JSON Schema cannot describe throws
  * here rather than becoming an empty schema. The contribution check refuses
- * such an input when it is registered (./contribution-schema.ts), and one
- * with a part that accepts any value (unconstrainedNodes below), so a throw
- * here is a host bug. If that check stops refusing either, revisit. Nothing
- * is cached between calls.
+ * such an input when it is registered (./contribution-schema.ts), one with
+ * a part that accepts any value (unconstrainedNodes below), and one whose
+ * root is not an object with properties (hasRootProperties below), so a
+ * throw here is a host bug and describeInput always finds the fields it
+ * removes. If that check stops refusing any of them, revisit. Nothing is
+ * cached between calls.
  */
 import { z } from "zod";
 import type { Json } from "../../contract";
@@ -20,6 +22,10 @@ import type { ActionDef } from "../../surface";
  * The JSON Schema of the fields a person enters: the input's, with bound
  * fields and `confirmation` (sent by the host's confirmation step) removed.
  * writeOnly marks stay, so a form never prefills or shows a secret.
+ *
+ * They are removed from the root's `properties` and `required` only, so an
+ * input whose root is a union would still list them as fields to fill in;
+ * the contribution check refuses such an input (hasRootProperties).
  */
 export function describeInput(def: Pick<ActionDef, "input" | "bind">): Json {
   // Through JSON, so only JSON is kept: zod adds a non-enumerable "~standard" property.
@@ -30,6 +36,18 @@ export function describeInput(def: Pick<ActionDef, "input" | "bind">): Json {
   }
   if (Array.isArray(schema.required)) schema.required = schema.required.filter((k) => !hidden.has(k as string));
   return schema as Json;
+}
+
+/**
+ * Whether a JSON Schema's root is an object with `properties`: what
+ * z.strictObject writes, and the only place describeInput removes bound
+ * fields and `confirmation` from. A root anyOf or oneOf (a union), a record
+ * or a scalar is not. The contribution check refuses every input that is
+ * not (./contribution-schema.ts). If describeInput comes to remove fields
+ * from anywhere else, revisit both.
+ */
+export function hasRootProperties(schema: unknown): boolean {
+  return isNode(schema) && schema.type === "object" && isNode(schema.properties);
 }
 
 /** Keywords that describe a schema without limiting what it accepts. */

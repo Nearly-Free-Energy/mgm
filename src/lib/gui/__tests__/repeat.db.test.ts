@@ -34,8 +34,9 @@ vi.mock("@/lib/supabase/server", () => ({
     return session.caller.client;
   },
 }));
-// The community management routes refresh pages they change, which needs a
-// Next.js request; sent here as plain handlers, there is none.
+// Community management's and metering's routes refresh the pages they
+// change, which needs a Next.js request; sent here as plain handlers, there
+// is none. Refreshing writes no row.
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import type { MgmPluginName } from "@/lib/plugins/bundled";
@@ -49,6 +50,7 @@ import {
 import { BILLING_CASES } from "./repeat/billing";
 import { COMMUNITY_MANAGEMENT_CASES } from "./repeat/community-management";
 import { absentIgnores, handlerFor, send, snapshot, without, type CaseModule, type Fixture } from "./repeat/harness";
+import { METERING_CASES } from "./repeat/metering";
 import { PAYMENTS_CASES } from "./repeat/payments";
 
 /** One module per plugin with "safe" actions. A plugin's first "safe" action adds its module here. */
@@ -56,6 +58,7 @@ const MODULES: Partial<Record<MgmPluginName, CaseModule>> = {
   "community-management": COMMUNITY_MANAGEMENT_CASES,
   billing: BILLING_CASES,
   payments: PAYMENTS_CASES,
+  metering: METERING_CASES,
 };
 
 const modules = Object.entries(MODULES) as [MgmPluginName, CaseModule][];
