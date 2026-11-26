@@ -119,14 +119,15 @@ export const DESCRIBING_ISSUES = {
 
 /**
  * Why no action names a write route. `permanent`: the route cannot be an
- * action, for one of three reasons. No person sends it; or it writes nothing
+ * action, for one of four reasons. No person sends it; or it writes nothing
  * (an action is a write a person confirms, and RFC #259 § 3 serves reads as
  * views); or it must refuse every caller but the person's own cookie session
  * on one of MGM's own pages, while an action is offered to any signed-in
- * caller, a client's bearer token included (ADR-008). Its reason says which,
- * and what would make that wrong ("Wrong once …", which
- * described-writes.test.ts requires); for the third, that includes actions
- * becoming limitable to the cookie session.
+ * caller, a client's bearer token included (ADR-008); or it must refuse
+ * every caller but one kind of client acting on its own session, for the
+ * same reason. Its reason says which, and what would make that wrong
+ * ("Wrong once …", which described-writes.test.ts requires); for the last
+ * two, that includes actions becoming limitable to that caller.
  * `not-yet-described`: the issue that will describe it.
  */
 export type UndescribedWrite =
@@ -154,10 +155,16 @@ export type UndescribedWrite =
 export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
   // ── Permanent: cannot be an action ──
   // No person sends it, it writes nothing, or it answers only the person's
-  // own cookie session on one of MGM's pages (UndescribedWrite above). A POST
+  // own cookie session on one of MGM's pages or one kind of client's own
+  // session (UndescribedWrite above). A POST
   // that writes nothing is here rather than an action: what it answers is a
   // read, and the twice-sent test (repeat.db.test.ts) can show no action
   // "safe" whose first send writes nothing.
+  "POST /api/auth/logout": {
+    kind: "permanent",
+    reason:
+      "Ends the calling operator client's own session (ADR-008 decision 5), only for an operator client's bearer token, never a cookie session or an agent client, while an action is offered to any signed-in caller. A second send finds no session to end, and `mgm logout` is its one caller. Wrong once an action can be limited to an operator client's bearer token, or once the route ends anything but the caller's own session.",
+  },
   "POST /api/auth/oauth/approvals": {
     kind: "permanent",
     reason:

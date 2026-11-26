@@ -117,6 +117,8 @@ describe("middleware PUBLIC_PATHS", () => {
     "/oauth/code?code=3f1d2c4b-5a6e-4f70-8a9b-0c1d2e3f4a5b&state=s",
     "/api/auth/oauth/approvals",
     "/api/auth/discovery",
+    // `mgm logout`'s route (#297), released with the CLI.
+    "/api/auth/logout",
   ])("returns 404 for unreleased route %s even when signed in", async (path) => {
     signedIn();
     const middleware = await loadMiddleware();
@@ -128,7 +130,8 @@ describe("middleware PUBLIC_PATHS", () => {
   // released yet, so the 404 above answers before PUBLIC_PATHS is read.
   // These pretend they are released, so the session check they will meet
   // then is pinned now: the code page and discovery pass through signed
-  // out, the consent page and the approvals route still ask for a session.
+  // out, the consent page, the approvals route and logout still ask for a
+  // session.
   // Once released-routes.ts lists them, the doMock is redundant, not wrong.
   describe("once the sign-in routes for other clients are released", () => {
     const SIGN_IN_ROUTES = new Set([
@@ -136,6 +139,7 @@ describe("middleware PUBLIC_PATHS", () => {
       "/oauth/code",
       "/api/auth/oauth/approvals",
       "/api/auth/discovery",
+      "/api/auth/logout",
     ]);
 
     beforeEach(() => {
@@ -181,6 +185,14 @@ describe("middleware PUBLIC_PATHS", () => {
       const res = await middleware(
         new NextRequest("http://localhost/api/auth/oauth/approvals", { method: "POST" }),
       );
+      expect(res.status).toBe(401);
+      expect(res.headers.get("location")).toBeNull();
+    });
+
+    it("answers a signed-out logout with 401", async () => {
+      signedOut();
+      const middleware = await loadMiddleware();
+      const res = await middleware(new NextRequest("http://localhost/api/auth/logout", { method: "POST" }));
       expect(res.status).toBe(401);
       expect(res.headers.get("location")).toBeNull();
     });
@@ -1418,6 +1430,7 @@ describe("middleware for a bearer token (RFC #259 § 2)", () => {
       "/oauth/code",
       "/api/auth/oauth/approvals",
       "/api/auth/discovery",
+      "/api/auth/logout",
     ]);
     const APPROVALS = "/api/auth/oauth/approvals";
 
