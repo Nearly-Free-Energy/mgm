@@ -117,16 +117,17 @@ export const DESCRIBING_ISSUES = {
   "#278": [COMMUNITY_MANAGEMENT_PLUGIN_NAME],
   /** ACM B5: describe metering's actions. */
   "#279": [METERING_PLUGIN_NAME],
-  /** ACM B6: describe the remaining billing and payments routes. */
-  "#280": [BILLING_PLUGIN_NAME, PAYMENTS_PLUGIN_NAME, PESAPAL_PLUGIN_NAME],
   /** ACM B7: describe the organization directory's and users' actions. */
   "#281": [ORGANIZATION_DIRECTORY_PLUGIN_NAME],
+  /** ACM B9: make billing's and payments' person routes into actions. */
+  "#310": [BILLING_PLUGIN_NAME, PAYMENTS_PLUGIN_NAME],
 } as const satisfies Record<`#${number}`, readonly MgmPluginName[]>;
 
 /**
- * Why no action names a write route. `permanent`: the route is not a
- * person's action, and its reason says why and what would make that wrong
- * ("Wrong once …", which described-writes.test.ts requires).
+ * Why no action names a write route. `permanent`: no issue will describe
+ * it, because the route is not a person's action or writes nothing; its
+ * reason says why and what would make that wrong ("Wrong once …",
+ * which described-writes.test.ts requires).
  * `not-yet-described`: the issue that will describe it.
  */
 export type UndescribedWrite =
@@ -179,6 +180,26 @@ export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
       "The scheduled worker that retries stored provider notifications, authenticated by its header secret with no session. Wrong once a signed-in person can run it.",
   },
 
+  // ── Permanent: writes nothing (#280, ACM B6) ──
+  // Two previews and a stub. A person may call them, but none writes, so
+  // nothing a repeat or a confirmation guards is lost by leaving them off
+  // the catalog.
+  "POST /api/billing-review/preview": {
+    kind: "permanent",
+    reason:
+      "A deployment reviewer's comparison of a period's bills, refused to everyone but the one account MGM_REVIEW_ALLOWED_USER_ID or MGM_REVIEW_ALLOWED_EMAIL names, and called by no page; offered to organization staff, it would only answer 403. Wrong once organization staff may run it.",
+  },
+  "POST /api/communities/[id]/invoice-preview": {
+    kind: "permanent",
+    reason:
+      "A preview that writes nothing: it renders the invoice settings form's unsaved state to a PDF for the person to look at, stores nothing and is answered while billing is off (its UNGATED_WRITES reason). Wrong once it stores anything.",
+  },
+  "PUT /api/communities/[id]/payment": {
+    kind: "permanent",
+    reason:
+      "A stub that always answers 409 use_organization_payment_settings and writes nothing; no page calls it. Wrong once it writes.",
+  },
+
   // ── Not yet described: #278 (ACM B4), community management ──
   "POST /api/communities": { kind: "not-yet-described", issue: "#278" },
   "PATCH /api/communities/[id]": { kind: "not-yet-described", issue: "#278" },
@@ -216,25 +237,6 @@ export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
   "POST /api/microgrids/[id]/openems-backend/test": { kind: "not-yet-described", issue: "#279" },
   "POST /api/openems/channels": { kind: "not-yet-described", issue: "#279" },
 
-  // ── Not yet described: #280 (ACM B6), billing, payments and Pesapal ──
-  // Five of these routes carry a plain-string gate exemption in UNGATED_WRITES
-  // above: invoice-preview, the payment stub, the override PUT and DELETE, and
-  // payment-accounts. gui-surface.test.ts refuses an action on such a route
-  // (check 3), so describing one means gating its route first, or, for a
-  // Payments or Pesapal route, giving it a PaymentExemption. If check 3 stops
-  // refusing a plain-string exemption, revisit this note.
-  "POST /api/billing-review/preview": { kind: "not-yet-described", issue: "#280" },
-  "PATCH /api/communities/[id]/invoice-config": { kind: "not-yet-described", issue: "#280" },
-  "POST /api/communities/[id]/invoice-logo": { kind: "not-yet-described", issue: "#280" },
-  "POST /api/communities/[id]/invoice-preview": { kind: "not-yet-described", issue: "#280" },
-  "PUT /api/communities/[id]/payment": { kind: "not-yet-described", issue: "#280" },
-  "PUT /api/communities/[id]/payment/override": { kind: "not-yet-described", issue: "#280" },
-  "DELETE /api/communities/[id]/payment/override": { kind: "not-yet-described", issue: "#280" },
-  "DELETE /api/microgrids/[id]/grid-tariffs/[id]": { kind: "not-yet-described", issue: "#280" },
-  "POST /api/organizations/[id]/payment-accounts": { kind: "not-yet-described", issue: "#280" },
-  "POST /api/rate-schedules": { kind: "not-yet-described", issue: "#280" },
-  "PUT /api/rate-schedules/[id]": { kind: "not-yet-described", issue: "#280" },
-
   // ── Not yet described: #281 (ACM B7), organization directory and users ──
   "POST /api/organizations": { kind: "not-yet-described", issue: "#281" },
   "PATCH /api/organizations/[id]": { kind: "not-yet-described", issue: "#281" },
@@ -247,6 +249,21 @@ export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
   "POST /api/users/[id]/resend-invite": { kind: "not-yet-described", issue: "#281" },
   "PATCH /api/users/[id]/role": { kind: "not-yet-described", issue: "#281" },
   "POST /api/users/invite": { kind: "not-yet-described", issue: "#281" },
+
+  // ── Not yet described: #310 (ACM B9), billing's and payments' person routes ──
+  // The payment-accounts route and the override PUT and DELETE carry a
+  // plain-string gate exemption in UNGATED_WRITES above. gui-surface.test.ts
+  // refuses an action on such a route (check 3), so describing one means
+  // giving it a PaymentExemption first. If check 3 stops refusing a
+  // plain-string exemption, revisit this note.
+  "PATCH /api/communities/[id]/invoice-config": { kind: "not-yet-described", issue: "#310" },
+  "POST /api/communities/[id]/invoice-logo": { kind: "not-yet-described", issue: "#310" },
+  "PUT /api/communities/[id]/payment/override": { kind: "not-yet-described", issue: "#310" },
+  "DELETE /api/communities/[id]/payment/override": { kind: "not-yet-described", issue: "#310" },
+  "DELETE /api/microgrids/[id]/grid-tariffs/[id]": { kind: "not-yet-described", issue: "#310" },
+  "POST /api/organizations/[id]/payment-accounts": { kind: "not-yet-described", issue: "#310" },
+  "POST /api/rate-schedules": { kind: "not-yet-described", issue: "#310" },
+  "PUT /api/rate-schedules/[id]": { kind: "not-yet-described", issue: "#310" },
 };
 
 /**

@@ -6,7 +6,8 @@
  * src/lib/mgm/released-routes.ts releases is named, by its method and path,
  * by an action a plugin contributes to the GUI surface, or is listed in
  * UNDESCRIBED_WRITES (./route-rules.ts): `permanent`, with the reason the
- * route is not a person's action, or `not-yet-described`, with the issue in
+ * route is not a person's action or writes nothing, or `not-yet-described`,
+ * with the issue in
  * DESCRIBING_ISSUES that will describe its owner's routes. The actions come
  * from the snapshot of the runtime root, as in gui-surface.test.ts
  * (src/lib/gui/__tests__). That test holds each action to a real, released
@@ -171,7 +172,7 @@ describe("described writes", () => {
     expect(
       coverageProblems(await repoFacts(files)),
       "Describe the route as an action in its plugin's surface contribution, or list it in UNDESCRIBED_WRITES " +
-        "(src/lib/runtime/__tests__/route-rules.ts) with the reason it is not a person's action, or the issue that will describe it"
+        "(src/lib/runtime/__tests__/route-rules.ts) with the reason it is not a person's action or writes nothing, or the issue that will describe it"
     ).toEqual([]);
   });
 
