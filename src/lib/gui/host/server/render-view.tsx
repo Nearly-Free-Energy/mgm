@@ -40,6 +40,7 @@ import { surfaceSnapshot } from "./snapshot";
 import { UnitPicker } from "./unit-picker";
 import { readTenantUnits } from "./units";
 import { dispatchView, matchView, NOT_RELEASED, UNIT_REQUIRED, type HostOutcome } from "./view";
+import { BROWSER } from "@/lib/runtime/caller";
 
 export type PageSearch = Record<string, string | string[] | undefined>;
 
@@ -90,6 +91,8 @@ async function loadPageView(
   const made = hostContext(access, requestHeaders, {
     newClient: createClient,
     makeFmt: (locale) => createFmt({ locale }),
+    // A page is cookie-only: middleware refuses a bearer token on it.
+    caller: BROWSER,
   });
   const preferred = requestCookies.get(ORG_COOKIE)?.value ?? null;
   return made.ok ? { ctx: made.ctx, out: await dispatchView(made.ctx, href, { preferred }) } : { ctx: null, out: made };

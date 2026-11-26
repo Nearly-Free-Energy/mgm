@@ -1,6 +1,13 @@
 /**
  * A client's token at MGM's routes, end to end on the job's own Supabase
- * (#272; RFC #259 § 2; ADR-008 decisions 4, 6 and 9's early warning).
+ * (#272; RFC #259 § 2; ADR-008 decisions 4 and 6, and part of decision 9's
+ * early warning).
+ *
+ * Of that early warning, this file signs the operator client in through the
+ * OAuth server, calls a route with its token, revokes the grant, and checks
+ * that both the refresh and Supabase Auth's answer then fail. Signing the
+ * agent client in, and checking that its token runs as `mgm_agent` and is
+ * refused a write, wait for #274, which lets the hook issue one.
  *
  * A client signs in through Supabase Auth's OAuth server as `mgm login`
  * will: authorize, the person's approval with their browser session, the
@@ -15,9 +22,12 @@
  * settings under row-level security, and the request scope knows it is an
  * operator client; a tenant's operator token is refused by the same staff
  * route; revoking the grant with the browser session refuses the token at
- * once, at middleware and at the route's own getUser(); a request with both
- * a session cookie and the token is refused; an agent client's token is
- * refused that route, and a browser session's token is refused as a bearer;
+ * once, at middleware and at the route's own getUser(), and its refresh
+ * fails; a request with both a session cookie and the token is refused; an
+ * agent client's token is refused that route and, let on to the view route,
+ * builds a client the route reads as that agent client and is refused by
+ * the route itself (see that case for which refusal, until #274); a browser
+ * session's token is refused as a bearer;
  * a live token with a mark set by hand, as on a route middleware skipped, is
  * refused by the route's createClient.
  *
@@ -106,8 +116,8 @@ async function browserFor(userId: string, email: string): Promise<Person> {
   return { userId, email, browserToken: data.session!.access_token };
 }
 
-/** A whole client sign-in for `person`, ending in an access token. */
-async function signIn(person: Person): Promise<string> {
+/** A whole client sign-in for `person`, ending in an access token and its refresh token. */
+async function signIn(person: Person): Promise<{ access: string; refresh: string }> {
   const verifier = randomBytes(32).toString("base64url");
   const query = new URLSearchParams({
     response_type: "code",
@@ -145,7 +155,12 @@ async function signIn(person: Person): Promise<string> {
     },
   });
   expect(token.status, JSON.stringify(token.body)).toBe(200);
-  return token.body.access_token as string;
+  return { access: token.body.access_token as string, refresh: token.body.refresh_token as string };
+}
+
+/** The refresh `mgm` will make with a public client's refresh token. */
+function refresh(refreshToken: string) {
+  return auth("POST", "/oauth/token", { form: { grant_type: "refresh_token", refresh_token: refreshToken, client_id: clientId } });
 }
 
 /** The headers NextResponse.next() passes on to the route (x-middleware-override-headers). */
@@ -217,7 +232,7 @@ describe.skipIf(skip)("a client's bearer token at MGM's routes (#272)", { timeou
     clientId = created.body.client_id as string;
     const { error } = await svc.from("mgm_clients").insert({ client_id: clientId, kind: "operator", label: "MGM CLI (bearer test)" });
     expect(error).toBeNull();
-    staffToken = await signIn(staff);
+    staffToken = (await signIn(staff)).access;
   }, 90_000);
 
   afterAll(async () => {
@@ -256,7 +271,7 @@ describe.skipIf(skip)("a client's bearer token at MGM's routes (#272)", { timeou
   });
 
   it("refuses a tenant's operator token on the same staff route", async () => {
-    const tenantToken = await signIn(tenant);
+    const tenantToken = (await signIn(tenant)).access;
     const { from, res } = await getPlugins(tenantToken);
     expect(from).toBe("route");
     expect(res.status).toBe(403);
@@ -278,16 +293,17 @@ describe.skipIf(skip)("a client's bearer token at MGM's routes (#272)", { timeou
     expect(await res.json()).toEqual({ error: "Authentication required", code: "unauthenticated" });
   });
 
-  it("refuses an agent client on that route before it runs, and lets it on to the view route", async () => {
+  it("refuses an agent client on that route before it runs, and lets it on to the view route, which refuses it itself", async () => {
     // No agent client can sign in until #274 (the hook refuses it), so this
     // token carries the claims one will, signed with the project's secret;
     // Supabase Auth answers GET /user for it, as for a client's token.
     const now = Math.floor(Date.now() / 1000);
+    const agentClientId = randomUUID();
     const agentToken = await new SignJWT({
       sub: staff.userId,
       aud: "authenticated",
       role: "mgm_agent",
-      client_id: randomUUID(),
+      client_id: agentClientId,
       mgm_client_kind: "agent",
       iat: now,
       exp: now + 600,
@@ -300,12 +316,40 @@ describe.skipIf(skip)("a client's bearer token at MGM's routes (#272)", { timeou
     expect(await res.json()).toMatchObject({ code: "agent_route_refused" });
 
     const { middleware } = await import("@/middleware");
-    const view = await middleware(new NextRequest(`${APP}/api/gui/view?href=%2F`, { headers: { authorization: `Bearer ${agentToken}` } }));
-    expect(passedOn(view)?.get("x-mgm-credential")).toBe(credentialMark(agentToken));
+    const viewUrl = `${APP}/api/gui/view?href=%2F`;
+    const view = await middleware(new NextRequest(viewUrl, { headers: { authorization: `Bearer ${agentToken}` } }));
+    const headers = passedOn(view);
+    expect(headers?.get("x-mgm-credential")).toBe(credentialMark(agentToken));
+
+    // On the headers middleware passed on, the route's createClient builds a
+    // client that callerOf reads as this agent client: the caller
+    // openHostRequest hands the host.
+    forwarded = headers!;
+    const { createClient: requestClient } = await import("@/lib/supabase/server");
+    const { callerOf } = await import("@/lib/runtime/caller");
+    expect(callerOf(await requestClient())).toEqual({ kind: "agent", clientId: agentClientId });
+
+    // The view route itself, on the same headers. openHostRequest checks the
+    // session with getUser() on the agent's client and reads the person's
+    // role rows on it. Until #274 creates the mgm_agent role, the database
+    // cannot run as it, so no role rows come back and hostContext refuses
+    // with 403 gui_no_access, before the route's agent checks: this case
+    // does not yet show those. They are shown on this route with the client
+    // stood in, recorded as an agent client as above
+    // (src/app/api/gui/__tests__/agent-client.test.ts): 404 for a view not
+    // marked for an assistant, 409 assistant_disabled at the assistant gate
+    // for a marked one, the loader never called. When #274 lands, this case
+    // expects those answers here, with a marked view, and the stand-in is
+    // no longer the only evidence.
+    const { GET } = await import("@/app/api/gui/view/route");
+    const res2 = await GET(new NextRequest(viewUrl, { headers: headers! }));
+    expect(res2.status).toBe(403);
+    expect(await res2.json()).toMatchObject({ ok: false, code: "gui_no_access" });
+    expect(res2.headers.get("set-cookie")).toBeNull();
   });
 
   it("refuses a live token whose mark the client set by hand, as on a route middleware skipped", async () => {
-    const token = await signIn(staff);
+    const token = (await signIn(staff)).access;
     expect((await getPlugins(token)).res.status).toBe(200);
     for (const mark of ["bearer", credentialMark(staffToken)!]) {
       await expect(routeWith(new Headers({ authorization: `Bearer ${token}`, "x-mgm-credential": mark }))).rejects.toThrow(
@@ -314,8 +358,11 @@ describe.skipIf(skip)("a client's bearer token at MGM's routes (#272)", { timeou
     }
   });
 
-  it("refuses the token at once once the person revokes the client, at middleware and at the route's own session check", async () => {
-    const token = await signIn(staff);
+  it("refuses the token at once once the person revokes the client, at middleware and at the route's own session check, and its refresh fails", async () => {
+    const { access: token, refresh: refreshToken } = await signIn(staff);
+    // A real refresh token, or the refused refresh below would prove nothing.
+    expect(refreshToken).toEqual(expect.any(String));
+    expect(refreshToken.length).toBeGreaterThan(0);
     expect((await getPlugins(token)).res.status).toBe(200);
 
     const revoke = await auth("DELETE", `/user/oauth/grants?client_id=${clientId}`, { token: staff.browserToken });
@@ -330,5 +377,12 @@ describe.skipIf(skip)("a client's bearer token at MGM's routes (#272)", { timeou
     const direct = await routeWith(new Headers({ authorization: `Bearer ${token}`, "x-mgm-credential": credentialMark(token)! }));
     expect(direct.status).toBe(401);
     expect(await direct.json()).toMatchObject({ code: "plugin_unauthenticated" });
+
+    // The revoke deleted the client's session, so its refresh token gets no
+    // new token either (ADR-008 decisions 4 and 9).
+    const refreshed = await refresh(refreshToken);
+    expect(refreshed.status, JSON.stringify(refreshed.body)).toBeGreaterThanOrEqual(400);
+    expect(refreshed.status, JSON.stringify(refreshed.body)).toBeLessThan(500);
+    expect(refreshed.body.access_token).toBeUndefined();
   });
 });

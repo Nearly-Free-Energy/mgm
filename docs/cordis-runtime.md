@@ -281,9 +281,15 @@ runs, after the release allowlist:
 - the token's claims must name a client (`callerFromClaims` in
   `src/lib/runtime/caller.ts`: a uuid `client_id`, a kind, and the role
   that kind runs as; `client_id` with no kind was issued while the hook was
-  off and is refused), and Supabase Auth must answer `GET /user` for it
-  (`verifyBearer` in `src/lib/runtime/bearer.ts`), so a revoked client is
-  refused at once; otherwise `401 unauthenticated`;
+  off and is refused; a token with no `client_id` is a browser session's,
+  sent from a script, and is refused too: ADR-008's amendment of 26 Nov
+  2026), and Supabase Auth must answer `GET /user` for it (`verifyBearer`
+  in `src/lib/runtime/bearer.ts`), so a revoked client is refused at once;
+  otherwise `401 unauthenticated`. When Auth does not answer within five
+  seconds, cannot be reached, or answers with an error of its own (a `5xx`
+  or `429`), the request is `503 auth_unavailable` instead, still refused,
+  so the client can tell an outage from a dead token and try again rather
+  than sign in again;
 - an agent client may call only `AGENT_ROUTES`
   (`src/lib/runtime/agent-routes.ts`): `GET /api/gui/catalog` and
   `GET /api/gui/view`. Every other request, whatever its method, public
@@ -307,7 +313,12 @@ mark, it builds a client that sends the token as its global `Authorization`
 header, so PostgREST runs as the person and `auth.getUser()` asks Supabase
 Auth about the token: every `getUser()`-backed check (`getCurrentUserAccess`,
 `authorizeOrganization`, `authorizeTenant`, the composers) works unchanged
-and refuses a revoked client too. A bearer token without a matching mark
+and refuses a revoked client too. That holds only while Supabase Auth's
+`GET /user` answers a client's token, which v2.198.0 marks as a temporary
+exception. When an Auth version stops answering it, every bearer request is
+refused, closed, at middleware and at these checks, until `verifyBearer` and
+these checks move to `GET /oauth/userinfo` (ADR-008 decision 6;
+`docs/setup.md` tells an operator what that looks like). A bearer token without a matching mark
 throws, and so does any bearer token while `MGM_CLIENT_TOKENS` is off: a
 second fence for pages and for any page or route the middleware matcher
 skips, where nothing removes a mark the client set, which therefore never
@@ -338,9 +349,27 @@ agent client gets less (`src/lib/gui/host/server/agent.ts`):
   views) is settled first.
 
 An operator client holds the person's access: nothing grants or refuses
-anything by that kind. A new `/api` route is open to operator clients, like
-a browser session, and closed to agent clients unless it is added to
-`AGENT_ROUTES`, which is a change to what an assistant can reach.
+anything by that kind. For a new `/api` route:
+
+- It is open to operator clients, like a browser session, and closed to
+  agent clients unless it is added to `AGENT_ROUTES`, which is a change to
+  what an assistant can reach.
+- A route that must take only a browser session refuses clients itself:
+  it builds its client with `createClient` and answers `403` unless
+  `callerOf(client).kind === "browser"`, before it reads anything, with a
+  test that an operator client's token is refused. Recording the person's
+  approval of a client (ADR-008 decision 2) is one; ending another person's
+  client (decision 5) is likely another. Middleware does not know which
+  routes these are.
+- A webhook, worker or other caller with no MGM session cannot
+  authenticate with `Authorization: Bearer <secret>`. Middleware reads any
+  bearer header on a released path as a client token, public paths
+  included, and refuses it (`401`, or `403 client_tokens_off`) before the
+  route runs; a scheduler that sends its secret that way, such as a Vercel
+  Cron job, never reaches the route. Such a route takes its secret in a
+  header of its own, as the payments worker does
+  (`x-payments-worker-secret`), and compares it with `secretMatches`
+  (`@/lib/security/constant-time`).
 
 ## GUI surface
 
@@ -474,17 +503,40 @@ the catalog leaves `authorized` undecided, as above.
 
 `state` is also undecided without entities, when a bound kind is not
 given, when the action has no `available()`, and when an earlier check
-refused it. The request itself is refused with `gui_unauthenticated` (401),
-`gui_no_access` (403), `gui_bad_request` (400), `gui_not_found` (404),
-`gui_unavailable` (503), `gui_output_invalid` (500) or, for the manifest,
-`gui_manifest_failed` (500, also when `MGM_GUI` names no usable interface).
+refused it. The request itself is refused with one of the host's codes
+below, such as `gui_not_found` for an `org` the person cannot see.
 
 Every host route answers a refusal in `ActionResult`'s failure shape with
 `error` beside `message`, carrying the same text (`HostFailureBody` in
 `src/lib/gui/contract.ts`, sent by `hostFailure` in
 `src/lib/gui/host/server/http.ts`), so it also has the `{ error, code }`
-shape of the gate and the action routes. A client reads `code`, which is
-stable, and shows `error`.
+shape the gate and `parseJsonBody` answer. A client reads `code`, which is
+stable, and shows `error`. An action route's own refusals were written
+before the described API and are not all alike: some carry `code`, many a
+`reason` instead, some only `error`, and those billing's composer and
+capability build carry `message` in place of `error`. The GUI kit reads
+`code` when there is one, and `error`, else `message` (`failureOf` in
+`src/lib/gui/host/client/invoke.ts`); the OpenAPI document describes them
+the same way (`ActionRefusal`).
+
+The described API's error codes are listed in one place,
+`src/lib/gui/host/server/error-codes.ts`, each with what it means and the
+statuses it comes with: the host's `gui_` codes, the catalog's reasons
+among them; the gate's two refusals, `<plugin>_disabled` (409) and
+`<plugin>_gate_unavailable` (503); `invalid_body` (400), which
+`parseJsonBody` answers on every action route; and each code an action
+lists in `prepareAgainOn` (409), its route's own, on which the host
+prepares the action again (`PREPARE_AGAIN`). An action route's other codes
+are its own too and are not listed yet, since no field of an action names
+them. `openapi.test.ts` fails while an operation names a code the
+document does not list at that status. `error-codes.test.ts` fails while a
+`gui_` code written in the host's server modules or routes is missing from
+the list, a listed one is written nowhere, or a status written beside a
+code is not listed for it, and it asks the gate and `parseJsonBody` for
+theirs. Two answers come from
+middleware before any route and carry no code: a 401 `{ error }` for an
+API request with no session, and a plain-text 404 for a path not
+released.
 
 A watcher (`signals` in a contribution) reports what needs someone in one
 organization: a period not closed, a month with no period, a payment held for
@@ -762,6 +814,52 @@ Cordis service, and it opens no scope and never uses the service role.
   `gui-boundary.test.ts` lets only the files in its `ASSISTANT_READERS`
   import it, and keeps `dispatchView` and the signal collectors inside the
   host and its pages. The action catalog is not part of it.
+
+### The OpenAPI document
+
+`docs/api/openapi.json` is an OpenAPI 3.1 document of the described API,
+generated from the runtime root's surface snapshot by `openApiDocument`
+(`src/lib/gui/host/server/openapi.ts`):
+
+- one operation per action route, however many actions are sent to it:
+  its path parameters, each of the kind its actions bind; the whole body
+  the route parses (`describeBody`, bound fields and `confirmation`
+  included), required unless the route reads an empty body as `{}`
+  (`EMPTY_BODY_ROUTES`); the codes it refuses with, `invalid_body`, the gate's two
+  unless its actions declare `whilePluginOff`, and its `prepareAgainOn`
+  codes; and under `x-mgm-actions` each action as the catalog describes it
+  (`describeAction`), so the two cannot disagree. Each of its refusal
+  responses says its list is partial (`x-mgm-codes-complete: false`), and
+  its 401 is middleware's or the route's own, for a session Supabase Auth
+  refuses. A write's answer and the route's own codes are not described
+  yet;
+- one operation per host route (`HOST_ROUTES` in the same file), its
+  answer described by the strict schema the host parses it with, and the
+  codes it refuses with;
+- `x-mgm-error-codes`, the list from `error-codes.ts`, and on each
+  response the codes it carries (`x-mgm-codes`);
+- `x-mgm-released` on each operation, false for a route middleware does
+  not serve in this build: the catalog and the manifest until the CLI
+  ships (RFC #259 § 7).
+
+`info.version` is `GUI_CONTRACT`, and the document says the API is
+experimental while that is 0.x; the generator throws once it is not, so
+the stability statement is decided again then. It says too what that
+version does not cover: the actions, routes and codes the document lists
+change from one release to the next while `GUI_CONTRACT` stays, and an
+action's body is versioned by its own `inputVersion`. It is deterministic, so one
+commit always generates the same file. `npm run api:openapi` writes it,
+and `src/lib/gui/host/server/__tests__/openapi.test.ts`, in the `Test`
+gate, fails while the committed file differs from what the registry
+generates, while a registered action or a host route file
+(`src/app/api/gui/`) is not described, or while the gate's codes on an
+action route disagree with `UNGATED_WRITES`. The generator runs under
+vitest rather than as a script, because it needs the runtime root's
+modules resolved as the tests resolve them. Anything the generator reads
+changes the file, a route's release and `GUI_CONTRACT` included, so a
+merge conflict in it is resolved by taking either side and running
+`npm run api:openapi` again. Publishing the document with each release is
+not done yet (#282).
 
 ## The gate
 

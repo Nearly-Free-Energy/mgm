@@ -49,6 +49,7 @@ import * as organization from "../organization";
 import { DATA_KEYS } from "../parse";
 import { WITHHELD_EMBED, dispatchView } from "../view";
 import { ORG_A, ORG_B, managerOf, superAdmin, tableClient, tenantOf } from "./host-fakes";
+import { BROWSER } from "@/lib/runtime/caller";
 
 const MG = "e7100000-0000-4000-8002-0000000000a1";
 const TENANT = "e7100000-0000-4000-8009-000000000001";
@@ -124,6 +125,7 @@ function ctx(): HostContext {
     newClient: async () => tableClient(tables).client as SupabaseClient,
     makeFmt: (locale) => createFmt({ locale }),
     now: NOW,
+    caller: BROWSER,
   });
   if (!made.ok) throw new Error("fixture context refused");
   return made.ctx;

@@ -1,10 +1,11 @@
 /**
  * verifyBearer (ADR-008 decision 6): every bearer token that could be
  * accepted is asked about at Supabase Auth's GET /user, and accepted only
- * when Auth answers for the subject its claims name.
+ * when Auth answers for the subject its claims name. A refusal by Auth and no
+ * answer from it are told apart; both refuse.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { verifyBearer } from "../bearer";
+import { AUTH_TIMEOUT_MS, verifyBearer } from "../bearer";
 import { CLIENT_ID, USER_ID, agentClaims, browserClaims, operatorClaims, tokenWith } from "./token-fixtures";
 
 const SETTINGS = { url: "http://127.0.0.1:54321", anonKey: "sb_publishable_test" };
@@ -38,9 +39,60 @@ describe("verifyBearer", () => {
     expect(await verifyBearer(tokenWith(operatorClaims()), SETTINGS)).toEqual({ ok: false, reason: "auth_refused" });
   });
 
-  it("refuses when Supabase Auth cannot be reached", async () => {
+  it.each([
+    [401, { code: 401, error_code: "bad_jwt", msg: "invalid JWT" }],
+    [404, { code: 404, error_code: "user_not_found", msg: "User not found" }],
+  ])("refuses a token Supabase Auth answers %i for as auth_refused", async (status, body) => {
+    authAnswers(status, body);
+    expect(await verifyBearer(tokenWith(operatorClaims()), SETTINGS)).toEqual({ ok: false, reason: "auth_refused" });
+  });
+
+  it("refuses when Supabase Auth cannot be reached, as auth_unavailable rather than a refusal of the token", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("fetch failed"))));
-    expect(await verifyBearer(tokenWith(operatorClaims()), SETTINGS)).toMatchObject({ ok: false });
+    expect(await verifyBearer(tokenWith(operatorClaims()), SETTINGS)).toEqual({ ok: false, reason: "auth_unavailable" });
+  });
+
+  it.each([
+    [500, { code: 500, error_code: "unexpected_failure", msg: "Unexpected failure" }],
+    [502, { message: "Bad gateway" }],
+    [503, { message: "Service unavailable" }],
+    [429, { code: 429, error_code: "over_request_rate_limit", msg: "Rate limit exceeded" }],
+  ])("refuses as auth_unavailable when Supabase Auth answers %i", async (status, body) => {
+    authAnswers(status, body);
+    expect(await verifyBearer(tokenWith(operatorClaims()), SETTINGS)).toEqual({ ok: false, reason: "auth_unavailable" });
+  });
+
+  it("refuses as auth_unavailable when Supabase Auth answers with something that is not its JSON", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<html>gateway</html>", { status: 500, headers: { "content-type": "text/html" } })));
+    expect(await verifyBearer(tokenWith(operatorClaims()), SETTINGS)).toEqual({ ok: false, reason: "auth_unavailable" });
+  });
+
+  it("bounds the call to Supabase Auth by AUTH_TIMEOUT_MS, and refuses as auth_unavailable when it runs out", async () => {
+    // AbortSignal.timeout runs on Node's own timers, which fake timers do not
+    // reach, so the test stands in a signal it can fire itself.
+    const timeout = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeout.signal);
+    try {
+      let asked!: () => void;
+      const reached = new Promise<void>((resolve) => (asked = resolve));
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          (_input: RequestInfo | URL, init?: RequestInit) =>
+            new Promise<Response>((_resolve, reject) => {
+              init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason));
+              asked();
+            }),
+        ),
+      );
+      const pending = verifyBearer(tokenWith(operatorClaims()), SETTINGS);
+      await reached;
+      expect(timeoutSpy).toHaveBeenCalledWith(AUTH_TIMEOUT_MS);
+      timeout.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+      expect(await pending).toEqual({ ok: false, reason: "auth_unavailable" });
+    } finally {
+      timeoutSpy.mockRestore();
+    }
   });
 
   it("refuses a token whose subject is not the user Auth answers for", async () => {

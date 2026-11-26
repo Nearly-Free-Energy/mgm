@@ -37,6 +37,7 @@ import { getCurrentUserAccess } from "@/lib/auth/access";
 import { readForAssistant, WITHHELD_NOTE } from "../assistant-read";
 import { createFmt } from "../../../fmt";
 import { hostContext } from "../access";
+import { BROWSER } from "@/lib/runtime/caller";
 
 const ORG = "e7ad0000-0000-4000-8000-000000000001";
 const COMMUNITY = "e7ad0000-0000-4000-8001-000000000001";
@@ -93,6 +94,7 @@ describe.skipIf(shouldSkip())("readForAssistant: metering.site-day against a dat
     const host = hostContext(await getCurrentUserAccess(client), new Headers({ "accept-language": "en-GB" }), {
       newClient: async () => client,
       makeFmt: (locale) => createFmt({ locale }),
+      caller: BROWSER,
     });
     if (!host.ok) throw new Error(`[assistant-read.db] context refused: ${host.code}`);
     return readForAssistant(host.ctx, { type: "view", href, org: ORG });
