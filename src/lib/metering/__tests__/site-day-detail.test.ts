@@ -103,6 +103,35 @@ describe("computeSiteDayDetail — the evidence document's §4 example", () => {
     expect(detail.carry_in).toEqual({ gridV: [-1, 231.4], soc: [-1, 14.8] });
   });
 
+  it("keeps the six series as picked, one value per bin", () => {
+    for (const series of Object.values(detail.series)) expect(series).toHaveLength(288);
+    expect(detail.series.gridV[119]).toBe(229.8);
+    expect(detail.series.soc[119]).toBe(63);
+    expect(detail.series.gridV[227]).toBe(0);
+    expect(detail.series.gridV.slice(0, 19)).toEqual(Array(19).fill(null));
+    expect(detail.series.loadW[19]).toBe(300);
+    expect(detail.series.pvW).toEqual(Array(288).fill(null));
+  });
+
+  it("takes the first sample in a bin, as the day does", () => {
+    const samples = samplesAt(rows);
+    // A second sample in bin 119, a minute later: the series keeps the first.
+    const i = samples.timestamps.indexOf(DAY_START + 119 * BIN_MS);
+    samples.timestamps.splice(i + 1, 0, DAY_START + 119 * BIN_MS + MINUTE);
+    for (const key of ["batterySocPct", "batteryPowerW", "gridPowerW", "gridVoltageV", "loadPowerW", "pvPowerW"] as const) {
+      samples[key].splice(i + 1, 0, key === "gridVoltageV" ? 0 : 1);
+    }
+    const twice = computeSiteDayDetail({
+      date: DATE,
+      timezone: KAMPALA,
+      samples,
+      sources: ALL_SOURCES,
+      resolutionMinutes: BIN_MINUTES,
+      nowMs: DAY_START + 26 * 60 * MINUTE,
+    });
+    expect(twice.detail.series).toEqual(detail.series);
+  });
+
   it("returns each range with the reading that decided it", () => {
     expect(detail.dark_lowbat).toEqual({ ranges: [[0, 95]], min: 95, decidedBy: [soc(-1, 14.8)] });
     expect(detail.no_data).toEqual({
@@ -454,6 +483,49 @@ function expectInvariants(input: SiteDayInput, day: SiteDayOperations, detail: S
     expect(detail.carry_in[series]).toEqual(before ? [before.pos, before.v] : null);
     if (before) expect(before.pos).toBeLessThan(0);
   }
+  expectSeries(input, day, detail);
+}
+
+/**
+ * The six series hold one value per bin read, each the first sample in its
+ * bin (null for an empty bin), and every deciding reading inside the day is
+ * the value at its position.
+ */
+function expectSeries(input: SiteDayInput, day: SiteDayOperations, detail: SiteDayDetail) {
+  const binMs = input.resolutionMinutes * MINUTE;
+  const bins = Math.round((day.readUntilMs - day.dayStartMs) / binMs);
+  const firstInBin = new Map<number, number>();
+  input.samples.timestamps.forEach((t, i) => {
+    if (t < day.dayStartMs || t >= day.readUntilMs) return;
+    const pos = Math.floor((t - day.dayStartMs) / binMs);
+    if (!firstInBin.has(pos)) firstInBin.set(pos, i);
+  });
+  const sampled = {
+    soc: input.samples.batterySocPct,
+    batW: input.samples.batteryPowerW,
+    gridW: input.samples.gridPowerW,
+    gridV: input.samples.gridVoltageV,
+    loadW: input.samples.loadPowerW,
+    pvW: input.samples.pvPowerW,
+  };
+  expect(Object.keys(detail.series)).toEqual(Object.keys(sampled));
+  for (const [name, samples] of Object.entries(sampled) as [keyof typeof sampled, (number | null)[]][]) {
+    const series = detail.series[name];
+    expect(series).toHaveLength(bins);
+    expect(series).toHaveLength(day.soc.length);
+    const expected = Array.from({ length: bins }, (_, pos) => {
+      const i = firstInBin.get(pos);
+      return i === undefined ? null : (samples[i] ?? null);
+    });
+    expect(series, name).toEqual(expected);
+  }
+  expect(detail.series.soc).toEqual(day.soc.map((s) => s.pct));
+  const readings = [
+    ...detail.dark_cut.decidedBy,
+    ...detail.dark_lowbat.decidedBy,
+    ...detail.no_data.ruledOut.flatMap(({ grid, soc: s }) => [grid, s]),
+  ].filter((r): r is DecidingReading => r !== null && r.pos >= 0);
+  for (const r of readings) expect(detail.series[r.series][r.pos]).toBe(r.v);
 }
 
 /** These read hundreds of days; the default five seconds is too little on a loaded runner. */

@@ -291,9 +291,27 @@ export type MinuteRange = [start: number, end: number];
  * Z). If the ranges start reading source availability themselves, revisit.
  * The meter fields differ: `meter_readings` and `meter_outcomes` follow
  * `sources.houses` and are empty when it is false, while `meter_window`
- * depends only on the bins read.
+ * depends only on the bins read. `series` keeps every bin's six values, so
+ * a deciding reading at position `pos ≥ 0` is `series[reading.series][pos]`.
  */
 export type SiteDayDetail = {
+  /**
+   * The six site series as computeSiteDay picks them: for each bin read, the
+   * first sample in the bin, null for an empty bin. One value per bin read
+   * (`readUntilMs`), so a read that ends before the day holds fewer than the
+   * day's bins. A bin is online when any of the six has a value, which
+   * decides dark and no-data time. Values are as the provider returned them,
+   * unrounded. Evidence §4's `series` item copies these, with a series whose
+   * source is unavailable stored as null whole (site-day-evidence.ts).
+   */
+  series: {
+    soc: (number | null)[];
+    batW: (number | null)[];
+    gridW: (number | null)[];
+    gridV: (number | null)[];
+    loadW: (number | null)[];
+    pvW: (number | null)[];
+  };
   /** The previous day's last voltage and SoC readings, as `[pos, v]`; null when it had none. */
   carry_in: { gridV: [pos: number, v: number] | null; soc: [pos: number, v: number] | null };
   /** Gaps that began with the grid known to be off: decided by the voltage reading below GRID_PRESENT_MIN_V. */
@@ -734,6 +752,14 @@ export function computeSiteDayDetail(input: SiteDayInput): { day: SiteDayOperati
     return { ranges: list, min: list.reduce((sum, [start, end]) => sum + end - start, 0) };
   };
   const detail: SiteDayDetail = {
+    series: {
+      soc: bins.map((b) => b.soc),
+      batW: bins.map((b) => b.batteryW),
+      gridW: bins.map((b) => b.gridW),
+      gridV: bins.map((b) => b.volts),
+      loadW: bins.map((b) => b.loadW),
+      pvW: bins.map((b) => b.pvW),
+    },
     carry_in: carryIn,
     dark_cut: { ...causeRanges("dark_cut"), decidedBy: darkCutBy },
     dark_lowbat: { ...causeRanges("dark_lowbat"), decidedBy: darkLowbatBy },
