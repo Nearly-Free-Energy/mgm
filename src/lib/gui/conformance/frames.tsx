@@ -5,8 +5,9 @@
  * and portals the step into it, so the check sees what production renders.
  * The Overlay is wrapped only to count its onDismiss calls. The step is a
  * sentinel bespoke form (role "form") or the host's ConfirmStep with a plain
- * ceremony (role "confirm", tone "danger"). The tone is the prepared
- * action's, as the host takes it (action-host.tsx).
+ * ceremony (role "confirm"), in the danger tone of a delete and the neutral
+ * tone most confirmations now take (ADR-006 decision 10). The tone is the
+ * prepared action's, as the host takes it (action-host.tsx).
  */
 import { act, fireEvent, queryAllByRole, render, waitFor } from "@testing-library/react";
 import { Component, type ReactNode } from "react";
@@ -39,6 +40,7 @@ const PAGES = Object.keys({
 const CASES = [
   { role: "form", tone: "neutral" },
   { role: "confirm", tone: "danger" },
+  { role: "confirm", tone: "neutral" },
 ] as const;
 
 function prepared(role: OverlayProps["role"], tone: OverlayProps["tone"]): PreparedAction {
@@ -158,7 +160,7 @@ export async function frameFindings(gui: GuiPlugin): Promise<Finding[]> {
     const report = (fixture: string, message: string) => found.push({ check: "frames", fixture: `${fixture} at ${width} px`, message });
     if (gui.Overlay) {
       for (const { role, tone } of CASES) {
-        for (const message of await overlay(gui.Overlay, role, tone)) report(`Overlay, ${role}`, message);
+        for (const message of await overlay(gui.Overlay, role, tone)) report(`Overlay, ${role}, ${tone}`, message);
       }
     }
     if (gui.PublicFrame) {

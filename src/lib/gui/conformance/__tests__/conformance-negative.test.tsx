@@ -188,6 +188,9 @@ const PrintsCurrencyInBareCells = drawing((m) =>
 );
 const DropsNotice = drawing((m) => ({ ...m, notice: undefined }));
 const DropsConfirmStep = (p: OverlayProps) => <Overlay {...p}>{p.role === "confirm" ? null : p.children}</Overlay>;
+const DropsNeutralConfirmStep = (p: OverlayProps) => (
+  <Overlay {...p}>{p.role === "confirm" && p.tone === "neutral" ? null : p.children}</Overlay>
+);
 const OutsideOverlay = (p: OverlayProps) => (
   <>
     <Overlay {...p}>{null}</Overlay>
@@ -282,6 +285,7 @@ const BROKEN: Case[] = [
   ["frames", "has an Overlay that does not name its dialog", withOverlay((p) => <Overlay {...p} title="" />), /no dialog named/],
   ["frames", "has a PublicFrame without a main landmark", referenceGui({ publicNoMain: true }), /no main landmark/],
   ["frames", "has an Overlay that leaves out the confirm step only", withOverlay(DropsConfirmStep), /host's/, /^Overlay, confirm/],
+  ["frames", "has an Overlay that leaves out the neutral confirm step only", withOverlay(DropsNeutralConfirmStep), /host's/, /^Overlay, confirm, neutral/],
   ["frames", "has an Overlay that shows the host's step outside its dialog", withOverlay(OutsideOverlay), [/step inside the dialog$/, /^does not hold the host's/]],
   ["frames", "has a PublicFrame that leaves out its children", referenceGui({ publicNoChildren: true }), /^does not render its children$/],
   ["frames", "has a Loading that throws", referenceGui({ loadingThrows: true }), /^throws while rendering: Loading failed$/, /^Loading/],
