@@ -450,6 +450,14 @@ export async function prepareGenerateFromMeters(
   ]);
   if (bills === null || tenants === null) return GENERATE_REFUSALS.unavailable;
 
+  // Sorted here, in the request's locale, because the read above is by id so
+  // the counts match the engine's. The not-billed section (./not-billed.ts),
+  // the review's own tenants read above and the close review sort by
+  // display_name in Postgres instead, so where the database's collation and
+  // the locale's differ (case, accents), this confirmation can list the
+  // names in another order, and name other tenants among the five it shows
+  // before "and N more". The counts are the same either way. If the names
+  // must match the section, sort both the same way.
   const byName = [...tenants].sort((a, b) => a.display_name.localeCompare(b.display_name, req.locale) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const r = generateReadiness(
     period,
