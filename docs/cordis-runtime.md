@@ -596,7 +596,8 @@ Cordis service, and it opens no scope and never uses the service role.
   whose plugin is off is reported in `off`.
 - Every action, proposal and composer is removed. A model or signal that
   carries a reference `assistant-references.ts` refuses (tenant, device,
-  rate schedule, billing period, line item, payment attempt, a kind of a
+  rate schedule, billing period, line item, payment attempt, a tenant's
+  access (`community.tenant-access`), a kind of a
   plugin whose reading is refused, any `/api` path, a page path with a
   segment of a refused kind, a page path no view or catalog page serves,
   an undeclared search parameter or a fragment, an outside link, a share or

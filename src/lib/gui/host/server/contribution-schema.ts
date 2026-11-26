@@ -212,8 +212,10 @@ export function strictProblems(schema: z.ZodType): { path: Path; message: string
  *   is contributed as billing), payments and Pesapal carry bills, tenants
  *   and payment references; the tenant app is about a tenant's own unit;
  *   the operations plugin contributes nothing yet;
- * - a view whose path names a tenant, a device, or a billing or payment
- *   record (ASSISTANT_REFUSED_KINDS);
+ * - a view whose path names a tenant, a device, a billing or payment
+ *   record, or a tenant's access to its unit (community management's
+ *   `community.tenant-access`, whose label and step name the person's
+ *   address) (ASSISTANT_REFUSED_KINDS);
  * - a view that takes signals, which carries every watcher's answer;
  * - a view that declares a key prefix, whose keys the list's review cannot
  *   see.
@@ -252,15 +254,22 @@ export const ASSISTANT_READING: Readonly<Record<MgmPluginName, "per view" | "ref
 /**
  * The entity kinds whose records an assistant may never read: through a
  * view's path here, and as a reference in what a view or watcher emits
- * (./assistant-references.ts).
+ * (./assistant-references.ts). Besides the core kinds, community
+ * management's `community.tenant-access`, a tenant's access to its unit,
+ * whose label and step name the person's address. It is spelled here
+ * rather than imported, so the host imports nothing from a capability;
+ * assistant-references.test.ts pins it to TENANT_ACCESS_KIND. A plugin
+ * kind added later that names a tenant, a tenant's access, a bill or a
+ * payment joins this list, as it joins the action catalog's (./catalog.ts).
  */
-export const ASSISTANT_REFUSED_KINDS: ReadonlySet<string> = new Set<CoreEntityKind>([
+export const ASSISTANT_REFUSED_KINDS: ReadonlySet<string> = new Set<CoreEntityKind | "community.tenant-access">([
   "tenant",
   "device",
   "rateSchedule",
   "billingPeriod",
   "lineItem",
   "paymentAttempt",
+  "community.tenant-access",
 ]);
 
 const READS_LIST = "src/lib/gui/assistant-reads.ts";

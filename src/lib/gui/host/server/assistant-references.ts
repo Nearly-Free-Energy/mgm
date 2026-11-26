@@ -12,7 +12,8 @@ import "server-only";
  *
  * - an entity reference (`entity`, each of `related`, and `ref` on a Value
  *   with `t: "ref"`) of a kind in ASSISTANT_REFUSED_KINDS (tenant, device,
- *   rate schedule, billing period, line item, payment attempt), or of a
+ *   rate schedule, billing period, line item, payment attempt, community
+ *   management's tenant access), or of a
  *   plugin's own kind whose alias names no plugin in the catalog or a plugin
  *   ASSISTANT_READING refuses (./contribution-schema.ts). Devices are refused
  *   because an EntityRef's label is a device's name, which decision 6 keeps
@@ -67,7 +68,9 @@ const CORE: ReadonlySet<string> = new Set(CORE_ENTITY_KINDS);
 
 /** Whether an assistant may never be given a reference of entity kind `kind`. */
 export function refusedKind(kind: string): boolean {
-  if (CORE.has(kind)) return ASSISTANT_REFUSED_KINDS.has(kind);
+  // The list holds a plugin kind too, so it is asked before the plugin's reading.
+  if (ASSISTANT_REFUSED_KINDS.has(kind)) return true;
+  if (CORE.has(kind)) return false;
   const dot = kind.indexOf(".");
   if (dot <= 0) return true;
   const plugin = getPluginByAlias(kind.slice(0, dot));

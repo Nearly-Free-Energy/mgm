@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { TENANT_ACCESS_KIND } from "@/lib/community-management/surface";
 import type { MgmPluginName } from "@/lib/plugins/bundled";
 import type { ViewDef } from "../../../surface";
 import { findRefusedReference, hrefRefusal, refusedKind } from "../assistant-references";
@@ -209,6 +210,7 @@ describe("findRefusedReference", () => {
     ["the entity", (m: M) => (m.entity = ref("tenant")), "entity", "tenant"],
     ["a related entity", (m: M) => (m.body.rows[0].related = [ref("community"), ref("device")]), "body.rows.0.related.1", "device"],
     ["a row's entity", (m: M) => (m.body.rows[0].entity = ref("lineItem")), "body.rows.0.entity", "lineItem"],
+    ["a tenant's access", (m: M) => (m.entity = ref(TENANT_ACCESS_KIND)), "entity", "community.tenant-access"],
     ["a ref value", (m: M) => (m.body.rows[0].cells.a = value("billingPeriod")), "body.rows.0.cells.a.ref", "billingPeriod"],
     ["a ref value in a total", (m: M) => (m.body.totals = { a: value("paymentAttempt") }), "body.totals.a.ref", "paymentAttempt"],
     ["a trail href", (m: M) => (m.trail[0].href = `/microgrids/${MG}/setup/tenants/${ID}`), "trail.0.href", "tenant"],
@@ -306,5 +308,10 @@ describe("refusedKind", () => {
   it("refuses the boundary's core kinds and allows the places", () => {
     expect(["tenant", "device", "rateSchedule", "billingPeriod", "lineItem", "paymentAttempt"].filter(refusedKind)).toHaveLength(6);
     expect(["organization", "community", "microgrid", "edge"].filter(refusedKind)).toEqual([]);
+  });
+
+  it("refuses community management's tenant access, and not its other kinds", () => {
+    expect(refusedKind(TENANT_ACCESS_KIND)).toBe(true);
+    expect(refusedKind("community.other")).toBe(false);
   });
 });
