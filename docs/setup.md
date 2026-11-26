@@ -371,8 +371,8 @@ the version a project runs with `curl <supabase-url>/auth/v1/health -H
   the consent page at `site_url` plus that path. The CLI's built-in signing
   key is enough; no key setup is needed.
 - *Hosted:* leave the OAuth server off until the release you run includes
-  MGM's consent and code pages (#271), the resolver's check of client tokens
-  (#272) and the CLI. Before then no client can complete a sign-in, and a
+  MGM's consent and code pages (#271, released with the CLI), the
+  resolver's check of client tokens (#272) and the CLI. Before then no client can complete a sign-in, and a
   server that is on adds the turn-it-off-first step to every later change of
   the hook. Once they ship: in the dashboard's Authentication settings for
   the OAuth server, turn it on, set the authorization path to
@@ -387,14 +387,13 @@ the version a project runs with `curl <supabase-url>/auth/v1/health -H
 - *Docker mode:* the OAuth server stays off, so no client can sign in.
 
 If the access-token hook is not on, or the migrations up to
-`20261126090100` are not pushed, leave the OAuth server off.
+`20261126150000` are not pushed, leave the OAuth server off.
 
 **2. Register each client** with Supabase Auth's admin endpoint, as a
 public client: no secret, the grant types `authorization_code` and
 `refresh_token`, and one return address, MGM's sign-in code page,
-`/oauth/code`. #271 serves that page; if it ships at another path, register
-the clients again with that one. Return addresses must match exactly, port
-included. Locally:
+`/oauth/code`. Return addresses must match exactly, port included.
+Locally:
 
 ```bash
 eval "$(supabase status -o env | grep '^SERVICE_ROLE_KEY=')"
@@ -429,7 +428,30 @@ VALUES ('<client_id>', 'agent', 'MGM assistant bridge');
 ```
 
 Only the service role and the database owner can write the table; no
-browser or client token reads or writes it through the database API.
+browser or client token reads or writes it through the database API. The
+label is the name MGM's consent page shows the person.
+
+**What the person sees** (#271). These pages and routes answer 404 until the
+release that ships the CLI lists them in `src/lib/mgm/released-routes.ts`.
+
+- `mgm login --url <MGM's address>` first asks `GET /api/auth/discovery`,
+  which needs no session and answers with the public Supabase URL and anon
+  key, Supabase Auth's authorize and token endpoints, the code page's
+  address (`MGM_APP_URL` plus `/oauth/code`) and the id and kind of each
+  client in `mgm_clients`.
+- Supabase Auth sends the browser to `/oauth/consent`, signing the person in
+  first if needed. The page names the client (its label), its kind and what
+  that kind may do, and warns that a program on the computer that ran the
+  command will act as them. It asks Supabase Auth nothing until the person
+  clicks Connect, even for a client they approved before, which Supabase
+  Auth would approve on its first look. Connect records the approval through
+  `POST /api/auth/oauth/approvals`, which refuses a bearer token and a
+  cross-site request and checks the cookie session with Supabase Auth before
+  it writes one record for that sign-in (`mgm_client_approvals.authorization_id`);
+  only then does the page ask Supabase Auth for the code. Don't connect asks
+  nothing, and the sign-in expires on its own.
+- Supabase Auth then sends the browser to `/oauth/code`, which shows one
+  string, `<state>.<code>`, to paste into the terminal that asked for it.
 
 **Removing a client.** `DELETE FROM public.mgm_clients WHERE client_id =
 '<id>';` refuses its next sign-in and its next refresh. It ends no session:

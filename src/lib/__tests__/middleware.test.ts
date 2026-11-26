@@ -99,11 +99,78 @@ describe("middleware PUBLIC_PATHS", () => {
   });
   it.each([
     "/api/openems/status",
+    // Sign-in for clients that are not a browser (#271), released with the CLI.
+    "/oauth/consent?authorization_id=Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4z",
+    "/oauth/code?code=3f1d2c4b-5a6e-4f70-8a9b-0c1d2e3f4a5b&state=s",
+    "/api/auth/oauth/approvals",
+    "/api/auth/discovery",
   ])("returns 404 for unreleased route %s even when signed in", async (path) => {
     signedIn();
     const middleware = await loadMiddleware();
     const res = await middleware(makeRequest(path));
     expect(res.status).toBe(404);
+  });
+
+  // The sign-in routes for clients that are not a browser (#271) are not
+  // released yet, so the 404 above answers before PUBLIC_PATHS is read.
+  // These pretend they are released, so the session check they will meet
+  // then is pinned now: the code page and discovery pass through signed
+  // out, the consent page and the approvals route still ask for a session.
+  // Once released-routes.ts lists them, the doMock is redundant, not wrong.
+  describe("once the sign-in routes for other clients are released", () => {
+    const SIGN_IN_ROUTES = new Set([
+      "/oauth/consent",
+      "/oauth/code",
+      "/api/auth/oauth/approvals",
+      "/api/auth/discovery",
+    ]);
+
+    beforeEach(() => {
+      vi.doMock("@/lib/mgm/released-routes", async (importOriginal) => {
+        const actual = await importOriginal<typeof import("@/lib/mgm/released-routes")>();
+        return {
+          ...actual,
+          isReleasedRoute: (pathname: string) =>
+            SIGN_IN_ROUTES.has(pathname) || actual.isReleasedRoute(pathname),
+        };
+      });
+    });
+
+    afterEach(() => {
+      vi.doUnmock("@/lib/mgm/released-routes");
+    });
+
+    it.each([
+      "/oauth/code?code=3f1d2c4b-5a6e-4f70-8a9b-0c1d2e3f4a5b&state=s",
+      "/api/auth/discovery",
+    ])("passes %s through without a session", async (path) => {
+      signedOut();
+      const middleware = await loadMiddleware();
+      const res = await middleware(makeRequest(path));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("location")).toBeNull();
+    });
+
+    it("sends a signed-out visit to the consent page to /login", async () => {
+      signedOut();
+      const middleware = await loadMiddleware();
+      const res = await middleware(
+        makeRequest("/oauth/consent?authorization_id=Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4z"),
+      );
+      expect(res.status).toBe(307);
+      const location = new URL(res.headers.get("location")!);
+      expect(location.pathname).toBe("/login");
+    });
+
+    it("answers a signed-out approval with 401", async () => {
+      signedOut();
+      const middleware = await loadMiddleware();
+      const res = await middleware(
+        new NextRequest("http://localhost/api/auth/oauth/approvals", { method: "POST" }),
+      );
+      expect(res.status).toBe(401);
+      expect(res.headers.get("location")).toBeNull();
+    });
   });
 
   it.each([

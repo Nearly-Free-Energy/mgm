@@ -152,6 +152,11 @@ export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
   // A POST that writes nothing is here rather than an action: what it
   // answers is a read, and the twice-sent test (repeat.db.test.ts) can show
   // no action "safe" whose first send writes nothing.
+  "POST /api/auth/oauth/approvals": {
+    kind: "permanent",
+    reason:
+      "Records the approval MGM's consent page gives a client sign-in (ADR-008 decision 2), only from the person's cookie session and never for a bearer token, while an action is offered to any signed-in caller, a client included. Wrong once it records anything but the caller's own approval of a sign-in on that page.",
+  },
   "POST /api/auth/sign-in-link": {
     kind: "permanent",
     reason:

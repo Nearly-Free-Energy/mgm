@@ -27,6 +27,13 @@ const PUBLIC_PATHS = [
   // that sends it, before a session exists.
   "/auth/confirm",
   "/api/auth/sign-in-link",
+  // Sign-in for clients that are not a browser (RFC #259 § 1, #271): what
+  // `mgm login --url` asks before anyone is signed in, and the code page,
+  // which reads no session, so a lapsed one never sends the code through
+  // /login?next= into a sign-in email. Neither is released yet
+  // (released-routes.ts), so both answer 404 before this list is read.
+  "/api/auth/discovery",
+  "/oauth/code",
   "/api/mgm/health",
   // Release 4 (payments): Pesapal IPN webhook is an unauthenticated
   // server-to-server callback with no MGM session.
