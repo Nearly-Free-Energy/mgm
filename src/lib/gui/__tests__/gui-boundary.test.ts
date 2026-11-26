@@ -51,10 +51,15 @@
  *      assistantSignals only under src/lib/gui/host/; readForAssistant, the
  *      assistant read interface, only by the files in ASSISTANT_READERS. A
  *      namespace import, `export *` or import() of their modules counts as
- *      importing every one. So nothing reads a view or a watcher for an
- *      assistant except through readForAssistant, which serves only marked
- *      and listed ones (ADR-007 decision 7); #259 § 5's guard against
- *      domain-data read tools, which A3 adds, is the wider check.
+ *      importing every one. No file re-exports one, by `export … from`,
+ *      `export *` or an `export` of the imported binding, since a file
+ *      that may import it would pass it on to files that may not. So no
+ *      module imports a view or watcher read for an assistant except
+ *      through readForAssistant, which serves only marked and listed ones
+ *      (ADR-007 decision 7). A value passed on another way (assigned to an
+ *      exported variable, or handed to a callback) is not seen: #259 § 5's
+ *      guard against domain-data read tools, which A3 adds, is the wider
+ *      check.
  *
  * Apart from the rules, the npm packages a GUI imports must equal both its
  * REVIEWED_PACKAGES entry and its GuiMeta.dependencies (packageListProblems).
@@ -193,21 +198,31 @@ type Import = {
  * namespace or default import, `export *` and import() or require(), whose
  * names cannot be told. Type-only imports and specifiers are left out.
  */
-function valueBindings(source: ts.SourceFile): { specifier: string; names: string[] }[] {
-  const found: { specifier: string; names: string[] }[] = [];
+type ValueBinding = {
+  specifier: string;
+  /** The names taken from the module; "*" for all of them. */
+  names: string[];
+  /** Whether this is an `export … from` or `export *`, which passes the names on. */
+  reexport: boolean;
+  /** Each name's local binding, for an import: [name, local]. */
+  locals: [string, string][];
+};
+
+function valueBindings(source: ts.SourceFile): ValueBinding[] {
+  const found: ValueBinding[] = [];
   const visit = (node: ts.Node) => {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const clause = node.importClause;
       if (clause && !clause.isTypeOnly) {
-        const names: string[] = clause.name ? ["*"] : [];
+        const locals: [string, string][] = clause.name ? [["*", clause.name.text]] : [];
         const bindings = clause.namedBindings;
-        if (bindings && ts.isNamespaceImport(bindings)) names.push("*");
+        if (bindings && ts.isNamespaceImport(bindings)) locals.push(["*", bindings.name.text]);
         if (bindings && ts.isNamedImports(bindings)) {
           for (const element of bindings.elements) {
-            if (!element.isTypeOnly) names.push((element.propertyName ?? element.name).text);
+            if (!element.isTypeOnly) locals.push([(element.propertyName ?? element.name).text, element.name.text]);
           }
         }
-        found.push({ specifier: node.moduleSpecifier.text, names });
+        found.push({ specifier: node.moduleSpecifier.text, names: locals.map(([name]) => name), reexport: false, locals });
       }
     } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
       if (!node.isTypeOnly) {
@@ -216,22 +231,40 @@ function valueBindings(source: ts.SourceFile): { specifier: string; names: strin
           clause && ts.isNamedExports(clause)
             ? clause.elements.filter((element) => !element.isTypeOnly).map((element) => (element.propertyName ?? element.name).text)
             : ["*"];
-        found.push({ specifier: node.moduleSpecifier.text, names });
+        found.push({ specifier: node.moduleSpecifier.text, names, reexport: true, locals: [] });
       }
     } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
       const expression = node.moduleReference.expression;
-      if (!node.isTypeOnly && ts.isStringLiteral(expression)) found.push({ specifier: expression.text, names: ["*"] });
+      if (!node.isTypeOnly && ts.isStringLiteral(expression)) {
+        found.push({ specifier: expression.text, names: ["*"], reexport: false, locals: [["*", node.name.text]] });
+      }
     } else if (
       ts.isCallExpression(node) &&
       (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
         (ts.isIdentifier(node.expression) && node.expression.text === "require"))
     ) {
       const [argument] = node.arguments;
-      if (argument && ts.isStringLiteralLike(argument)) found.push({ specifier: argument.text, names: ["*"] });
+      if (argument && ts.isStringLiteralLike(argument)) found.push({ specifier: argument.text, names: ["*"], reexport: false, locals: [] });
     }
     ts.forEachChild(node, visit);
   };
   visit(source);
+  return found;
+}
+
+/** The local bindings a file exports by name: `export { a, b as c }` and `export default a`. */
+function exportedLocals(source: ts.SourceFile): Set<string> {
+  const found = new Set<string>();
+  for (const statement of source.statements) {
+    if (ts.isExportDeclaration(statement) && !statement.moduleSpecifier && !statement.isTypeOnly) {
+      const clause = statement.exportClause;
+      if (clause && ts.isNamedExports(clause)) {
+        for (const element of clause.elements) if (!element.isTypeOnly) found.add((element.propertyName ?? element.name).text);
+      }
+    } else if (ts.isExportAssignment(statement) && ts.isIdentifier(statement.expression)) {
+      found.add(statement.expression.text);
+    }
+  }
   return found;
 }
 
@@ -447,16 +480,18 @@ function boundaryViolations(
     const imports = importsOf(source);
 
     // 12. host-reads
-    for (const { specifier, names } of valueBindings(source)) {
+    const exported = exportedLocals(source);
+    for (const { specifier, names, reexport, locals } of valueBindings(source)) {
       const target = resolveLocal(file, specifier, files);
       if (!target) continue;
       const stem = target.path.replace(/\.tsx?$/, "").replace(/\/index$/, "");
       for (const read of HOST_READS) {
-        if (stem !== read.module || read.may(file)) continue;
+        if (stem !== read.module) continue;
         for (const name of read.names) {
-          if (names.includes(name) || names.includes("*")) {
-            report("host-reads", file, `imports ${name} from ${specifier}; only ${read.where} may`);
-          }
+          if (!names.includes(name) && !names.includes("*")) continue;
+          const passedOn = reexport || locals.some(([imported, local]) => (imported === name || imported === "*") && exported.has(local));
+          if (passedOn) report("host-reads", file, `re-exports ${name} from ${specifier}; no file may`);
+          else if (!read.may(file)) report("host-reads", file, `imports ${name} from ${specifier}; only ${read.where} may`);
         }
       }
     }
@@ -1367,6 +1402,22 @@ describe("the boundary checker catches each violation (self-tests)", () => {
       ]) {
         expect(rulesOf(check({ [file]: source })), source).toContain("host-reads");
       }
+    });
+
+    it("refuses a re-export of one, even from a file that may import it", () => {
+      for (const source of [
+        'export { dispatchView } from "./view";',
+        'export { dispatchView as load } from "./view";',
+        'export * from "./signals";',
+        'export * as signals from "./signals";',
+        'import { assistantSignals } from "./signals";\nexport { assistantSignals };',
+        'import { dispatchView as load } from "./view";\nexport { load as read };',
+        'import * as view from "./view";\nexport { view };',
+        'import { dispatchView } from "./view";\nexport default dispatchView;',
+      ]) {
+        expect(rulesOf(check({ [`${HOST_SERVER}reexport.ts`]: server(source) })), source).toContain("host-reads");
+      }
+      expect(rulesOf(check({ [`${HOST_SERVER}reexport.ts`]: server('import { dispatchView } from "./view";\nexport { other } from "./other";') }))).not.toContain("host-reads");
     });
   });
 });

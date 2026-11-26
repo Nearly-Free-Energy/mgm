@@ -299,7 +299,8 @@ function tally(org: string, found: Signal[], checked: Id[], unchecked: Id[]): Ho
  * unchecked, and none of its signals are given, with only its id logged.
  * Proposals keep the action the watcher's own resolution gives them, without
  * asking its available() (checkProposals), since the read interface removes
- * every action. `off` lists the admitted watchers skipped because their
+ * every action. If a caller of assistantSignals passes a proposal's action
+ * on, ask available() here again. `off` lists the admitted watchers skipped because their
  * plugin is off for `org`, so an assistant can tell "off" from "nothing to
  * report". Nothing is cached: the render slot holds every watcher's signals.
  */
