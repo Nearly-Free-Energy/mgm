@@ -6,8 +6,11 @@
  *
  *   1. contract: src/lib/gui/contract.ts is client-safe. It imports only
  *      types (`import type`), and only from the plugin catalog
- *      (@/lib/plugins/bundled), so a client that is not a GUI type-checks it
- *      without React.
+ *      (@/lib/plugins/bundled). Two further tests keep a client that is not
+ *      a GUI able to type-check it without React: no npm package is reached
+ *      through its imports (contractPackageReach), and it compiles with no
+ *      @types package, loading nothing outside src/ and TypeScript's
+ *      libraries (contractCompileProblems).
  *   2. server: src/lib/gui/surface.ts, src/lib/gui/fmt.ts and every file under
  *      src/lib/gui/host/server/ start with `import "server-only"`, so the
  *      Next.js build fails if a browser bundle reaches one.
@@ -88,11 +91,6 @@ const HOST_PAGES = "src/app/";
 const CONTRACT_TYPE_SOURCES = ["@/lib/plugins/bundled"];
 /** What contract-react.ts may import types from. */
 const CONTRACT_REACT_TYPE_SOURCES = ["react", "./contract"];
-/**
- * Packages the contract must not reach, even as types: a client that is not
- * a GUI, such as the CLI, type-checks contract.ts without them.
- */
-const REACT_PACKAGES = /^(react|react-dom|next)(\/|$)/;
 
 /** What any GUI package may import, besides its own files and its reviewed packages. */
 const GUI_ALLOWED = [
@@ -579,12 +577,16 @@ function boundaryViolations(
 }
 
 /**
- * Every package specifier matching REACT_PACKAGES that contract.ts reaches,
- * with the chain of files that reaches it. The walk follows every import,
- * type-only ones included, through the local files it resolves to, because a
- * type import makes the compiler load its module too.
+ * Every npm package, and every module named by a computed specifier, that
+ * contract.ts reaches, with the chain of files that reaches it. The walk
+ * follows every import, type-only ones included, through the local files it
+ * resolves to, because a type import makes the compiler load its module too.
+ * Any package counts, not only react: a package's own types may import React
+ * (lucide-react's and react-hook-form's do). The reach is empty today; if the
+ * contract ever needs a package, allow it here by name once its types are
+ * known to need no React.
  */
-function contractReactReach(files: Files): string[] {
+function contractPackageReach(files: Files): string[] {
   const found: string[] = [];
   const seen = new Set<string>([CONTRACT]);
   const queue: string[][] = [[CONTRACT]];
@@ -592,18 +594,82 @@ function contractReactReach(files: Files): string[] {
     const steps = queue.shift()!;
     const file = steps[steps.length - 1];
     for (const imported of importsOf(parse(file, files.get(file) ?? ""))) {
-      if (REACT_PACKAGES.test(imported.specifier)) {
-        found.push(`${steps.join(" → ")} imports ${imported.specifier}`);
-        continue;
-      }
       const target = resolveLocal(file, imported.specifier, files);
-      if (target?.exists && !seen.has(target.path)) {
+      if (!target) {
+        found.push(`${steps.join(" → ")} imports ${imported.specifier || "a computed module"}`);
+      } else if (target.exists && !seen.has(target.path)) {
         seen.add(target.path);
         queue.push([...steps, target.path]);
       }
     }
   }
   return found;
+}
+
+/** Library and package files the compile check reads from disk, parsed once for every program. */
+const diskSourceFiles = new Map<string, ts.SourceFile | undefined>();
+
+/**
+ * Type-checks contract.ts on its own, as a client that is not a GUI would:
+ * no @types package loaded automatically (`types: []`), files under src/
+ * read from `files`, everything else from disk. Returns every diagnostic,
+ * and every file the program loads besides those under src/ and
+ * TypeScript's own libraries. That catches what the import walk cannot see:
+ * a global such as `React.ReactNode` or `JSX.Element` (an error once
+ * @types/react is not loaded), and a `/// <reference types="react" />`
+ * directive (which loads @types/react). The options follow tsconfig.json's
+ * target, lib and module resolution; if those change, change them here.
+ */
+function contractCompileProblems(files: Files): string[] {
+  const options: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ES2017,
+    lib: ["lib.dom.d.ts", "lib.dom.iterable.d.ts", "lib.esnext.d.ts"],
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    isolatedModules: true,
+    strict: true,
+    noEmit: true,
+    skipLibCheck: true,
+    types: [],
+    paths: { "@/*": [path.join(REPO_ROOT, "src", "*")] },
+  };
+  const srcRoot = path.join(REPO_ROOT, "src") + path.sep;
+  const local = (fileName: string): string | null => {
+    const full = path.resolve(fileName);
+    return full.startsWith(srcRoot) ? path.relative(REPO_ROOT, full).split(path.sep).join("/") : null;
+  };
+  const host = ts.createCompilerHost(options, true);
+  const fromDisk = host.getSourceFile.bind(host);
+  host.fileExists = (fileName) => {
+    const file = local(fileName);
+    return file ? files.has(file) : ts.sys.fileExists(fileName);
+  };
+  host.readFile = (fileName) => {
+    const file = local(fileName);
+    return file ? files.get(file) : ts.sys.readFile(fileName);
+  };
+  host.getSourceFile = (fileName, languageVersion, onError, shouldCreate) => {
+    const file = local(fileName);
+    if (file) {
+      const text = files.get(file);
+      return text === undefined ? undefined : ts.createSourceFile(fileName, text, languageVersion, true);
+    }
+    if (!diskSourceFiles.has(fileName)) {
+      diskSourceFiles.set(fileName, fromDisk(fileName, languageVersion, onError, shouldCreate));
+    }
+    return diskSourceFiles.get(fileName);
+  };
+  const program = ts.createProgram({ rootNames: [path.join(REPO_ROOT, CONTRACT)], options, host });
+  const problems = ts.getPreEmitDiagnostics(program).map((diagnostic) => {
+    const where = diagnostic.file ? (local(diagnostic.file.fileName) ?? diagnostic.file.fileName) : "program";
+    return `${where}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")}`;
+  });
+  for (const source of program.getSourceFiles()) {
+    if (local(source.fileName) === null && !program.isSourceFileDefaultLibrary(source)) {
+      problems.push(`loads ${path.relative(REPO_ROOT, source.fileName).split(path.sep).join("/")}`);
+    }
+  }
+  return problems;
 }
 
 /** Every .ts and .tsx file under src/, test files included, keyed by repo-relative path. */
@@ -715,13 +781,20 @@ describe("GUI import boundaries in this repository", () => {
     expect(byRule("contract-react")).toEqual([]);
   });
 
-  it("the contract reaches no React", () => {
-    // contract.ts is what a client that is not a GUI, such as the CLI,
-    // imports (ADR-006 decision 1), and it type-checks without React only
-    // while this holds. If the CLI or the assistant read interface (A1-1 on
-    // #133) ever needs a React type from the contract, revisit the split
-    // between contract.ts and contract-react.ts rather than this test.
-    expect(contractReactReach(files)).toEqual([]);
+  // contract.ts is what a client that is not a GUI, such as the CLI, imports
+  // (ADR-006 decision 1). These two tests are what keep it type-checking
+  // without React: the first names any npm package its imports reach, the
+  // second compiles it with no @types package and fails on any error or any
+  // file loaded from outside src/ and TypeScript's libraries. If the CLI or
+  // the assistant read interface (A1-1 on #133) ever needs a React type from
+  // the contract, revisit the split between contract.ts and
+  // contract-react.ts rather than these tests.
+  it("the contract reaches no npm package through its imports", () => {
+    expect(contractPackageReach(files)).toEqual([]);
+  });
+
+  it("the contract type-checks with no @types package and loads nothing outside src/", () => {
+    expect(contractCompileProblems(files)).toEqual([]);
   });
 
   it('surface.ts, fmt.ts and host/server/ start with import "server-only"', () => {
@@ -910,33 +983,83 @@ describe("the boundary checker catches each violation (self-tests)", () => {
     });
   });
 
-  describe("the contract reaches no React", () => {
+  describe("the contract reaches no npm package", () => {
+    const bundled = "src/lib/plugins/bundled.ts";
+
     it("accepts a contract that reaches only the plugin catalog", () => {
       const files = new Map([
         [CONTRACT, 'import type { CoreEntityKind } from "@/lib/plugins/bundled";'],
-        ["src/lib/plugins/bundled.ts", "export type CoreEntityKind = string;"],
+        [bundled, "export type CoreEntityKind = string;"],
       ]);
-      expect(contractReactReach(files)).toEqual([]);
+      expect(contractPackageReach(files)).toEqual([]);
     });
 
     it("finds react, react-dom and next, through type imports and other files", () => {
-      expect(contractReactReach(new Map([[CONTRACT, 'import type { ReactNode } from "react";']]))).toEqual([
+      expect(contractPackageReach(new Map([[CONTRACT, 'import type { ReactNode } from "react";']]))).toEqual([
         `${CONTRACT} imports react`,
       ]);
-      expect(contractReactReach(new Map([[CONTRACT, 'type R = import("react-dom/client").Root;']]))).toEqual([
+      expect(contractPackageReach(new Map([[CONTRACT, 'type R = import("react-dom/client").Root;']]))).toEqual([
         `${CONTRACT} imports react-dom/client`,
       ]);
       const files = new Map([
         [CONTRACT, 'import type { CoreEntityKind } from "@/lib/plugins/bundled";'],
-        ["src/lib/plugins/bundled.ts", 'import type { Metadata } from "next";\nexport type CoreEntityKind = string;'],
+        [bundled, 'import type { Metadata } from "next";\nexport type CoreEntityKind = string;'],
       ]);
-      expect(contractReactReach(files)).toEqual([
-        `${CONTRACT} → src/lib/plugins/bundled.ts imports next`,
-      ]);
+      expect(contractPackageReach(files)).toEqual([`${CONTRACT} → ${bundled} imports next`]);
     });
 
-    it("does not mistake a package that only starts with react for it", () => {
-      expect(contractReactReach(new Map([[CONTRACT, 'import type { X } from "react-hook-form";']]))).toEqual([]);
+    it("finds a package whose name is not React's, since its own types may import React", () => {
+      const files = new Map([
+        [CONTRACT, 'import type { CoreEntityKind } from "@/lib/plugins/bundled";'],
+        [bundled, 'import type { LucideIcon } from "lucide-react";\nexport type CoreEntityKind = string;'],
+      ]);
+      expect(contractPackageReach(files)).toEqual([`${CONTRACT} → ${bundled} imports lucide-react`]);
+      expect(contractPackageReach(new Map([[CONTRACT, 'export const load = (name: string) => import(name);']]))).toEqual([
+        `${CONTRACT} imports a computed module`,
+      ]);
+    });
+  });
+
+  describe("the contract type-checks without React", () => {
+    const bundled = "src/lib/plugins/bundled.ts";
+    const withCatalog = (contract: string, catalog = "export type CoreEntityKind = string;") =>
+      new Map([
+        [CONTRACT, `import type { CoreEntityKind } from "@/lib/plugins/bundled";\n${contract}`],
+        [bundled, catalog],
+      ]);
+
+    it("accepts a contract that uses only the plugin catalog's types", () => {
+      expect(contractCompileProblems(withCatalog("export type Kind = CoreEntityKind;"))).toEqual([]);
+    });
+
+    it("refuses React's global names, which need no import", () => {
+      for (const contract of ["export type Node = React.ReactNode;", "export type Element = JSX.Element;"]) {
+        expect(contractCompileProblems(withCatalog(contract)), contract).not.toEqual([]);
+      }
+    });
+
+    it("refuses a triple-slash reference to React's types", () => {
+      const problems = contractCompileProblems(
+        new Map([
+          [CONTRACT, '/// <reference types="react" />\nexport type Node = React.ReactNode;'],
+          [bundled, ""],
+        ]),
+      );
+      expect(problems).toContainEqual(expect.stringMatching(/^loads node_modules\/@types\/react\//));
+    });
+
+    it("refuses a package reached through the plugin catalog", () => {
+      const problems = contractCompileProblems(
+        withCatalog(
+          "export type Kind = CoreEntityKind;",
+          'import type { LucideIcon } from "lucide-react";\nexport type Icon = LucideIcon;\nexport type CoreEntityKind = string;',
+        ),
+      );
+      expect(problems).toContainEqual(expect.stringMatching(/^loads node_modules\/lucide-react\//));
+    });
+
+    it("refuses a type error, such as a name the catalog does not export", () => {
+      expect(contractCompileProblems(withCatalog("export type Kind = CoreEntityKind;", ""))).not.toEqual([]);
     });
   });
 

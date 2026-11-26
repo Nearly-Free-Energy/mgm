@@ -77,10 +77,13 @@ read a stored credential, or to send data to another origin.
 5. **Import boundaries follow where code runs.**
    `src/lib/gui/__tests__/gui-boundary.test.ts` enforces them:
    - `contract.ts` imports only types, and only from
-     `@/lib/plugins/bundled`, and reaches no `react`, `react-dom` or `next`
-     module even as types, so a client that is not an interface type-checks
-     it without React. `contract-react.ts` holds `GuiKit`, `GuiPlugin` and
-     the kit's props, and imports only types, from `react` and `contract.ts`.
+     `@/lib/plugins/bundled`; no npm package is reached through its imports,
+     even as types; and it type-checks with no `@types` package loaded,
+     loading no file outside `src/` and TypeScript's own libraries. So a
+     client that is not an interface type-checks it without React.
+     `contract-react.ts` holds `GuiKit`, `GuiPlugin` and the kit's props,
+     imports only types, from `react` and `contract.ts`, and re-exports
+     nothing.
    - `surface.ts`, `fmt.ts` and everything under `src/lib/gui/host/server/`
      start with `import "server-only"`.
    - Everything under `src/lib/gui/host/client/` starts with `"use client"`.
