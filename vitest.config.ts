@@ -66,6 +66,7 @@ export default defineConfig({
             "src/lib/supabase/__tests__/meter_readings_insert_only.test.ts",
             "src/lib/supabase/__tests__/openems_id_format.test.ts",
             "src/lib/community-management/__tests__/actions.db.test.ts",
+            "src/lib/organization-directory/__tests__/actions.db.test.ts",
             "src/lib/supabase/__tests__/auth_access_token_hook.test.ts",
             "src/lib/supabase/__tests__/auth_access_token_hook_clients.test.ts",
             // Component tests of the interface kit and host run in the
@@ -138,6 +139,7 @@ export default defineConfig({
             "src/lib/supabase/__tests__/meter_readings_insert_only.test.ts",
             "src/lib/supabase/__tests__/openems_id_format.test.ts",
             "src/lib/community-management/__tests__/actions.db.test.ts",
+            "src/lib/organization-directory/__tests__/actions.db.test.ts",
             "src/lib/supabase/__tests__/auth_access_token_hook.test.ts",
             "src/lib/supabase/__tests__/auth_access_token_hook_clients.test.ts",
             "src/app/api/users/[id]/resend-invite/__tests__/rls-route.test.ts",

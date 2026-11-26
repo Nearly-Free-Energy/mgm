@@ -4,7 +4,10 @@
  * Every encrypted credential column holds a canary, stored through
  * fn_ems_encrypt_secret. An org manager of that organization then gets every
  * view, prepares every action, and runs every watcher and search in the real
- * root's snapshot, and no response
+ * root's snapshot, and a super admin prepares every action again, so a
+ * prepare that refuses anyone else before it reads (deleting an
+ * organization, changing a role, removing a person, billing's failed and
+ * refunded transitions) is scanned past that refusal too. No response
  * body or console line may carry any canary as plaintext, base64, hex or
  * stored ciphertext. Every view must be dispatched and its loader run, and
  * every action prepared and its own available() and prepare run, and every
@@ -88,6 +91,8 @@ const IDS: CanaryIds = {
   lineItemId: "e7400000-0000-4000-8005-000000000001",
   paymentAttemptId: "e7400000-0000-4000-8008-000000000001",
   tenantAccessId: "e7400000-0000-4000-800a-000000000001",
+  // The manager's invited colleague's account id, filled in beforeAll once it is created.
+  staffUserId: "",
   rateScheduleId: "e7400000-0000-4000-8006-000000000001",
   edgeId: "e7400000-0000-4000-800c-000000000001",
   deviceId: "e7400000-0000-4000-800b-000000000001",
@@ -98,10 +103,16 @@ const EMAIL = "gui-canary-manager@test.local";
 const TENANT_EMAIL = "gui-canary-tenant@test.local";
 /** The person whose access to the canary tenant (IDS.tenantAccessId) the access removal's prepare reads. */
 const ACCESS_EMAIL = "gui-canary-access@test.local";
+/** The manager's colleague, invited and not yet signed in: the `org.user` the user actions' prepares read (IDS.staffUserId). */
+const COLLEAGUE_EMAIL = "gui-canary-colleague@test.local";
+/** A super admin, who prepares every action a second time. */
+const SUPER_EMAIL = "gui-canary-super@test.local";
 const COLUMNS = Object.entries(CREDENTIAL_COLUMNS).flatMap(([t, cs]) => cs.map((c) => `${t}.${c}`));
 
 let manager: TestUser;
 let roles: UserRoleRecord[];
+let superAdmin: TestUser;
+let superRoles: UserRoleRecord[];
 let tenant: TestUser;
 let tenantRoles: UserRoleRecord[];
 let canaries: Canary[];
@@ -115,6 +126,7 @@ const contextOf = (user: TestUser, email: string, rows: UserRoleRecord[]) => {
   return made.ctx;
 };
 const ctx = () => contextOf(manager, EMAIL, roles);
+const superCtx = () => contextOf(superAdmin, SUPER_EMAIL, superRoles);
 /** A tenant of every seeded unit, and of nothing else. */
 const tenantCtx = () => contextOf(tenant, TENANT_EMAIL, tenantRoles);
 
@@ -125,7 +137,7 @@ async function cleanup() {
   const svc = await serviceClient();
   const { error } = await svc.from("payment_merchant_versions").delete().eq("org_id", IDS.orgId);
   if (error) throw new Error(`[cleanup] payment_merchant_versions: ${error.message}`);
-  await cleanupTestData({ orgIds: [IDS.orgId], userEmails: [EMAIL, TENANT_EMAIL, ACCESS_EMAIL] });
+  await cleanupTestData({ orgIds: [IDS.orgId], userEmails: [EMAIL, TENANT_EMAIL, ACCESS_EMAIL, COLLEAGUE_EMAIL, SUPER_EMAIL] });
 }
 
 beforeAll(async () => {
@@ -154,9 +166,22 @@ beforeAll(async () => {
   const svc = await serviceClient();
   canaries = await seedCanaries(svc, IDS);
   manager = await createTestUser({ email: EMAIL, role: "org_manager", scopeId: IDS.orgId });
+  // An invitation not yet accepted, as the invite route makes one: an
+  // account whose address is not confirmed, with its role.
+  const colleague = await svc.auth.admin.createUser({ email: COLLEAGUE_EMAIL, email_confirm: false });
+  if (colleague.error || !colleague.data.user) throw new Error(`[fixture] colleague: ${colleague.error?.message ?? "none"}`);
+  IDS.staffUserId = colleague.data.user.id;
+  const colleagueRole = await svc
+    .from("user_roles")
+    .insert({ user_id: IDS.staffUserId, role: "org_manager", scope_type: "org", scope_id: IDS.orgId });
+  if (colleagueRole.error) throw new Error(`[fixture] colleague role: ${colleagueRole.error.message}`);
   const { data, error } = await svc.from("user_roles").select("*").eq("user_id", manager.userId);
   if (error || !data?.length) throw new Error(`[fixture] user_roles: ${error?.message ?? "none"}`);
   roles = data as UserRoleRecord[];
+  superAdmin = await createTestUser({ email: SUPER_EMAIL, role: "super_admin", scopeId: null });
+  const supers = await svc.from("user_roles").select("*").eq("user_id", superAdmin.userId);
+  if (supers.error || !supers.data?.length) throw new Error(`[fixture] super admin user_roles: ${supers.error?.message ?? "none"}`);
+  superRoles = supers.data as UserRoleRecord[];
   const [first, ...rest] = IDS.unitIds;
   tenant = await createTestUser({
     email: TENANT_EMAIL,
@@ -370,6 +395,20 @@ describe.skipIf(shouldSkip())("credential canary", () => {
     const results = await prepareEveryAction(ctx(), snapshot, IDS, serve);
     expect(new Set(results.map((r) => r.id)).size).toBe(snapshot.actions.size);
     for (const r of results) assertNoCanary(r.output, canaries, `${r.id} (${r.href}, ${r.status})`);
+  });
+
+  it("no action in the real snapshot returns or logs a stored credential when a super admin prepares it", async () => {
+    const snapshot = (await getMgmRuntime()).mgmSurface.snapshot();
+    const results = await prepareEveryAction(superCtx(), snapshot, IDS, serve);
+    expect(new Set(results.map((r) => r.id)).size).toBe(snapshot.actions.size);
+    for (const r of results) assertNoCanary(r.output, canaries, `${r.id} as a super admin (${r.href}, ${r.status})`);
+    // The prepares an org manager is refused at their first line get past it
+    // here: changing the colleague's role and removing them are built in
+    // full, and deleting the organization reads everything under it, which
+    // keeps it, since the seeded period has a recorded payment.
+    const answers = (id: string) => results.filter((r) => r.id === id).map((r) => [r.status, r.output.split("\n")[0]]);
+    for (const id of ["org.change-role", "org.remove-user"]) expect(answers(id).map(([status]) => status), id).toContain(200);
+    expect(answers("org.delete-organization")).toEqual([[409, expect.stringContaining("with recorded payments")]]);
   });
 
   it("no watcher or search in the real snapshot returns or logs a stored credential", async () => {

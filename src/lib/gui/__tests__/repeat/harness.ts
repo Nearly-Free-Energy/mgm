@@ -3,7 +3,8 @@
  * it is sent to its route, and the snapshot that shows whether a send wrote.
  *
  * Each plugin with "safe" actions has a case module beside this file
- * (./billing.ts, ./payments.ts, ./community-management.ts, ./metering.ts). A module seeds its own organization under
+ * (./billing.ts, ./payments.ts, ./community-management.ts, ./metering.ts,
+ * ./organization-directory.ts). A module seeds its own organization under
  * its own UUID prefix and lists one or more cases for each of its "safe"
  * actions. A case names no route: it is sent to the handler its action's own
  * method and path name (handlerFor). A plugin that contributes its first
@@ -81,6 +82,11 @@ export interface Ignored {
 export interface Fixture {
   /** The organization whose rows the snapshot reads. */
   orgId: string;
+  /**
+   * Other organizations whose rows the snapshot also reads, for a case that
+   * acts on a whole organization other than `orgId`, such as deleting one.
+   */
+  otherOrgIds?: readonly string[];
   /** The people the module's cases are sent as. */
   users: Readonly<Partial<Record<Caller, TestUser>>>;
 }
@@ -126,6 +132,11 @@ export type Snapshot = Record<string, Row[]>;
 
 /** Each table the snapshot reads, with its primary key. */
 const KEYS: Readonly<Record<string, readonly string[]>> = {
+  organizations: ["id"],
+  mgm_plugins: ["id"],
+  mgm_plugin_audit_log: ["id"],
+  organization_email_senders: ["org_id"],
+  user_profiles: ["user_id"],
   communities: ["id"],
   microgrids: ["id"],
   tenants: ["id"],
@@ -157,12 +168,16 @@ const COLUMNS: Readonly<Record<string, string>> = { microgrids: MICROGRID_PUBLIC
 /**
  * Stored secrets in tables read whole, each value replaced by a fingerprint
  * (the start of its SHA-256), so a send that rewrites one still changes the
- * snapshot and a failing case's diff prints no secret. Today that is
+ * snapshot and a failing case's diff prints no secret. Today those are
  * communities.payment_provider_secret_encrypted, the retired community-level
- * Pesapal secret; no other table read here stores one. If a table read
- * here gains a secret column, add it.
+ * Pesapal secret, and organization_email_senders.password_encrypted, the
+ * organization's mail server password; no other table read here stores
+ * one. If a table read here gains a secret column, add it.
  */
-const SECRETS: Readonly<Record<string, readonly string[]>> = { communities: ["payment_provider_secret_encrypted"] };
+const SECRETS: Readonly<Record<string, readonly string[]>> = {
+  communities: ["payment_provider_secret_encrypted"],
+  organization_email_senders: ["password_encrypted"],
+};
 
 const fingerprint = (value: unknown) =>
   value === null || value === undefined ? value : `sha256:${createHash("sha256").update(String(value)).digest("hex").slice(0, 16)}`;
@@ -188,19 +203,25 @@ async function rows(
 }
 
 /**
- * Every row of the organization's in each table a community management,
- * billing, payments or metering write route reaches, read with the service
- * role: its communities, microgrids, tenants, edges and devices, the meter
- * links of its tenants and of its devices, the role rows scoped to it or to
- * its tenants, its devices' readings, and its billing and payments rows. A
- * new "safe" action whose route writes another table adds that table here,
- * or the test cannot see its writes.
+ * Every row of the organizations' in each table an organization directory,
+ * community management, billing, payments or metering write route reaches,
+ * read with the service role: the organizations themselves, their plugin
+ * states and plugin audit log, their mail senders, their communities,
+ * microgrids, tenants, edges and devices, the meter links of their tenants
+ * and of their devices, the role rows scoped to them or to their tenants, the
+ * profiles of the people holding those rows, their devices' readings, and
+ * their billing and payments rows. A new "safe" action whose route writes
+ * another table adds that table here, or the test cannot see its writes.
  */
-export async function snapshot(orgId: string): Promise<Snapshot> {
+export async function snapshot(orgIds: readonly string[]): Promise<Snapshot> {
   const svc = await serviceClient();
   const ids = (list: Row[], column = "id") => list.map((r) => String(r[column]));
   const out: Snapshot = {};
-  out.communities = await rows(svc, "communities", [["org_id", [orgId]]]);
+  out.organizations = await rows(svc, "organizations", [["id", orgIds]]);
+  for (const table of ["mgm_plugins", "mgm_plugin_audit_log", "organization_email_senders"]) {
+    out[table] = await rows(svc, table, [["org_id", orgIds]]);
+  }
+  out.communities = await rows(svc, "communities", [["org_id", orgIds]]);
   out.microgrids = await rows(svc, "microgrids", [["community_id", ids(out.communities)]]);
   const mg = ids(out.microgrids);
   out.tenants = await rows(svc, "tenants", [["microgrid_id", mg]]);
@@ -213,16 +234,17 @@ export async function snapshot(orgId: string): Promise<Snapshot> {
     ["tenant_id", ids(out.tenants)],
     ["device_id", ids(out.devices)],
   ]);
-  out.user_roles = await rows(svc, "user_roles", [["scope_id", [orgId, ...ids(out.tenants)]]]);
+  out.user_roles = await rows(svc, "user_roles", [["scope_id", [...orgIds, ...ids(out.tenants)]]]);
+  out.user_profiles = await rows(svc, "user_profiles", [["user_id", [...new Set(ids(out.user_roles, "user_id"))]]]);
   for (const table of ["billing_periods", "rate_schedules", "grid_tariffs", "microgrid_savings_settings"]) {
     out[table] = await rows(svc, table, [["microgrid_id", mg]]);
   }
   const periods = ids(out.billing_periods);
   out.billing_line_items = await rows(svc, "billing_line_items", [["billing_period_id", periods]]);
-  out.billing_audit_log = await rows(svc, "billing_audit_log", [["billing_period_id", periods], ["org_id", [orgId]]]);
+  out.billing_audit_log = await rows(svc, "billing_audit_log", [["billing_period_id", periods], ["org_id", orgIds]]);
   out.payment_events = await rows(svc, "payment_events", [["line_item_id", ids(out.billing_line_items)]]);
   for (const table of ["payment_attempts", "payment_receipts", "payment_notifications"]) {
-    out[table] = await rows(svc, table, [["org_id", [orgId]]]);
+    out[table] = await rows(svc, table, [["org_id", orgIds]]);
   }
   out.meter_readings = await rows(svc, "meter_readings", [["device_id", ids(out.devices)]]);
   return out;

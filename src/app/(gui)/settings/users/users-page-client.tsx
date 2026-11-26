@@ -68,18 +68,18 @@ export function UsersPageClient(props: UsersPageClientProps) {
   // super_admin can change any role. org_manager cannot change roles.
   const canChangeRoleAny = props.callerRole === SUPER_ADMIN;
 
+  /**
+   * Revoke is offered to super admins only, for anyone but themselves, as
+   * org.remove-user's prepare offers it (prepareRemoveUser in
+   * src/lib/organization-directory/surface/users.ts). DELETE /api/users/[id]
+   * deletes with the caller's own client, and the user_roles SELECT policies
+   * show an org manager only their own rows (00002_rls.sql), so the route
+   * removes no colleague's row for them and answers 403. If an org manager is
+   * ever given a SELECT policy on colleagues' role rows, revisit this.
+   */
   function canRevokeFor(row: UserVisibleRow): boolean {
     if (row.user_id === props.currentUserId) return false;
-    if (props.callerRole === SUPER_ADMIN) return true;
-    // org_manager can revoke rows scoped to an org they manage.
-    if (
-      row.scope_type === "org" &&
-      row.scope_id != null &&
-      props.callerOrgIds.includes(row.scope_id)
-    ) {
-      return true;
-    }
-    return false;
+    return props.callerRole === SUPER_ADMIN;
   }
 
   /**

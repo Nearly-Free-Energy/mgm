@@ -89,6 +89,16 @@ const ACTION_IDS = [
   "metering.register-edges",
   "metering.save-connection",
   "metering.save-devices",
+  "org.change-role",
+  "org.delete-organization",
+  "org.invite-user",
+  "org.remove-email-sender",
+  "org.remove-user",
+  "org.resend-invite",
+  "org.save-email-sender",
+  "org.set-plugin",
+  "org.update-organization",
+  "org.update-profile",
   "payments.accept-receipts",
   "payments.record-adjustment",
   "payments.refresh-attempt",
@@ -326,6 +336,28 @@ describe.skipIf(shouldSkip())("GET /api/gui/catalog against the database", () =>
     ]);
     expect(byId(body).get("billing.bill-from-readings")).toMatchObject({ params: { periodId: DRAFT, tenantId: TENANT } });
     expect(text).not.toContain(TENANT_NAME);
+  });
+
+  it("resolves a person (org.user) of the manager's organization, asks available() and never names them", async () => {
+    caller = manager;
+    const { body, text } = await answer(`?entity=org.user:${manager.userId}`);
+    expect(body).toMatchObject({ org: ORG, entities: [{ kind: "org.user", id: manager.userId }] });
+    const actions = byId(body);
+    expect([...actions.keys()].sort()).toEqual(["org.change-role", "org.remove-user", "org.resend-invite", "org.update-profile"]);
+    // Their own profile: available() answers for them.
+    expect(actions.get("org.update-profile")!.availability).toEqual({ available: true, reasons: [], unchecked: ["configured", "authorized"] });
+    expect(text).not.toContain(EMAIL);
+  });
+
+  it("answers 404 for a person the manager's list does not show: one whose rows are all tenant rows, or no one", async () => {
+    caller = manager;
+    for (const id of [tenantUser.userId, "e8900000-0000-4000-800b-0000000000ff"]) {
+      const res = await catalog(`?entity=org.user:${id}`);
+      expect(res.status, id).toBe(404);
+      const text = await res.text();
+      expect(JSON.parse(text)).toMatchObject({ code: "gui_not_found" });
+      expect(text).not.toContain(TENANT_EMAIL);
+    }
   });
 
   it("gives a person whose rows are all tenant rows no actions, and a 404 for their own unit", async () => {
