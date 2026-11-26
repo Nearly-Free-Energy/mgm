@@ -4,6 +4,11 @@ import {
   composeCommunityManagement,
   type CommunityManagementError,
 } from "@/lib/community-management";
+import {
+  CREATE_TENANT_REFUSALS,
+  CreateTenantBody,
+} from "@/lib/community-management/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 function mapError(error: CommunityManagementError): NextResponse {
   const { ok, status, code, message, field, reason } = error;
@@ -20,7 +25,7 @@ function mapError(error: CommunityManagementError): NextResponse {
 }
 
 /**
- * POST /api/tenants/with-meter
+ * POST /api/tenants/with-meter, as `community.create-tenant`.
  *
  * Creates a tenant. Originally written for the Add-Tenant wizard
  * (UX2 / #74) when meter assignment was mandatory; route name is preserved
@@ -38,6 +43,10 @@ function mapError(error: CommunityManagementError): NextResponse {
  * INVOKER — RLS on tenants and tenant_devices decides whether the
  * caller may write.
  *
+ * The body is CreateTenantBody (src/lib/community-management/schemas.ts),
+ * refused with this route's own answers (CREATE_TENANT_REFUSALS) before
+ * anything is read.
+ *
  * Response:
  *   201 { tenant_id: string }
  *   400 invalid JSON | tenant_phone_required (#155)
@@ -47,21 +56,10 @@ function mapError(error: CommunityManagementError): NextResponse {
  *   500 unexpected
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const microgridId =
-    typeof body.microgrid_id === "string" ? body.microgrid_id.trim() : "";
-  if (!microgridId) {
-    return NextResponse.json(
-      { error: "microgrid_id is required.", field: "microgrid_id" },
-      { status: 422 }
-    );
-  }
+  const parsed = await parseJsonBody(request, CreateTenantBody, CREATE_TENANT_REFUSALS);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
+  const microgridId = body.microgrid_id;
 
   const supabase = await createClient();
   const { data: microgrid } = await supabase

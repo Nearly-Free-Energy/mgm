@@ -139,6 +139,28 @@ export function createSupabaseCommunityRepository(
       return { data: (data as Microgrid | null) ?? null, error: null };
     },
 
+    async getMicrogridCurrencyUse(microgridId: string) {
+      const [microgrid, closed] = await Promise.all([
+        supabase
+          .from("microgrids")
+          .select("id, currency")
+          .eq("id", microgridId)
+          .maybeSingle<{ id: string; currency: string }>(),
+        supabase
+          .from("billing_periods")
+          .select("id", { count: "exact", head: true })
+          .eq("microgrid_id", microgridId)
+          .eq("status", "closed"),
+      ]);
+      if (microgrid.error) return { data: null, error: toError(microgrid.error) };
+      if (closed.error) return { data: null, error: toError(closed.error) };
+      if (!microgrid.data) return { data: null, error: null };
+      return {
+        data: { currency: microgrid.data.currency, closedPeriods: closed.count ?? 0 },
+        error: null,
+      };
+    },
+
     async createTenant(args: Record<string, unknown>, withMeter: boolean) {
       const { data, error } = withMeter
         ? await supabase.rpc("fn_create_tenant_with_meter", args as never)

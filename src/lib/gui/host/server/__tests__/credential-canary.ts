@@ -114,6 +114,13 @@ export type CanaryIds = {
    */
   paymentAttemptId: string;
   /**
+   * A person's access to `tenantId`'s pages: the id of their tenant role
+   * row, which is the `community.tenant-access` entity the access removal's
+   * path names, so its prepare runs. The test creates the person and the
+   * row, since seedCanaries creates no account.
+   */
+  tenantAccessId: string;
+  /**
    * One tenant unit per seeded microgrid, in canaryMicrogrids order: tenant
    * views are dispatched as a tenant holding every one of them. Each unit
    * has that microgrid's house meter (TENANT_METER_COMPONENT, on its first
@@ -383,6 +390,7 @@ function seededParams(ids: CanaryIds, kinds: Record<string, EntityKind>, what: s
     lineItem: [ids.lineItemId],
     tenant: [ids.tenantId],
     paymentAttempt: [ids.paymentAttemptId],
+    "community.tenant-access": [ids.tenantAccessId],
   };
   /** Each seeded row's parent, by the parent's kind. */
   const parentOf: Record<string, { kind: EntityKind; id: string }> = {
@@ -390,6 +398,7 @@ function seededParams(ids: CanaryIds, kinds: Record<string, EntityKind>, what: s
     [ids.lineItemId]: { kind: "billingPeriod", id: ids.billingPeriodId },
     [ids.paymentAttemptId]: { kind: "lineItem", id: ids.lineItemId },
     [ids.tenantId]: { kind: "microgrid", id: ids.microgridIds.basic },
+    [ids.tenantAccessId]: { kind: "tenant", id: ids.tenantId },
   };
   let combos: Record<string, string>[] = [{}];
   for (const [name, kind] of Object.entries(kinds)) {

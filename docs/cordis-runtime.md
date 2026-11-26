@@ -326,6 +326,22 @@ key is a 400.
   organization but holds a unit, or whose rows are all tenant rows, gets no
   actions, since every action is a staff route.
 
+An entry's `confirm` is the level of the step the GUI host shows before it
+sends, and the host sends the confirmation that step asks for. The route
+stays the authority and checks that confirmation on every write (ADR-006,
+decision 10), so a client other than the host sends what its entry's level
+asks for too. The typed deletes refuse a request without it: billing's
+period delete answers 428 `billing_delete_confirmation_required`, and
+community management's three (`DELETE /api/communities/[id]`,
+`/api/microgrids/[id]` and `/api/tenants/[id]`) answer 428
+`*_delete_confirmation_required`, each naming the record to type; a
+confirmation with another name, or none typed, answers 428
+`*_delete_name_mismatch`. Nothing is deleted on either. The community
+page and the tenants list send the name their dialogs ask for; no page
+deletes a microgrid, which only the GUI host's typed step does. Community management's access removal is a
+ceremony with nothing to tick or type, so its route has nothing in it to
+check.
+
 An entry's `availability` lists each check that refused it in `reasons`,
 and each check not decided in `unchecked`, so `available: true` means only
 that nothing refused it:
@@ -417,6 +433,19 @@ capability method outside its `LOADER_READS`, so a new contributing plugin
 lists the module that exports its contribution in `SURFACE_MODULES` there,
 as an `@/` specifier. That module's exports must reach every function the
 plugin registered.
+
+A route described after it shipped may keep the answers it gave bad bodies
+before: `parseJsonBody` (`src/lib/validation/parse-body.ts`) takes the
+route's own refusals (`BodyRefusals`), which replace its generic 400 for
+each issue the route answered itself. Community management's routes do
+(the `*_REFUSALS` in `src/lib/community-management/schemas.ts`, which its
+`schemas.test.ts` holds to the capability's own answers); a new route
+answers the generic 400. A path segment that names a plugin's own entity
+kind resolves through the `organizationOf` the plugin contributes.
+Community management's `community.tenant-access`, a tenant's access to its
+unit, is the first: an org manager cannot read the role row it names, so
+it resolves only beside the tenant whose access list holds it
+(`tenantAccessOrganization`).
 
 The reverse direction is checked by
 `src/lib/runtime/__tests__/described-writes.test.ts`: every write handler
