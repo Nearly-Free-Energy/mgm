@@ -7,7 +7,8 @@ import "server-only";
  * used to live inline in the session route `POST /api/billing/generate`
  * (removed once nothing called it, #201). Its callers:
  *
- *   1. `BillingCapability.previewBills` — mode='preview', the one unguarded
+ *   1. Billing review's preview (src/lib/cordis/billing-review.ts, for POST
+ *      /api/billing-review/preview) — mode='preview', the one unguarded
  *      run, which writes nothing.
  *      `tenantIds`: undefined → all metered/un-metered tenants on the
  *      period's microgrid; `[]` → explicit no-op; `[uuid, …]` → only those.

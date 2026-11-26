@@ -51,11 +51,10 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 vi.mock("@/lib/billing/compose", () => ({
-  composeBilling: vi.fn(async (o: { organizationId: string; readOnly?: boolean }) => {
+  composeBilling: vi.fn(async (o: { organizationId: string }) => {
     if (composeResult) return composeResult;
     expect(o.organizationId).toBe(ORG);
     // A write: the composer checks the plugin gate.
-    expect(o.readOnly).toBeUndefined();
     return { ok: true, data: { billing: { billFromReadings }, dispose } };
   }),
 }));

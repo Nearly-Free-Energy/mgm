@@ -309,7 +309,8 @@ function periodsNoManualRevert(
 }
 
 /**
- * The input BillingCapability.generateBills and previewBills parse with.
+ * The input BillingCapability's bill generation parses with (generateBills,
+ * and generateFromMeters and billFromReadings through it).
  */
 export const GenerateBillsBody = z
   .strictObject(

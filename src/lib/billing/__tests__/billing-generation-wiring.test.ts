@@ -222,29 +222,6 @@ describe("billing generation wiring (assignment-date enforcement)", () => {
     });
   });
 
-  it("previewBills reaches the engine with effective-dated assignments required", async () => {
-    const composed = await composeBilling({
-      supabase: makeSupabase(),
-      organizationId: ORG_ID,
-    });
-    if (!composed.ok) throw new Error("expected composition");
-
-    try {
-      const result = await composed.data.billing.previewBills({
-        billingPeriodId: PERIOD_ID,
-      });
-      expect(result).toMatchObject({ ok: true });
-    } finally {
-      await composed.data.dispose();
-    }
-
-    expect(capturedParams).toMatchObject({
-      periodId: PERIOD_ID,
-      mode: "preview",
-      requireEffectiveDatedAssignments: true,
-      allowUsageOnlyReadings: true,
-    });
-  });
   it("generation uses a newly registered provider for its configured microgrid", async () => {
     const runtime = await getMgmRuntime();
     const getReadings = vi.fn(async () => []);

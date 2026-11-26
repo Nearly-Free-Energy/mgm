@@ -150,7 +150,7 @@ const MODULES: Record<string, Module> = {
   "src/lib/billing/compose.ts": {
     privilegedExports: ["BillingPlugin"],
     reason:
-      "composeBilling runs authorizeOrganization (getUser) before it opens a scope, readOnly or not; BillingPlugin builds a provider in whatever scope loads it.",
+      "composeBilling runs authorizeOrganization (getUser) before it opens a scope; BillingPlugin builds a provider in whatever scope loads it.",
   },
   "src/lib/tenant-app/compose.ts": {
     privilegedExports: ["TenantAppPlugin"],

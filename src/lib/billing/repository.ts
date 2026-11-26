@@ -102,7 +102,8 @@ export interface BillingGeneration {
     manualReadings?: ManualReadingInput[];
     revertToEdgeTenantIds?: string[];
     seedReadings?: SeedReadingInput[];
-    mode: "write" | "preview";
+    /** The capability only writes; a preview runs through billing review (src/lib/cordis/billing-review.ts). */
+    mode: "write";
     actorUserId: string;
     /** A per-bill regeneration's bill as read (RunGenerationParams.expectedBill). */
     expectedBill?: ExpectedBill;
@@ -195,7 +196,6 @@ export interface BillingCapabilityContract {
     periodId: string,
     input?: unknown
   ): Promise<BillingResult<{ period: BillingPeriodRow; unresolved: UnresolvedTenant[] }>>;
-  previewBills(input: unknown): Promise<BillingResult<GenerationOutput>>;
   /**
    * Regenerates one bill as it was read: `options.expectedBill` makes the
    * run a per-bill regeneration (RunGenerationParams.expectedBill), and is
