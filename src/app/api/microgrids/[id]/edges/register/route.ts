@@ -3,11 +3,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { gateRoute } from "@/lib/runtime/gate";
 import { meteringFixturesEnabled } from "@/lib/config/metering-fixtures";
-import {
-  OPENEMS_ID_FORMAT_HINT,
-  firstDuplicateOpenEmsId,
-  parseOpenEmsId,
-} from "@/lib/openems/ids";
+import { firstDuplicateOpenEmsId } from "@/lib/openems/ids";
+import { OPENEMS_ID_FORMAT_HINT, parseOpenEmsId } from "@/lib/openems/ids";
 import {
   SYNTHETIC_EDGE_ID_PREFIX,
   isSyntheticEdgeId,
