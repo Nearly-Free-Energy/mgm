@@ -3,18 +3,20 @@ import { NextRequest } from "next/server";
 
 type Call = { table: string; op: string; args: unknown[] };
 
-/** A query builder that records its calls and resolves `result` when awaited. */
-function builder(table: string, calls: Call[], result: () => unknown) {
+/** A query builder that records its calls and resolves `result` when awaited; `deleting` once delete() was called on it. */
+function builder(table: string, calls: Call[], result: (deleting: boolean) => unknown) {
   const query: Record<string, unknown> = {};
+  let deleting = false;
   for (const op of ["select", "eq", "update", "insert", "delete"]) {
     query[op] = (...args: unknown[]) => {
       calls.push({ table, op, args });
+      if (op === "delete") deleting = true;
       return query;
     };
   }
-  query.maybeSingle = async () => result();
+  query.maybeSingle = async () => result(deleting);
   query.then = (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) =>
-    Promise.resolve(result()).then(resolve, reject);
+    Promise.resolve(result(deleting)).then(resolve, reject);
   return query;
 }
 
@@ -22,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   access: vi.fn(),
   user: vi.fn(),
   saved: vi.fn(),
+  removed: vi.fn(),
   encrypt: vi.fn(),
   decrypt: vi.fn(),
   write: vi.fn(),
@@ -38,8 +41,8 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
     auth: { getUser: mocks.user },
     from: (table: string) =>
-      builder(table, mocks.userCalls, () =>
-        table === "organizations" ? { data: { name: "Kiwumu Energy" }, error: null } : mocks.saved()
+      builder(table, mocks.userCalls, (deleting) =>
+        table === "organizations" ? { data: { name: "Kiwumu Energy" }, error: null } : deleting ? mocks.removed() : mocks.saved()
       ),
     rpc: mocks.encrypt,
   }),
@@ -99,6 +102,7 @@ beforeEach(() => {
   mocks.access.mockResolvedValue(true);
   mocks.user.mockResolvedValue({ data: { user: { email: "manager@example.org" } } });
   mocks.saved.mockReturnValue({ data: SAVED, error: null });
+  mocks.removed.mockReturnValue({ data: null, error: null, count: 1 });
   mocks.encrypt.mockResolvedValue({ data: "\\xdeadbeef", error: null });
   mocks.decrypt.mockResolvedValue({ data: "saved-password", error: null });
   mocks.write.mockReturnValue({ data: { ...SAVED, version: 4 }, error: null });
@@ -233,17 +237,90 @@ describe("PUT /api/organizations/[id]/email-sender", () => {
 });
 
 describe("DELETE /api/organizations/[id]/email-sender", () => {
-  it("deletes on the caller's client, under RLS", async () => {
+  it("deletes on the caller's client, under RLS, only the version it read", async () => {
+    const response = await DELETE(
+      new NextRequest("https://mgm.test", {
+        method: "DELETE",
+        body: JSON.stringify({ confirmation: { acknowledged: [], typed: "smtp.example.com" } }),
+        headers: { "Content-Type": "application/json" },
+      }),
+      params
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.userCalls).toContainEqual({ table: "organization_email_senders", op: "delete", args: [{ count: "exact" }] });
+    expect(mocks.userCalls.slice(-2)).toEqual([
+      { table: "organization_email_senders", op: "eq", args: ["org_id", ORG] },
+      { table: "organization_email_senders", op: "eq", args: ["version", 3] },
+    ]);
+    expect(mocks.service).not.toHaveBeenCalled();
+  });
+
+  it("deletes nothing when no sender is saved", async () => {
     mocks.saved.mockReturnValue({ data: null, error: null });
     const response = await DELETE(new NextRequest("https://mgm.test", { method: "DELETE" }), params);
     expect(response.status).toBe(200);
-    expect(mocks.userCalls).toContainEqual({ table: "organization_email_senders", op: "delete", args: [] });
-    expect(mocks.service).not.toHaveBeenCalled();
+    expect(await response.json()).toEqual({ sender: null });
+    expect(mocks.userCalls.filter((c) => c.op === "delete")).toHaveLength(0);
+  });
+
+  it("answers 409 version_conflict when the sender was saved again after it was read and confirmed", async () => {
+    mocks.removed.mockReturnValue({ data: null, error: null, count: 0 });
+    const response = await DELETE(
+      new NextRequest("https://mgm.test", {
+        method: "DELETE",
+        body: JSON.stringify({ confirmation: { acknowledged: [], typed: "smtp.example.com" } }),
+        headers: { "Content-Type": "application/json" },
+      }),
+      params
+    );
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "version_conflict" });
   });
 
   it("refuses a caller without access", async () => {
     mocks.access.mockResolvedValue(false);
     expect((await DELETE(new NextRequest("https://mgm.test", { method: "DELETE" }), params)).status).toBe(403);
     expect(mocks.userCalls).toHaveLength(0);
+  });
+
+  // org.remove-email-sender is a typed action: the saved server's name,
+  // which the route requires while a sender is saved.
+  const remove = (body?: unknown) =>
+    DELETE(
+      new NextRequest("https://mgm.test", {
+        method: "DELETE",
+        ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { "Content-Type": "application/json" } }),
+      }),
+      params
+    );
+  const deleted = () => mocks.userCalls.filter((c) => c.op === "delete");
+
+  it("requires the saved server's name, typed, naming it, while a sender is saved", async () => {
+    for (const body of [undefined, {}]) {
+      const response = await remove(body);
+      expect(response.status).toBe(428);
+      expect(await response.json()).toEqual({
+        error: "Type the mail server's name, smtp.example.com, to remove these settings.",
+        code: "email_sender_delete_confirmation_required",
+      });
+    }
+    const wrong = await remove({ confirmation: { acknowledged: [], typed: "smtp.other.com" } });
+    expect(wrong.status).toBe(428);
+    expect(await wrong.json()).toMatchObject({ code: "email_sender_delete_name_mismatch", field: "confirmation" });
+    expect(deleted()).toHaveLength(0);
+
+    const right = await remove({ confirmation: { acknowledged: [], typed: "SMTP.example.com" } });
+    expect(right.status).toBe(200);
+    expect(await right.json()).toEqual({ sender: null });
+    expect(deleted()).toHaveLength(1);
+  });
+
+  it("reads the saved sender without its password, and refuses a body that is not RemoveEmailSenderBody", async () => {
+    await remove();
+    const read = mocks.userCalls.find((c) => c.table === "organization_email_senders" && c.op === "select");
+    expect(String(read?.args[0])).not.toMatch(/password/);
+    const bad = await remove({ host: "smtp.example.com" });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ code: "invalid_body" });
   });
 });

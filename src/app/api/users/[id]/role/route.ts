@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { SUPER_ADMIN, ORG_MANAGER } from "@/lib/roles";
-import type { UserRole } from "@/lib/types/domain";
+import { ORG_MANAGER } from "@/lib/roles";
+import { CHANGE_ROLE_REFUSALS, ChangeRoleBody } from "@/lib/organization-directory/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -20,6 +21,12 @@ const UUID_RE =
  * Errors surface as Postgres ERRCODE 42501 / 22023; the BEFORE DELETE
  * trigger also fires during the RPC's internal DELETE → can raise
  * 40000 (last super_admin) or 42501 (self).
+ *
+ * Described as `org.change-role`, a ceremony: the body is ChangeRoleBody
+ * (src/lib/organization-directory/schemas.ts), refused with this route's own
+ * answers (CHANGE_ROLE_REFUSALS). Its `confirmation` carries nothing to
+ * check. What a change does is fn_change_user_role's alone: the route calls
+ * it for every send, including one asking for the role the person holds.
  *
  * Error contract: { error: string }
  *   403 — not authorized (42501 or self-revoke)
@@ -40,22 +47,10 @@ export async function PATCH(
     );
   }
 
-  let body: { role?: UserRole; scope_id?: string | null };
-  try {
-    body = (await request.json()) as { role?: UserRole; scope_id?: string | null };
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
+  const parsed = await parseJsonBody(request, ChangeRoleBody, CHANGE_ROLE_REFUSALS);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
   const role = body.role;
-  if (role !== SUPER_ADMIN && role !== ORG_MANAGER) {
-    return NextResponse.json(
-      {
-        error: `Role must be one of '${SUPER_ADMIN}' or '${ORG_MANAGER}'.`,
-      },
-      { status: 422 }
-    );
-  }
 
   let scopeId: string | null = null;
   if (role === ORG_MANAGER) {

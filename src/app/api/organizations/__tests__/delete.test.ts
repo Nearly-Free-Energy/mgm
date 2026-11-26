@@ -6,6 +6,8 @@
  *   - DELETE: 403 unauthorized (not super_admin)
  *   - DELETE: 404 entity not found
  *   - DELETE: 204 happy path + asserts the structured log payload shape
+ *   - DELETE: 428 without the organization's name typed, or with another
+ *     (org.delete-organization is a typed action the route requires)
  *   - Preview: 200 happy path returns { entity, descendant_counts, as_of, parent }
  */
 
@@ -121,9 +123,14 @@ function configureEntityLookup(
 
 const VALID_UUID = "550e8400-e29b-41d4-a716-446655440000";
 
-function makeRequest(): NextRequest {
+/** A DELETE with no body at all. */
+const NO_BODY = Symbol("no body");
+
+/** The DELETE the organization page and the GUI host send: the name typed, as the route requires. */
+function makeRequest(body: unknown = { confirmation: { acknowledged: [], typed: "NFE" } }): NextRequest {
   return new NextRequest(`http://localhost/api/organizations/${VALID_UUID}`, {
     method: "DELETE",
+    ...(body === NO_BODY ? {} : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
   });
 }
 
@@ -260,6 +267,47 @@ describe("DELETE /api/organizations/[id]", () => {
       params: Promise.resolve({ id: VALID_UUID }),
     });
     expect(res.status).toBe(404);
+  });
+
+  it("returns 428 without the name typed, naming it, and deletes nothing", async () => {
+    configureEntityLookup({ data: { id: VALID_UUID, name: " NFE " }, error: null });
+    const { DELETE } = await import("../[id]/route");
+    for (const body of [NO_BODY, {}]) {
+      const res = await DELETE(makeRequest(body), { params: Promise.resolve({ id: VALID_UUID }) });
+      expect(res.status).toBe(428);
+      expect(await res.json()).toEqual({
+        error: "Type the organization's name, NFE, to delete it.",
+        code: "organization_delete_confirmation_required",
+      });
+    }
+    expect(mockRpcImpl).not.toHaveBeenCalled();
+  });
+
+  it("returns 428 for another name, and takes the name in another case or spacing", async () => {
+    configureEntityLookup({ data: { id: VALID_UUID, name: "NFE Uganda" }, error: null });
+    const { DELETE } = await import("../[id]/route");
+    const wrong = await DELETE(makeRequest({ confirmation: { acknowledged: [], typed: "NFE" } }), {
+      params: Promise.resolve({ id: VALID_UUID }),
+    });
+    expect(wrong.status).toBe(428);
+    expect(await wrong.json()).toMatchObject({ code: "organization_delete_name_mismatch", field: "confirmation" });
+    expect(mockRpcImpl).not.toHaveBeenCalled();
+
+    mockRpcImpl.mockResolvedValueOnce({ data: 1, error: null });
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const right = await DELETE(makeRequest({ confirmation: { acknowledged: [], typed: "  nfe   uganda " } }), {
+      params: Promise.resolve({ id: VALID_UUID }),
+    });
+    expect(right.status).toBe(204);
+  });
+
+  it("answers a caller who is not a super admin 403 before asking for the name, and a malformed body 400", async () => {
+    isSuperAdminReturn = false;
+    const { DELETE } = await import("../[id]/route");
+    expect((await DELETE(makeRequest(NO_BODY), { params: Promise.resolve({ id: VALID_UUID }) })).status).toBe(403);
+    const bad = await DELETE(makeRequest({ name: "NFE" }), { params: Promise.resolve({ id: VALID_UUID }) });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ code: "invalid_body" });
   });
 
   it("returns 409 when entity has an empty name (cannot type-to-confirm)", async () => {

@@ -18,7 +18,17 @@
  *     shows that the saved server stopped working.
  *
  * DELETE — remove the sender. The organization's notices then go through
- * the deployment's sender (#186 decision 1).
+ * the deployment's sender (#186 decision 1). While a sender is saved, the
+ * route requires its mail server's name, typed (RemoveEmailSenderBody):
+ * 428 `email_sender_delete_confirmation_required` without a confirmation,
+ * and 428 `email_sender_delete_name_mismatch` for another name. It deletes
+ * only the version it read, so a sender saved again since answers 409
+ * `version_conflict` and stays. With none saved it answers
+ * `{ sender: null }` as before, confirmed or not, and deletes nothing.
+ *
+ * Described as actions (RFC #259 § 3): PUT is `org.save-email-sender`,
+ * parsed with SaveEmailSenderBody, whose `password` is write-only, and
+ * DELETE is `org.remove-email-sender` (src/lib/organization-directory).
  *
  * Access: currentUserCanAccessOrg (org managers of the organization and
  * super admins) answers 403 before the service client is used. The service
@@ -31,6 +41,13 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { currentUserCanAccessOrg } from "@/lib/auth/access";
 import { getMgmRuntime } from "@/lib/runtime/root";
 import { parseSenderInput } from "@/lib/email/sender-input";
+import {
+  RemoveEmailSenderBody,
+  SAVE_EMAIL_SENDER_REFUSALS,
+  SaveEmailSenderBody,
+} from "@/lib/organization-directory/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
+import { typedNameMatches } from "@/lib/validation/typed-name";
 import { normalizeMailHost } from "@/lib/email/smtp/address";
 import {
   SENDER_PUBLIC_COLUMNS,
@@ -71,7 +88,11 @@ export async function GET(_request: NextRequest, { params }: RouteContext): Prom
 
 export async function PUT(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
   const { id: orgId } = await params;
-  const parsed = parseSenderInput(await request.json().catch(() => null));
+  // The schema refuses what parseSenderInput refuses, in its words
+  // (SAVE_EMAIL_SENDER_REFUSALS); parseSenderInput still makes the values.
+  const body = await parseJsonBody(request, SaveEmailSenderBody, SAVE_EMAIL_SENDER_REFUSALS);
+  if (!body.ok) return body.response;
+  const parsed = parseSenderInput(body.data);
   if (!parsed.ok) {
     return NextResponse.json({ error: parsed.error, field: parsed.field }, { status: 422 });
   }
@@ -235,13 +256,60 @@ export async function PUT(request: NextRequest, { params }: RouteContext): Promi
   });
 }
 
-export async function DELETE(_request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+export async function DELETE(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
   const { id: orgId } = await params;
   const { supabase, response } = await authorize(orgId);
   if (!supabase) return response;
-  const { error } = await supabase.from("organization_email_senders").delete().eq("org_id", orgId);
+  // A DELETE often has no body; an empty one is read as `{}`, which asks for the name.
+  const empty = (await request.clone().text()).trim() === "";
+  const parsed = empty
+    ? ({ ok: true, data: RemoveEmailSenderBody.parse({}) } as const)
+    : await parseJsonBody(request, RemoveEmailSenderBody);
+  if (!parsed.ok) return parsed.response;
+
+  const { data: saved, error: readError } = await supabase
+    .from("organization_email_senders")
+    .select(SENDER_PUBLIC_COLUMNS)
+    .eq("org_id", orgId)
+    .maybeSingle<OrganizationEmailSenderPublic>();
+  if (readError) {
+    return NextResponse.json({ error: "Could not read the email settings." }, { status: 500 });
+  }
+  if (saved) {
+    const { confirmation } = parsed.data;
+    const typeTheName = `Type the mail server's name, ${saved.host}, to remove these settings.`;
+    if (!confirmation) {
+      return NextResponse.json(
+        { error: typeTheName, code: "email_sender_delete_confirmation_required" },
+        { status: 428 }
+      );
+    }
+    if (!typedNameMatches(confirmation.typed, saved.host)) {
+      return NextResponse.json(
+        { error: typeTheName, code: "email_sender_delete_name_mismatch", field: "confirmation" },
+        { status: 428 }
+      );
+    }
+  }
+  // Nothing saved: nothing to delete. Deleting by org_id here would remove a
+  // sender saved since the read, which no one confirmed.
+  if (!saved) return NextResponse.json({ sender: null });
+  // Only the version that was read and confirmed: a sender saved again since
+  // (a PUT bumps the version) is not deleted under a confirmation that named
+  // the one before it.
+  const { error, count } = await supabase
+    .from("organization_email_senders")
+    .delete({ count: "exact" })
+    .eq("org_id", orgId)
+    .eq("version", saved.version);
   if (error) {
     return NextResponse.json({ error: "Could not remove the email settings." }, { status: 500 });
+  }
+  if ((count ?? 0) === 0) {
+    return NextResponse.json(
+      { error: "These email settings were changed elsewhere. Reload the page and try again.", code: "version_conflict" },
+      { status: 409 }
+    );
   }
   return NextResponse.json({ sender: null });
 }

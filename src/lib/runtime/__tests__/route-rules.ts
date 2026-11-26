@@ -114,10 +114,10 @@ export const UNGATED_WRITES: Record<string, string | PaymentExemption> = {
 export const DESCRIBING_ISSUES = {
   /** ACM B5: describe metering's actions. */
   "#279": [METERING_PLUGIN_NAME],
-  /** ACM B7: describe the organization directory's and users' actions. */
-  "#281": [ORGANIZATION_DIRECTORY_PLUGIN_NAME],
   /** ACM B9: make billing's and payments' person routes into actions. */
   "#310": [BILLING_PLUGIN_NAME, PAYMENTS_PLUGIN_NAME],
+  /** Installation-wide actions: what the host needs to prepare an action no organization holds. */
+  "#324": [ORGANIZATION_DIRECTORY_PLUGIN_NAME],
 } as const satisfies Record<`#${number}`, readonly MgmPluginName[]>;
 
 /**
@@ -215,19 +215,6 @@ export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
   "POST /api/microgrids/[id]/openems-backend/test": { kind: "not-yet-described", issue: "#279" },
   "POST /api/openems/channels": { kind: "not-yet-described", issue: "#279" },
 
-  // ── Not yet described: #281 (ACM B7), organization directory and users ──
-  "POST /api/organizations": { kind: "not-yet-described", issue: "#281" },
-  "PATCH /api/organizations/[id]": { kind: "not-yet-described", issue: "#281" },
-  "DELETE /api/organizations/[id]": { kind: "not-yet-described", issue: "#281" },
-  "PUT /api/organizations/[id]/email-sender": { kind: "not-yet-described", issue: "#281" },
-  "DELETE /api/organizations/[id]/email-sender": { kind: "not-yet-described", issue: "#281" },
-  "PATCH /api/organizations/[id]/plugins": { kind: "not-yet-described", issue: "#281" },
-  "DELETE /api/users/[id]": { kind: "not-yet-described", issue: "#281" },
-  "PATCH /api/users/[id]/profile": { kind: "not-yet-described", issue: "#281" },
-  "POST /api/users/[id]/resend-invite": { kind: "not-yet-described", issue: "#281" },
-  "PATCH /api/users/[id]/role": { kind: "not-yet-described", issue: "#281" },
-  "POST /api/users/invite": { kind: "not-yet-described", issue: "#281" },
-
   // ── Not yet described: #310 (ACM B9), billing's and payments' person routes ──
   // The payment-accounts route and the override PUT and DELETE carry a
   // plain-string gate exemption in UNGATED_WRITES above. gui-surface.test.ts
@@ -243,6 +230,15 @@ export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
   "POST /api/organizations/[id]/payment-accounts": { kind: "not-yet-described", issue: "#310" },
   "POST /api/rate-schedules": { kind: "not-yet-described", issue: "#310" },
   "PUT /api/rate-schedules/[id]": { kind: "not-yet-described", issue: "#310" },
+
+  // ── Not yet described: #324, installation-wide actions ──
+  // Creating an organization is a person's action, but no action can hold
+  // it yet: prepare resolves an action's organization from its bound
+  // entities and answers 404 when there are none (prepareAction in
+  // src/lib/gui/host/server/prepare.ts), and a new organization has no
+  // entity to bind. If the host comes to prepare an action with no
+  // organization, describe it.
+  "POST /api/organizations": { kind: "not-yet-described", issue: "#324" },
 };
 
 /**

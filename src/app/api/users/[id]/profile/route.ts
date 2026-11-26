@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { UPDATE_PROFILE_REFUSALS, UpdateProfileBody } from "@/lib/organization-directory/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -16,6 +18,10 @@ const UUID_RE =
  * 403 rather than 404 to avoid existence oracles.
  *
  * Uses the user-bound server client (never the service-role client).
+ *
+ * Described as `org.update-profile`: the body is UpdateProfileBody
+ * (src/lib/organization-directory/schemas.ts), refused with this route's own
+ * answers (UPDATE_PROFILE_REFUSALS).
  */
 export async function PATCH(
   request: NextRequest,
@@ -30,31 +36,20 @@ export async function PATCH(
     );
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, UpdateProfileBody, UPDATE_PROFILE_REFUSALS);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
 
   const supabase = await createClient();
 
-  // Build PATCH payload from present keys only.
+  // Build PATCH payload from present keys only. The schema has refused any
+  // value that is neither text nor null.
   const updates: Record<string, string | null> = {};
   for (const field of ["first_name", "last_name", "phone"] as const) {
     if (field in body) {
       const v = body[field];
-      if (v === null) {
-        updates[field] = null;
-      } else if (typeof v === "string") {
-        const trimmed = v.trim();
-        updates[field] = trimmed === "" ? null : trimmed;
-      } else {
-        return NextResponse.json(
-          { error: `${field} must be a string or null.`, field },
-          { status: 422 }
-        );
-      }
+      const trimmed = typeof v === "string" ? v.trim() : "";
+      updates[field] = trimmed === "" ? null : trimmed;
     }
   }
 

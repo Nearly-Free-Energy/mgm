@@ -121,6 +121,16 @@ export type CanaryIds = {
    */
   tenantAccessId: string;
   /**
+   * A colleague of the manager the test signs in as: another org manager of
+   * `orgId`, whose invitation is not yet accepted. It is the `org.user`
+   * entity the user actions' paths name, so their available() and prepare
+   * run against a person the caller's own list shows, and the resend's step
+   * is built in full. Removing them and changing their role are refused to
+   * an org manager before anyone is read. The test fills it in once it
+   * creates the account, since seedCanaries creates none.
+   */
+  staffUserId: string;
+  /**
    * One tenant unit per seeded microgrid, in canaryMicrogrids order: tenant
    * views are dispatched as a tenant holding every one of them. Each unit
    * has that microgrid's house meter (TENANT_METER_COMPONENT, on its first
@@ -391,6 +401,7 @@ function seededParams(ids: CanaryIds, kinds: Record<string, EntityKind>, what: s
     tenant: [ids.tenantId],
     paymentAttempt: [ids.paymentAttemptId],
     "community.tenant-access": [ids.tenantAccessId],
+    "org.user": [ids.staffUserId],
   };
   /** Each seeded row's parent, by the parent's kind. */
   const parentOf: Record<string, { kind: EntityKind; id: string }> = {

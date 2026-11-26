@@ -87,6 +87,8 @@ const IDS: CanaryIds = {
   lineItemId: "e7400000-0000-4000-8005-000000000001",
   paymentAttemptId: "e7400000-0000-4000-8008-000000000001",
   tenantAccessId: "e7400000-0000-4000-800a-000000000001",
+  // The manager's invited colleague's account id, filled in beforeAll once it is created.
+  staffUserId: "",
   rateScheduleId: "e7400000-0000-4000-8006-000000000001",
   unitIds: [1, 2, 3, 4, 5, 6].map((n) => `e7400000-0000-4000-8003-00000000000${n}`),
 };
@@ -95,6 +97,8 @@ const EMAIL = "gui-canary-manager@test.local";
 const TENANT_EMAIL = "gui-canary-tenant@test.local";
 /** The person whose access to the canary tenant (IDS.tenantAccessId) the access removal's prepare reads. */
 const ACCESS_EMAIL = "gui-canary-access@test.local";
+/** The manager's colleague, invited and not yet signed in: the `org.user` the user actions' prepares read (IDS.staffUserId). */
+const COLLEAGUE_EMAIL = "gui-canary-colleague@test.local";
 const COLUMNS = Object.entries(CREDENTIAL_COLUMNS).flatMap(([t, cs]) => cs.map((c) => `${t}.${c}`));
 
 let manager: TestUser;
@@ -122,7 +126,7 @@ async function cleanup() {
   const svc = await serviceClient();
   const { error } = await svc.from("payment_merchant_versions").delete().eq("org_id", IDS.orgId);
   if (error) throw new Error(`[cleanup] payment_merchant_versions: ${error.message}`);
-  await cleanupTestData({ orgIds: [IDS.orgId], userEmails: [EMAIL, TENANT_EMAIL, ACCESS_EMAIL] });
+  await cleanupTestData({ orgIds: [IDS.orgId], userEmails: [EMAIL, TENANT_EMAIL, ACCESS_EMAIL, COLLEAGUE_EMAIL] });
 }
 
 beforeAll(async () => {
@@ -151,6 +155,15 @@ beforeAll(async () => {
   const svc = await serviceClient();
   canaries = await seedCanaries(svc, IDS);
   manager = await createTestUser({ email: EMAIL, role: "org_manager", scopeId: IDS.orgId });
+  // An invitation not yet accepted, as the invite route makes one: an
+  // account whose address is not confirmed, with its role.
+  const colleague = await svc.auth.admin.createUser({ email: COLLEAGUE_EMAIL, email_confirm: false });
+  if (colleague.error || !colleague.data.user) throw new Error(`[fixture] colleague: ${colleague.error?.message ?? "none"}`);
+  IDS.staffUserId = colleague.data.user.id;
+  const colleagueRole = await svc
+    .from("user_roles")
+    .insert({ user_id: IDS.staffUserId, role: "org_manager", scope_type: "org", scope_id: IDS.orgId });
+  if (colleagueRole.error) throw new Error(`[fixture] colleague role: ${colleagueRole.error.message}`);
   const { data, error } = await svc.from("user_roles").select("*").eq("user_id", manager.userId);
   if (error || !data?.length) throw new Error(`[fixture] user_roles: ${error?.message ?? "none"}`);
   roles = data as UserRoleRecord[];

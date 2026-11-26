@@ -147,11 +147,22 @@ describe("PATCH /api/users/[id]/profile", () => {
   // ── Edge: 422 when no updatable fields in body ───────────────────────────
   it("returns 422 when the body contains no updatable fields", async () => {
     const { PATCH } = await import("../route");
-    const res = await PATCH(makePatchRequest(SELF_UUID, { unrelated_field: "ignored" }), {
+    const res = await PATCH(makePatchRequest(SELF_UUID, {}), {
       params: Promise.resolve({ id: SELF_UUID }),
     });
     expect(res.status).toBe(422);
     const json = await res.json();
     expect(json.error).toMatch(/no updatable fields/i);
+  });
+
+  // The body is UpdateProfileBody (org.update-profile's input), which
+  // refuses a key the route used to ignore with the generic 400.
+  it("returns 400 invalid_body for a field it does not update", async () => {
+    const { PATCH } = await import("../route");
+    const res = await PATCH(makePatchRequest(SELF_UUID, { unrelated_field: "ignored" }), {
+      params: Promise.resolve({ id: SELF_UUID }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Unknown field: unrelated_field", code: "invalid_body" });
   });
 });

@@ -6,7 +6,8 @@
  *   - Profile section always renders; email is read-only.
  *   - Role section is hidden when canChangeRole = false.
  *   - Revoke button is hidden when canRevoke = false.
- *   - Clicking Revoke opens the ConfirmDialog.
+ *   - Clicking Revoke opens the ConfirmDialog, which asks for the person's
+ *     address typed and sends it as the route requires (org.remove-user).
  *   - Resend invitation (UX5b):
  *       * Hidden when target.email_confirmed_at is non-null (Active).
  *       * Visible when target.email_confirmed_at is null (Invited).
@@ -137,6 +138,34 @@ describe("EditUserDialog — render", () => {
     // with label "Revoke access" — two buttons with that accessible name now
     // exist. The confirm-dialog title "Revoke access?" is distinct.
     expect(screen.getByText(/revoke access\?/i)).toBeDefined();
+  });
+
+  it("enables the revoke only once the address is typed, and sends it as the route requires", async () => {
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    render(
+      <EditUserDialog
+        open
+        onOpenChange={() => {}}
+        target={baseTarget()}
+        callerRole="super_admin"
+        canChangeRole
+        canRevoke
+        orgs={orgList()}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^revoke access$/i }));
+    const confirm = () => screen.getAllByRole("button", { name: /^revoke access$/i }).at(-1)!;
+    expect(confirm().hasAttribute("disabled")).toBe(true);
+    fireEvent.change(screen.getByLabelText(/type their email address to confirm/i), { target: { value: "alice@nfe.local" } });
+    expect(confirm().hasAttribute("disabled")).toBe(false);
+    fireEvent.click(confirm());
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchSpy.mock.calls[0]!;
+    expect(url).toBe("/api/users/11111111-1111-4000-8000-000000000001");
+    expect((init as RequestInit).method).toBe("DELETE");
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({ confirmation: { acknowledged: [], typed: "alice@nfe.local" } });
+    fetchSpy.mockRestore();
   });
 });
 

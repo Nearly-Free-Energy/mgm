@@ -10,9 +10,9 @@
  *
  * The sends are one after the other, so this shows nothing about two copies
  * sent at once: those rest on each route's own locks. Outside state is held
- * still, the meters and the payment provider answering the same both times,
- * so "safe" here is safe against the same meter data and the same provider
- * answer.
+ * still, the meters, the payment provider and the mail server answering the
+ * same both times, so "safe" here is safe against the same meter data and
+ * the same provider and mail server answers.
  *
  * A billing, payments or Pesapal action that fails declares "unsafe" and goes
  * into REPEAT_KEY_PENDING (./repeat/exemptions.ts) with the issue that will
@@ -48,11 +48,13 @@ import {
 } from "@/lib/supabase/__tests__/rls.helpers";
 import { BILLING_CASES } from "./repeat/billing";
 import { COMMUNITY_MANAGEMENT_CASES } from "./repeat/community-management";
+import { ORGANIZATION_DIRECTORY_CASES } from "./repeat/organization-directory";
 import { absentIgnores, handlerFor, send, snapshot, without, type CaseModule, type Fixture } from "./repeat/harness";
 import { PAYMENTS_CASES } from "./repeat/payments";
 
 /** One module per plugin with "safe" actions. A plugin's first "safe" action adds its module here. */
 const MODULES: Partial<Record<MgmPluginName, CaseModule>> = {
+  "organization-directory": ORGANIZATION_DIRECTORY_CASES,
   "community-management": COMMUNITY_MANAGEMENT_CASES,
   billing: BILLING_CASES,
   payments: PAYMENTS_CASES,
@@ -145,9 +147,11 @@ describe.skipIf(shouldSkip())("each safe action sent twice (live database)", () 
     // No deployment sender (src/lib/config/mail-sender.ts reads these per
     // call), so a notice a route sends, such as community management's grant,
     // finds no sender here whatever the environment sets, and no mail leaves
-    // the test: the fetch guard below cannot see SMTP. The fixtures save no
-    // organization sender. If sendNotice comes to read another sender,
-    // revisit.
+    // the test: the fetch guard below cannot see SMTP. Organization senders
+    // exist only in the organization directory's module, whose fixture and
+    // cases send through a transport it replaces with one that contacts
+    // nothing (./repeat/organization-directory.ts). If sendNotice comes to
+    // read another sender, revisit.
     vi.stubEnv("MGM_SMTP_URL", "");
     vi.stubEnv("MGM_MAIL_FROM", "");
     fetchSpy = vi.spyOn(globalThis, "fetch");
@@ -179,18 +183,19 @@ describe.skipIf(shouldSkip())("each safe action sent twice (live database)", () 
     const parsed = def.input.safeParse(body);
     expect(parsed.error?.issues ?? [], "the body must be one the action's input accepts").toEqual([]);
 
-    const before = await snapshot(fixture.orgId);
+    const orgs = [fixture.orgId, ...(fixture.otherOrgIds ?? [])];
+    const before = await snapshot(orgs);
     const first = await send(handler, def, c.params, body);
     expect(first.status, first.text).toBe(c.first);
     if (c.firstAnswer) expect(JSON.parse(first.text), "the first answer").toMatchObject(c.firstAnswer);
-    const once = await snapshot(fixture.orgId);
+    const once = await snapshot(orgs);
     // Compared as the second send is, so a first send that moved only an
     // ignored column does not count as having written.
     expect(without(once, c.ignore), "the first send must write, or the case shows nothing").not.toEqual(without(before, c.ignore));
 
     const second = await send(handler, def, c.params, body);
     expect(second.status, second.text).toBe(c.second);
-    const twice = await snapshot(fixture.orgId);
+    const twice = await snapshot(orgs);
     expect(absentIgnores(twice, c.ignore), "each ignored column must be one of a row the snapshot reads").toEqual([]);
     expect(without(twice, c.ignore), "the second send changed a row").toEqual(without(once, c.ignore));
   }, 60_000);

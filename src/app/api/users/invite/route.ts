@@ -15,6 +15,8 @@ import { invitationNotice } from "@/lib/auth/invitation-notice";
 import { sendNotice } from "@/lib/email/notices";
 import { getMgmRuntime } from "@/lib/runtime/root";
 import type { UserRole } from "@/lib/types/domain";
+import { INVITE_USER_REFUSALS, InviteUserBody } from "@/lib/organization-directory/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 /**
  * POST /api/users/invite — invite a new user (UX5 / #79).
@@ -42,6 +44,11 @@ import type { UserRole } from "@/lib/types/domain";
  *                                           sending the invitation notice
  *                                           (sendNotice reads and decrypts
  *                                           the org's mail sender)
+ *
+ * Described as `org.invite-user`: the body is InviteUserBody
+ * (src/lib/organization-directory/schemas.ts), refused with this route's own
+ * answers (INVITE_USER_REFUSALS), with `scope_id` bound from the
+ * organization the action is offered in.
  *
  * Steps:
  *   1. Validate body + defense-in-depth permission check.
@@ -90,46 +97,17 @@ import type { UserRole } from "@/lib/types/domain";
  *   500 — unexpected.
  */
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-interface InviteBody {
-  email?: string;
-  first_name?: string;
-  last_name?: string;
-  phone?: string;
-  role?: UserRole;
-  scope_id?: string | null;
-}
-
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  let body: InviteBody;
-  try {
-    body = (await request.json()) as InviteBody;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
   // ── Validate shape ────────────────────────────────────────────────────
-  const email = typeof body.email === "string" ? body.email.trim() : "";
-  if (!email || !EMAIL_RE.test(email)) {
-    return NextResponse.json(
-      { error: "A valid email is required.", field: "email" },
-      { status: 422 }
-    );
-  }
-
+  // The schema trims the address and checks it, then the role.
+  const parsed = await parseJsonBody(request, InviteUserBody, INVITE_USER_REFUSALS);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
+  const email = body.email;
   const role = body.role;
-  if (role !== SUPER_ADMIN && role !== ORG_MANAGER) {
-    return NextResponse.json(
-      {
-        error: `Role must be one of '${SUPER_ADMIN}' or '${ORG_MANAGER}'.`,
-        field: "role",
-      },
-      { status: 422 }
-    );
-  }
 
   let scopeId: string | null;
   if (role === SUPER_ADMIN) {

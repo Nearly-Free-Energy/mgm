@@ -12,6 +12,8 @@ import { sendNotice } from "@/lib/email/notices";
 import { getMgmRuntime } from "@/lib/runtime/root";
 import { checkRateLimit } from "@/lib/rate-limit/in-memory";
 import type { UserRole, RoleScopeType } from "@/lib/types/domain";
+import { ResendInviteBody } from "@/lib/organization-directory/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 /**
  * POST /api/users/[id]/resend-invite — send the invitation notice again
@@ -76,6 +78,11 @@ import type { UserRole, RoleScopeType } from "@/lib/types/domain";
  *           - a notice that cannot be sent → 502.
  *
  * Returns 200 { resent: true } on success.
+ *
+ * Described as `org.resend-invite`. The body is optional: the Users page
+ * sends none, and the GUI host sends `{}`. One that is not ResendInviteBody
+ * (src/lib/organization-directory/schemas.ts), which takes no field, answers
+ * 400 `invalid_body`, before Step A.
  */
 
 const UUID_RE =
@@ -88,7 +95,7 @@ interface CurrentRoleRow {
 }
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   const { id: targetId } = await params;
@@ -98,6 +105,10 @@ export async function POST(
       { error: "Invalid user id — expected UUID." },
       { status: 400 }
     );
+  }
+  if ((await request.clone().text()).trim() !== "") {
+    const parsed = await parseJsonBody(request, ResendInviteBody);
+    if (!parsed.ok) return parsed.response;
   }
 
   const userClient = await createClient();
