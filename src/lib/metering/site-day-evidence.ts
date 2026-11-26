@@ -31,6 +31,7 @@ import {
   type MinuteRange,
   type SiteDayDetail,
   type SiteDayOperations,
+  type SiteDayRead,
 } from "./site-operations";
 
 export type { MinuteRange };
@@ -264,6 +265,40 @@ export type SiteDayEvidence = SiteDayEvidenceRead | SiteDayEvidenceRefused;
 export type SiteDayZone = { tz: string; zone: "microgrid" | "fallback" };
 /** An investigation operation's window (evidence §3 O2): fixed at creation, validated there. */
 export type SiteDayWindow = SiteDayZone & { date: string };
+
+/**
+ * What MeteringCapability.captureSiteDay returns. `outcome` uses evidence
+ * §3 E6's words. Every refusal but an access refusal is evidence.
+ */
+export type SiteDayCapture =
+  | {
+      outcome: "read";
+      snapshot: SiteDayEvidenceRead;
+      /** The zone this read used; the operations step compares it with the operation's (O2). */
+      zoneRead: SiteDayZone;
+      /**
+       * The read ended before the day did (`readUntilMs < dayEndMs`): the
+       * step stores nothing and reads again (E4, `window_not_closed`).
+       */
+      endedBeforeDay: boolean;
+      day: SiteDayRead;
+    }
+  | {
+      outcome: "refused";
+      snapshot: SiteDayEvidenceRefused;
+      /** Null when the refusal came before or at the zone read; the snapshot then carries the operation's zone. */
+      zoneRead: SiteDayZone | null;
+      /** The capability's status and code as returned, for the step's log; never its message. Not stored. */
+      refusal: { status: number; code: string };
+      /**
+       * Set only when MGM's own defect produced or reshaped this refusal:
+       * which check failed and where, as a normalised path, and zod's issue
+       * code. Never a value, an id or zod's message. For the step's log.
+       * Not stored.
+       */
+      defect?: { check: SiteDayDefectCheck; path: string; issue?: string };
+    }
+  | { outcome: "access_refused"; status: number; code: string };
 
 /** Which of MGM's own checks on a snapshot failed (captureSiteDay records it as a defect). */
 export type SiteDayDefectCheck = "schema" | "pointer" | "meter_join" | "provider_name" | "resolution";

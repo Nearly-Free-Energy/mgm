@@ -14,13 +14,28 @@ import { MeteringError } from "./errors";
 import { computeAssignmentGaps } from "./assignment-gaps";
 import {
   computeSiteDay,
+  computeSiteDayDetail,
   SITE_DAYS_MAX,
   type SiteDayOperations,
   type SiteDayRead,
   type SiteDayReadFacts,
   type SiteSourceAvailability,
 } from "./site-operations";
-import { SITE_DAY_RESOLUTION_MINUTES } from "./site-day-evidence";
+import {
+  SITE_DAY_DEFECT_REFUSAL,
+  SITE_DAY_RESOLUTION_MINUTES,
+  SiteDayEvidenceDefect,
+  buildRefusedSiteDaySnapshot,
+  buildSiteDaySnapshot,
+  schemaDefect,
+  siteDayEvidenceReadSchema,
+  siteDayEvidenceRefusedSchema,
+  siteDayRefusal,
+  type SiteDayCapture,
+  type SiteDayEvidenceRead,
+  type SiteDayWindow,
+  type SiteDayZone,
+} from "./site-day-evidence";
 import { addDaysToDateKey, dayKeyInZone, isCalendarDateKey } from "@/lib/timezone/day-key";
 import type {
   ManagedDevice,
@@ -37,6 +52,7 @@ import type {
   DiscoveredMeter,
   MeteringProvider,
   OpeningRegisterInput,
+  SiteSamples,
   SiteSources,
 } from "./types";
 import type { MeteringProviderName } from "./registry";
@@ -784,7 +800,7 @@ export class MeteringCapability implements MeteringCapabilityContract {
       }
   > {
     const provider = await this.resolveSiteProvider(microgridId);
-    if (!provider.ok) return provider;
+    if (!provider.ok) return provider.refusal;
     const read = await this.readSiteDevices(microgridId, houseDate, {});
     if (!read.ok) return read;
     if (!read.availability.battery && !read.availability.gridMeter) return this.noSiteDevices();
@@ -797,9 +813,12 @@ export class MeteringCapability implements MeteringCapabilityContract {
     };
   }
 
-  /** The microgrid's site-sample provider: selected, resolved and able to read site samples. */
+  /**
+   * The microgrid's site-sample provider: selected, resolved and able to
+   * read site samples. A refusal carries the name selected, when one was.
+   */
   private async resolveSiteProvider(microgridId: string): Promise<
-    | Extract<MeteringResult<never>, { ok: false }>
+    | { ok: false; refusal: Extract<MeteringResult<never>, { ok: false }>; selected: MeteringProviderName | null }
     | {
         ok: true;
         name: MeteringProviderName;
@@ -807,28 +826,24 @@ export class MeteringCapability implements MeteringCapabilityContract {
         synthetic: boolean;
       }
   > {
+    const unavailable = {
+      ok: false as const,
+      status: 503 as const,
+      code: "METERING_CONFIGURATION",
+      message: "Metering provider is not available.",
+    };
     let providerName: MeteringProviderName;
     try {
       providerName = await this.selectProvider(microgridId);
     } catch (error) {
-      if (error instanceof MeteringError) return this.fromMeteringError(error);
-      return {
-        ok: false as const,
-        status: 503 as const,
-        code: "METERING_CONFIGURATION",
-        message: "Metering provider is not available.",
-      };
+      const refusal = error instanceof MeteringError ? this.fromMeteringError(error) : unavailable;
+      return { ok: false, refusal, selected: null };
     }
     let provider: MeteringProvider;
     try {
       provider = this.registry.resolve(providerName);
     } catch {
-      return {
-        ok: false as const,
-        status: 503 as const,
-        code: "METERING_CONFIGURATION",
-        message: "Metering provider is not available.",
-      };
+      return { ok: false, refusal: unavailable, selected: null };
     }
     // A source that cannot read site samples at all, told apart by its code
     // from one that is not set up (METERING_CONFIGURATION): setting it up
@@ -836,10 +851,14 @@ export class MeteringCapability implements MeteringCapabilityContract {
     // had a code of its own; the code, not the status, says which this is.
     if (!provider.getSiteSamples) {
       return {
-        ok: false as const,
-        status: 503 as const,
-        code: "metering_site_samples_unsupported",
-        message: "This metering source does not provide site samples.",
+        ok: false,
+        refusal: {
+          ok: false as const,
+          status: 503 as const,
+          code: "metering_site_samples_unsupported",
+          message: "This metering source does not provide site samples.",
+        },
+        selected: providerName,
       };
     }
     return {
@@ -906,6 +925,17 @@ export class MeteringCapability implements MeteringCapabilityContract {
     };
   }
 
+  /** The refusal of a site day's date: not a calendar date, or after today in the microgrid's zone. */
+  private invalidSiteDate(): Extract<MeteringResult<never>, { ok: false }> {
+    return {
+      ok: false as const,
+      status: 422 as const,
+      code: "metering_invalid_date",
+      message: "date must be a YYYY-MM-DD day that has started in the microgrid's timezone.",
+      field: "date",
+    };
+  }
+
   /** A failure while reading or computing site days, reported as one. */
   private siteReadFailed(
     error: unknown,
@@ -940,15 +970,7 @@ export class MeteringCapability implements MeteringCapabilityContract {
     if (!opened.ok) return opened;
     const { q, microgridId, timezone, zone, nowMs, today } = opened;
     const date = typeof q.date === "string" ? q.date : "";
-    if (!isCalendarDateKey(date) || date > today) {
-      return {
-        ok: false as const,
-        status: 422 as const,
-        code: "metering_invalid_date",
-        message: "date must be a YYYY-MM-DD day that has started in the microgrid's timezone.",
-        field: "date",
-      };
-    }
+    if (!isCalendarDateKey(date) || date > today) return this.invalidSiteDate();
 
     const reader = await this.openSiteReader(microgridId, date);
     if (!reader.ok) return reader;
@@ -990,6 +1012,163 @@ export class MeteringCapability implements MeteringCapabilityContract {
         "This day's operations could not be worked out. Try another day."
       );
     }
+  }
+
+  /**
+   * One site day as investigation evidence (MeteringCapabilityContract's
+   * comment, repository.ts, says what it returns and when it throws). It
+   * reads as getSiteDay does, in the same order, except that it leaves out a
+   * site device whose ids fall outside the stored format before it reads
+   * (`requireStorableIds`), and checks that the query's date is `window`'s.
+   */
+  async captureSiteDay(query: unknown, window: SiteDayWindow): Promise<SiteDayCapture> {
+    const opened = await this.openSiteQuery(query);
+    if (!opened.ok) return this.refusedCapture(window, opened, { zoneRead: null, provider: null, sources: null });
+    const { q, microgridId, timezone, nowMs, today } = opened;
+    const zoneRead: SiteDayZone = { tz: timezone, zone: opened.zone };
+    const date = typeof q.date === "string" ? q.date : "";
+    // A date other than the operation's is MGM's defect in the step, refused
+    // as a bad date is (evidence §6 `request_invalid`).
+    if (!isCalendarDateKey(date) || date > today || date !== window.date) {
+      return this.refusedCapture(window, this.invalidSiteDate(), { zoneRead, provider: null, sources: null });
+    }
+
+    const provider = await this.resolveSiteProvider(microgridId);
+    if (!provider.ok) {
+      return this.refusedCapture(window, provider.refusal, { zoneRead, provider: provider.selected, sources: null });
+    }
+    // The format check applies before any provider read.
+    const read = await this.readSiteDevices(microgridId, date, { requireStorableIds: true });
+    if (!read.ok) return this.refusedCapture(window, read, { zoneRead, provider: provider.name, sources: null });
+    const sources = siteSourceEvidence(read.devices, read.sources);
+    const known = { zoneRead, provider: provider.name, sources };
+    if (!read.availability.battery && !read.availability.gridMeter) {
+      return this.refusedCapture(window, this.noSiteDevices(), known);
+    }
+
+    let samples: SiteSamples;
+    let computed: ReturnType<typeof computeSiteDayDetail>;
+    try {
+      // The previous day's tail tells whether this day began in a cut.
+      samples = await provider.getSiteSamples({
+        microgridId,
+        sources: read.sources,
+        startDate: addDaysToDateKey(date, -1),
+        endDate: date,
+        timezone,
+        resolutionMinutes: SITE_RESOLUTION_MINUTES,
+      });
+      computed = computeSiteDayDetail({
+        date,
+        timezone,
+        samples,
+        sources: read.availability,
+        resolutionMinutes: SITE_RESOLUTION_MINUTES,
+        nowMs,
+        // The meters asked for, so one the provider leaves out is counted
+        // as missing rather than dropped (SITE_DAY_CALC_VERSION 1).
+        houseMeterIds: read.sources.houseMeters.map((meter) => meter.id),
+      });
+    } catch (error) {
+      const failed = this.siteReadFailed(
+        error,
+        { date, timezone },
+        "metering_site_day_failed",
+        "This day's operations could not be worked out. Try another day."
+      );
+      return this.refusedCapture(window, failed, known);
+    }
+    const { day, detail } = computed;
+    const unreadableTimestamps = samples.unreadableTimestamps ?? null;
+
+    let snapshot: SiteDayEvidenceRead;
+    try {
+      snapshot = buildSiteDaySnapshot({
+        date,
+        zone: zoneRead,
+        provider: provider.name,
+        day,
+        detail,
+        sources,
+        houseMeters: read.sources.houseMeters,
+        unreadableMeters: unreadableHouseMeters(read.devices, read.houseMeterIds, { requireStorableIds: true }),
+        unreadableTimestamps,
+      });
+      const parsed = siteDayEvidenceReadSchema.safeParse(snapshot);
+      if (!parsed.success) throw schemaDefect(parsed.error);
+    } catch (error) {
+      if (!(error instanceof SiteDayEvidenceDefect)) throw error;
+      return this.refusedCapture(window, SITE_DAY_DEFECT_REFUSAL, { ...known, defect: error });
+    }
+    const facts: SiteDayReadFacts = { zone: opened.zone, unreadableTimestamps };
+    return {
+      outcome: "read",
+      snapshot,
+      zoneRead,
+      endedBeforeDay: day.readUntilMs < day.dayEndMs,
+      day: { ...day, ...(provider.synthetic ? { synthetic: true as const } : {}), read: facts },
+    };
+  }
+
+  /**
+   * A capture's refusal: an access refusal as such, anything else as a
+   * refused snapshot (evidence §4 "A refused read") in the operation's date,
+   * with the zone read, or the operation's before it. A snapshot whose known
+   * parts fail the schema (a source the schema refuses, say) is MGM's defect:
+   * it is built again from the operation's window alone, keeping the
+   * refusal, and the defect is named. Throws only when that fails too.
+   */
+  private refusedCapture(
+    window: SiteDayWindow,
+    failure: { status: number; code: string },
+    known: {
+      zoneRead: SiteDayZone | null;
+      provider: string | null;
+      sources: SiteSourceEvidence | null;
+      defect?: SiteDayEvidenceDefect;
+    }
+  ): SiteDayCapture {
+    const refusal = siteDayRefusal(failure.status, failure.code);
+    if (refusal.kind === "access_refused") {
+      return { outcome: "access_refused", status: failure.status, code: failure.code };
+    }
+    const operationZone: SiteDayZone = { tz: window.tz, zone: window.zone };
+    let defect = known.defect;
+    let snapshot = buildRefusedSiteDaySnapshot({
+      date: window.date,
+      zone: known.zoneRead ?? operationZone,
+      provider: known.provider,
+      sources: known.sources,
+      refusal,
+    });
+    const parsed = siteDayEvidenceRefusedSchema.safeParse(snapshot);
+    if (!parsed.success) {
+      defect ??= schemaDefect(parsed.error);
+      snapshot = buildRefusedSiteDaySnapshot({
+        date: window.date,
+        zone: operationZone,
+        provider: null,
+        sources: null,
+        refusal,
+      });
+      const fallback = siteDayEvidenceRefusedSchema.safeParse(snapshot);
+      if (!fallback.success) throw schemaDefect(fallback.error);
+    }
+    if (defect) {
+      // Named by check and normalised path only: no id or value reaches the log.
+      console.error("MGM site day evidence could not be built", {
+        check: defect.check,
+        path: defect.path,
+        issue: defect.issue,
+      });
+    }
+    return {
+      outcome: "refused",
+      snapshot,
+      zoneRead: known.zoneRead,
+      refusal: { status: failure.status, code: failure.code },
+      ...(defect ? { defect: { check: defect.check, path: defect.path, ...(defect.issue ? { issue: defect.issue } : {}) } } : {}),
+    };
   }
 
   /**
