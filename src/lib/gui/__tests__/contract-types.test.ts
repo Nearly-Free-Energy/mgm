@@ -1,9 +1,10 @@
 /**
- * Compile-time checks of the GUI contract (src/lib/gui/contract.ts and
- * surface.ts). `npx tsc --noEmit` type-checks this file: each line under a
- * `@ts-expect-error` must fail to compile, and tsc reports a directive whose
- * line compiles. Vitest runs the rest. The Test gate runs tsc before the
- * tests; if it stops doing so, these cases are no longer checked.
+ * Compile-time checks of the GUI contract (src/lib/gui/contract.ts,
+ * contract-react.ts and surface.ts). `npx tsc --noEmit` type-checks this
+ * file: each line under a `@ts-expect-error` must fail to compile, and tsc
+ * reports a directive whose line compiles. Vitest runs the rest. The Test
+ * gate runs tsc before the tests; if it stops doing so, these cases are no
+ * longer checked.
  *
  * These rules are aids. The widened-boolean case below compiles, so anything
  * that registers a contribution must check the rules again at run time.
@@ -15,12 +16,11 @@ import {
   GUI_CONTRACT,
   GUI_KINDS_SINCE,
   type CoreEntityKind,
-  type GuiKit,
-  type GuiPlugin,
   type Href,
   type Signal,
   type ViewKind,
 } from "../contract";
+import type { GuiKit, GuiPlugin } from "../contract-react";
 import type {
   ActionDef,
   Contribution,

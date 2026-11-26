@@ -1,7 +1,7 @@
 import { cleanup, render } from "@testing-library/react";
 import { useLayoutEffect, useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { GuiPlugin, ShellProps } from "../../contract";
+import type { GuiPlugin, ShellProps } from "../../contract-react";
 import { KitRuntimeProvider } from "../../host/client/kit-runtime";
 import { kit } from "../../kit";
 import { crawl, MANIFEST_FIXTURES, PAGE_MODEL, recordingRuntime, renderShell } from "..";

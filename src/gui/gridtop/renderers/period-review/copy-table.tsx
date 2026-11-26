@@ -22,7 +22,8 @@
  * row's link. Entering the box, each move and each copy is announced.
  */
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import type { ActionRef, Column, GuiKit, LiveState, ModelOf, RowOf } from "@/lib/gui/contract";
+import type { ActionRef, Column, LiveState, ModelOf, RowOf } from "@/lib/gui/contract";
+import type { GuiKit } from "@/lib/gui/contract-react";
 import { RowControls, ValueText } from "./controls";
 import type { Copier } from "./copy";
 import { cls, type PeriodReviewFigures } from "./ext";

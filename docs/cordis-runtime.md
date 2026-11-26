@@ -563,7 +563,7 @@ Cordis service, and it opens no scope and never uses the service role.
   The host's own refusals pass on with their codes, so an unavailable,
   disabled or unsupported read is never shown as zero.
 - The caller asks the assistant plugin's gate with `access: "write"` first
-  (ADR-007 decision 5). Nothing calls `readForAssistant` yet: rule 12 of
+  (ADR-007 decision 5). Nothing calls `readForAssistant` yet: rule 13 of
   `gui-boundary.test.ts` lets only the files in its `ASSISTANT_READERS`
   import it, and keeps `dispatchView` and the signal collectors inside the
   host and its pages. The action catalog is not part of it.

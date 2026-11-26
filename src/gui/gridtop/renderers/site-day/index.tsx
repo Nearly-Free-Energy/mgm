@@ -10,7 +10,8 @@
  * hydrating it, and shows nothing in its place meanwhile on a soft navigation.
  */
 import { lazy, Suspense } from "react";
-import type { SyncNode, ViewProps } from "@/lib/gui/contract";
+import type { ViewProps } from "@/lib/gui/contract";
+import type { SyncNode } from "@/lib/gui/contract-react";
 import { kit } from "@/lib/gui/kit";
 
 const SiteDayView = lazy(() => import("./renderer").then((m) => ({ default: m.SiteDayView })));

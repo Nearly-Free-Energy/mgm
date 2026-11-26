@@ -19,7 +19,8 @@
  * else of Gridtop's or the kit's, so this chunk shares no module with the
  * shell's (../site-day/renderer.tsx says why).
  */
-import type { GuiKit, SyncNode, ViewProps } from "@/lib/gui/contract";
+import type { ViewProps } from "@/lib/gui/contract";
+import type { GuiKit, SyncNode } from "@/lib/gui/contract-react";
 import { HourBars, HourTable } from "./day";
 import { readUsageDay, readUsageMonth, type DayExt, type Joined, type MonthExt } from "./ext";
 import { MonthCalendar, MonthLegend } from "./month";

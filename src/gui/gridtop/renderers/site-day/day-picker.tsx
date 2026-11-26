@@ -11,7 +11,8 @@
  * another day until a new day is shown, as a followed step link is.
  */
 import { useState, type FormEvent } from "react";
-import type { GuiKit, Href, LinkRef } from "@/lib/gui/contract";
+import type { Href, LinkRef } from "@/lib/gui/contract";
+import type { GuiKit } from "@/lib/gui/contract-react";
 import { DATE, type SiteDayExt, cls } from "./ext";
 
 /** The link ids this picker places; the renderer leaves them out of its other links. */

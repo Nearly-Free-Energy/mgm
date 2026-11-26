@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { SyncComponent, ViewModel, ViewProps } from "../../../contract";
+import type { ViewModel, ViewProps } from "../../../contract";
+import type { SyncComponent } from "../../../contract-react";
 import { extVersion, knowsKind, pickRenderer } from "../pick-renderer";
 
 const View: SyncComponent<ViewProps> = () => null;

@@ -5,8 +5,12 @@
  * its own side:
  *
  *   1. contract: src/lib/gui/contract.ts is client-safe. It imports only
- *      types (`import type`), and only from react and the plugin catalog
- *      (@/lib/plugins/bundled).
+ *      types (`import type`), and only from the plugin catalog
+ *      (@/lib/plugins/bundled). Two further tests keep a client that is not
+ *      a GUI able to type-check it without React: no npm package is reached
+ *      through its imports (contractPackageReach), and it compiles with no
+ *      @types package, loading nothing outside src/ and TypeScript's
+ *      libraries (contractCompileProblems).
  *   2. server: src/lib/gui/surface.ts, src/lib/gui/fmt.ts and every file under
  *      src/lib/gui/host/server/ start with `import "server-only"`, so the
  *      Next.js build fails if a browser bundle reaches one.
@@ -18,12 +22,13 @@
  *      file is in server/, client/ or shared/ ("host-layout").
  *   5. client-reach: no file a browser can load imports surface.ts, fmt.ts or
  *      host/server/. Browser entry points are files with "use client",
- *      contract.ts, host/client/, host/shared/, src/components/ and the GUI
- *      packages under src/gui/. Reachability follows `@/` and relative
+ *      contract.ts, contract-react.ts, host/client/, host/shared/,
+ *      src/components/ and the GUI packages under src/gui/. Reachability follows `@/` and relative
  *      imports, re-exports and import(); type-only imports are skipped,
  *      because the compiler erases them.
  *   6. gui-imports: a GUI package (src/gui/<name>/) imports only the
- *      contract, the kit, react, react-dom, its own files, and the npm
+ *      contract (contract.ts and contract-react.ts), the kit, react,
+ *      react-dom, its own files, and the npm
  *      packages listed for it in REVIEWED_PACKAGES. It imports no stylesheet:
  *      GuiMeta.styles names it and the host links it.
  *   7. gui-meta: GUI metadata is read at start-up without React.
@@ -42,10 +47,13 @@
  *      are client references.
  *  11. gui-installed: src/gui/installed.ts, the GUIs' entry points by name,
  *      imports only ./<name> package entries and types from ./meta and the
- *      contract. Only host pages import it: server files under src/app/,
+ *      contract (contract.ts and contract-react.ts). Only host pages import it: server files under src/app/,
  *      and test code. So a GUI's components reach the pages that render it
  *      and no other module.
- *  12. host-reads: the host's read entry points stay where they are
+ *  12. contract-react: src/lib/gui/contract-react.ts, the kit and GUI-plugin
+ *      types, imports only types, and only from react and ./contract, and
+ *      re-exports nothing (no `export … from`), so each name has one home.
+ *  13. host-reads: the host's read entry points stay where they are
  *      called. dispatchView, collectSignals and organizationSignals are
  *      imported only by files under src/lib/gui/host/ and src/app/;
  *      assistantSignals only under src/lib/gui/host/; readForAssistant, the
@@ -81,6 +89,8 @@ import { describe, expect, it } from "vitest";
 const REPO_ROOT = path.resolve(__dirname, "../../../..");
 
 const CONTRACT = "src/lib/gui/contract.ts";
+/** The contract's kit and GUI-plugin types, which name React types. */
+const CONTRACT_REACT = "src/lib/gui/contract-react.ts";
 const SERVER_ONLY_FILES = ["src/lib/gui/surface.ts", "src/lib/gui/fmt.ts", "src/lib/gui/assistant-reads.ts"];
 const HOST = "src/lib/gui/host/";
 const HOST_SERVER = `${HOST}server/`;
@@ -93,14 +103,14 @@ const INSTALLED = "src/gui/installed.ts";
 const HOST_PAGES = "src/app/";
 
 /**
- * The files that may import readForAssistant (rule 12). Empty until A3's
+ * The files that may import readForAssistant (rule 13). Empty until A3's
  * harness adapter, which asks the assistant plugin's gate first (ADR-007
  * decision 5); a file added here takes on that precondition, stated in
  * src/lib/gui/host/server/assistant-read.ts.
  */
 const ASSISTANT_READERS: readonly string[] = [];
 
-/** The host's read entry points, by the module that exports them, and who may import each (rule 12). */
+/** The host's read entry points, by the module that exports them, and who may import each (rule 13). */
 const HOST_READS: readonly { module: string; names: readonly string[]; may: (file: string) => boolean; where: string }[] = [
   {
     module: `${HOST_SERVER}view`,
@@ -129,10 +139,19 @@ const HOST_READS: readonly { module: string; names: readonly string[]; may: (fil
 ];
 
 /** What contract.ts may import types from. */
-const CONTRACT_TYPE_SOURCES = ["react", "@/lib/plugins/bundled"];
+const CONTRACT_TYPE_SOURCES = ["@/lib/plugins/bundled"];
+/** What contract-react.ts may import types from. */
+const CONTRACT_REACT_TYPE_SOURCES = ["react", "./contract"];
 
 /** What any GUI package may import, besides its own files and its reviewed packages. */
-const GUI_ALLOWED = ["@/lib/gui/contract", "@/lib/gui/kit", "react", "react/jsx-runtime", "react-dom"];
+const GUI_ALLOWED = [
+  "@/lib/gui/contract",
+  "@/lib/gui/contract-react",
+  "@/lib/gui/kit",
+  "react",
+  "react/jsx-runtime",
+  "react-dom",
+];
 
 /** What a GUI package's test files may import besides GUI_ALLOWED; also any @testing-library/ package. */
 const GUI_TEST_ALLOWED = ["@/lib/gui/conformance", "vitest"];
@@ -162,6 +181,7 @@ const SHARED_FORBIDDEN_DIRS = ["src/lib/supabase/", "src/lib/runtime/", HOST_CLI
 
 type Rule =
   | "contract"
+  | "contract-react"
   | "server"
   | "client"
   | "shared"
@@ -415,6 +435,7 @@ function isBrowserEntry(file: string, source: ts.SourceFile): boolean {
   return (
     directives(source).includes("use client") ||
     file === CONTRACT ||
+    file === CONTRACT_REACT ||
     file.startsWith(HOST_CLIENT) ||
     file.startsWith(HOST_SHARED) ||
     file.startsWith("src/components/") ||
@@ -479,7 +500,7 @@ function boundaryViolations(
     const source = sourceOf(file);
     const imports = importsOf(source);
 
-    // 12. host-reads
+    // 13. host-reads
     const exported = exportedLocals(source);
     for (const { specifier, names, reexport, locals } of valueBindings(source)) {
       const target = resolveLocal(file, specifier, files);
@@ -504,6 +525,29 @@ function boundaryViolations(
             "contract",
             file,
             `imports ${imported.specifier || "a computed module"}${imported.declaredTypeOnly ? "" : " as a value"}; contract.ts may only \`import type\` from ${CONTRACT_TYPE_SOURCES.join(" or ")}`,
+          );
+        }
+      }
+    }
+
+    // 12. contract-react
+    if (file === CONTRACT_REACT) {
+      for (const imported of imports) {
+        if (!imported.declaredTypeOnly || !CONTRACT_REACT_TYPE_SOURCES.includes(imported.specifier)) {
+          report(
+            "contract-react",
+            file,
+            `imports ${imported.specifier || "a computed module"}${imported.declaredTypeOnly ? "" : " as a value"}; contract-react.ts may only \`import type\` from ${CONTRACT_REACT_TYPE_SOURCES.join(" or ")}`,
+          );
+        }
+      }
+      for (const statement of source.statements) {
+        if (ts.isExportDeclaration(statement) && statement.moduleSpecifier) {
+          const from = ts.isStringLiteral(statement.moduleSpecifier) ? statement.moduleSpecifier.text : "a module";
+          report(
+            "contract-react",
+            file,
+            `re-exports from ${from}; contract-react.ts re-exports nothing, so each name has one home`,
           );
         }
       }
@@ -567,11 +611,12 @@ function boundaryViolations(
           const typeFrom = (specifier: string) => imported.declaredTypeOnly && imported.specifier === specifier;
           // ./meta is a file, not a package, so its values stay out.
           const entry = /^\.\/[a-z0-9][a-z0-9-]*$/.test(imported.specifier) && imported.specifier !== "./meta";
-          if (!typeFrom("@/lib/gui/contract") && !typeFrom("./meta") && !entry) {
+          const contractType = typeFrom("@/lib/gui/contract") || typeFrom("@/lib/gui/contract-react");
+          if (!contractType && !typeFrom("./meta") && !entry) {
             report(
               "gui-installed",
               file,
-              `imports ${imported.specifier || "a computed module"}; it may import only ./<name> package entries and types from ./meta and @/lib/gui/contract`,
+              `imports ${imported.specifier || "a computed module"}; it may import only ./<name> package entries and types from ./meta, @/lib/gui/contract and @/lib/gui/contract-react`,
             );
           }
         }
@@ -675,6 +720,102 @@ function boundaryViolations(
   return violations;
 }
 
+/**
+ * Every npm package, and every module named by a computed specifier, that
+ * contract.ts reaches, with the chain of files that reaches it. The walk
+ * follows every import, type-only ones included, through the local files it
+ * resolves to, because a type import makes the compiler load its module too.
+ * Any package counts, not only react: a package's own types may import React
+ * (lucide-react's and react-hook-form's do). The reach is empty today; if the
+ * contract ever needs a package, allow it here by name once its types are
+ * known to need no React.
+ */
+function contractPackageReach(files: Files): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>([CONTRACT]);
+  const queue: string[][] = [[CONTRACT]];
+  while (queue.length > 0) {
+    const steps = queue.shift()!;
+    const file = steps[steps.length - 1];
+    for (const imported of importsOf(parse(file, files.get(file) ?? ""))) {
+      const target = resolveLocal(file, imported.specifier, files);
+      if (!target) {
+        found.push(`${steps.join(" → ")} imports ${imported.specifier || "a computed module"}`);
+      } else if (target.exists && !seen.has(target.path)) {
+        seen.add(target.path);
+        queue.push([...steps, target.path]);
+      }
+    }
+  }
+  return found;
+}
+
+/** Library and package files the compile check reads from disk, parsed once for every program. */
+const diskSourceFiles = new Map<string, ts.SourceFile | undefined>();
+
+/**
+ * Type-checks contract.ts on its own, as a client that is not a GUI would:
+ * no @types package loaded automatically (`types: []`), files under src/
+ * read from `files`, everything else from disk. Returns every diagnostic,
+ * and every file the program loads besides those under src/ and
+ * TypeScript's own libraries. That catches what the import walk cannot see:
+ * a global such as `React.ReactNode` or `JSX.Element` (an error once
+ * @types/react is not loaded), and a `/// <reference types="react" />`
+ * directive (which loads @types/react). The options follow tsconfig.json's
+ * target, lib and module resolution; if those change, change them here.
+ */
+function contractCompileProblems(files: Files): string[] {
+  const options: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ES2017,
+    lib: ["lib.dom.d.ts", "lib.dom.iterable.d.ts", "lib.esnext.d.ts"],
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    isolatedModules: true,
+    strict: true,
+    noEmit: true,
+    skipLibCheck: true,
+    types: [],
+    paths: { "@/*": [path.join(REPO_ROOT, "src", "*")] },
+  };
+  const srcRoot = path.join(REPO_ROOT, "src") + path.sep;
+  const local = (fileName: string): string | null => {
+    const full = path.resolve(fileName);
+    return full.startsWith(srcRoot) ? path.relative(REPO_ROOT, full).split(path.sep).join("/") : null;
+  };
+  const host = ts.createCompilerHost(options, true);
+  const fromDisk = host.getSourceFile.bind(host);
+  host.fileExists = (fileName) => {
+    const file = local(fileName);
+    return file ? files.has(file) : ts.sys.fileExists(fileName);
+  };
+  host.readFile = (fileName) => {
+    const file = local(fileName);
+    return file ? files.get(file) : ts.sys.readFile(fileName);
+  };
+  host.getSourceFile = (fileName, languageVersion, onError, shouldCreate) => {
+    const file = local(fileName);
+    if (file) {
+      const text = files.get(file);
+      return text === undefined ? undefined : ts.createSourceFile(fileName, text, languageVersion, true);
+    }
+    if (!diskSourceFiles.has(fileName)) {
+      diskSourceFiles.set(fileName, fromDisk(fileName, languageVersion, onError, shouldCreate));
+    }
+    return diskSourceFiles.get(fileName);
+  };
+  const program = ts.createProgram({ rootNames: [path.join(REPO_ROOT, CONTRACT)], options, host });
+  const problems = ts.getPreEmitDiagnostics(program).map((diagnostic) => {
+    const where = diagnostic.file ? (local(diagnostic.file.fileName) ?? diagnostic.file.fileName) : "program";
+    return `${where}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")}`;
+  });
+  for (const source of program.getSourceFiles()) {
+    if (local(source.fileName) === null && !program.isSourceFileDefaultLibrary(source)) {
+      problems.push(`loads ${path.relative(REPO_ROOT, source.fileName).split(path.sep).join("/")}`);
+    }
+  }
+  return problems;
+}
+
 /** Every .ts and .tsx file under src/, test files included, keyed by repo-relative path. */
 function repositoryFiles(): Map<string, string> {
   const files = new Map<string, string>();
@@ -775,8 +916,29 @@ describe("GUI import boundaries in this repository", () => {
     expect(files.has("src/lib/gui/surface.ts")).toBe(true);
   });
 
-  it("contract.ts imports only types, from react and the plugin catalog", () => {
+  it("contract.ts imports only types, and only from the plugin catalog", () => {
     expect(byRule("contract")).toEqual([]);
+  });
+
+  it("contract-react.ts imports only types, from react and contract.ts", () => {
+    expect(files.has(CONTRACT_REACT)).toBe(true);
+    expect(byRule("contract-react")).toEqual([]);
+  });
+
+  // contract.ts is what a client that is not a GUI, such as the CLI, imports
+  // (ADR-006 decision 1). These two tests are what keep it type-checking
+  // without React: the first names any npm package its imports reach, the
+  // second compiles it with no @types package and fails on any error or any
+  // file loaded from outside src/ and TypeScript's libraries. If the CLI or
+  // the assistant read interface (A1-1 on #133) ever needs a React type from
+  // the contract, revisit the split between contract.ts and
+  // contract-react.ts rather than these tests.
+  it("the contract reaches no npm package through its imports", () => {
+    expect(contractPackageReach(files)).toEqual([]);
+  });
+
+  it("the contract type-checks with no @types package and loads nothing outside src/", () => {
+    expect(contractCompileProblems(files)).toEqual([]);
   });
 
   it('surface.ts, fmt.ts and host/server/ start with import "server-only"', () => {
@@ -888,11 +1050,10 @@ describe("the boundary checker catches each violation (self-tests)", () => {
   });
 
   describe("contract", () => {
-    it("accepts type-only imports from react and the plugin catalog", () => {
+    it("accepts type-only imports from the plugin catalog", () => {
       expect(
         check({
           [CONTRACT]: [
-            'import type { ReactNode } from "react";',
             'import type { CoreEntityKind } from "@/lib/plugins/bundled";',
             "export type { CoreEntityKind };",
             "export const GUI_CONTRACT = '0.1.0';",
@@ -901,7 +1062,8 @@ describe("the boundary checker catches each violation (self-tests)", () => {
       ).toEqual([]);
     });
 
-    it("refuses a value import from react", () => {
+    it("refuses react, even as types", () => {
+      expect(rulesOf(check({ [CONTRACT]: 'import type { ReactNode } from "react";' }))).toContain("contract");
       expect(rulesOf(check({ [CONTRACT]: 'import { useState } from "react";' }))).toContain("contract");
     });
 
@@ -909,7 +1071,8 @@ describe("the boundary checker catches each violation (self-tests)", () => {
       expect(rulesOf(check({ [CONTRACT]: 'import { type ReactNode } from "react";' }))).toContain("contract");
     });
 
-    it("refuses a type import from any other module", () => {
+    it("refuses a type import from any other module, contract-react.ts included", () => {
+      expect(rulesOf(check({ [CONTRACT]: 'import type { GuiKit } from "./contract-react";' }))).toContain("contract");
       expect(rulesOf(check({ [CONTRACT]: 'import type { Fmt } from "./surface";' }))).toContain("contract");
       expect(rulesOf(check({ [CONTRACT]: 'export type { Fmt } from "./surface";' }))).toContain("contract");
       expect(rulesOf(check({ [CONTRACT]: 'type F = import("./surface").Fmt;' }))).toContain("contract");
@@ -920,6 +1083,131 @@ describe("the boundary checker catches each violation (self-tests)", () => {
       expect(rulesOf(check({ [CONTRACT]: 'export const load = () => import("react");' }))).toContain(
         "contract",
       );
+    });
+  });
+
+  describe("contract-react", () => {
+    it("accepts type-only imports from react and contract.ts", () => {
+      expect(
+        check({
+          [CONTRACT_REACT]: [
+            'import type { ComponentType, ReactNode } from "react";',
+            'import type { Href, ViewProps } from "./contract";',
+            "export type Node = ReactNode;",
+          ].join("\n"),
+        }),
+      ).toEqual([]);
+    });
+
+    it("refuses a value import, from react or from contract.ts", () => {
+      expect(rulesOf(check({ [CONTRACT_REACT]: 'import { useState } from "react";' }))).toContain("contract-react");
+      expect(rulesOf(check({ [CONTRACT_REACT]: 'import { GUI_CONTRACT } from "./contract";' }))).toContain(
+        "contract-react",
+      );
+      expect(rulesOf(check({ [CONTRACT_REACT]: 'import { type ReactNode } from "react";' }))).toContain(
+        "contract-react",
+      );
+    });
+
+    it("refuses any other module, even as types", () => {
+      for (const source of [
+        'import type { Root } from "react-dom/client";',
+        'import type { Fmt } from "./surface";',
+        'import type { CoreEntityKind } from "@/lib/plugins/bundled";',
+        'export type { Fmt } from "./surface";',
+      ]) {
+        expect(rulesOf(check({ [CONTRACT_REACT]: source })), source).toContain("contract-react");
+      }
+    });
+
+    it("refuses a re-export, even a type re-export of contract.ts", () => {
+      for (const source of [
+        'export type { Href } from "./contract";',
+        'export type * from "./contract";',
+        'export type { ReactNode } from "react";',
+      ]) {
+        expect(rulesOf(check({ [CONTRACT_REACT]: source })), source).toEqual(["contract-react"]);
+      }
+    });
+  });
+
+  describe("the contract reaches no npm package", () => {
+    const bundled = "src/lib/plugins/bundled.ts";
+
+    it("accepts a contract that reaches only the plugin catalog", () => {
+      const files = new Map([
+        [CONTRACT, 'import type { CoreEntityKind } from "@/lib/plugins/bundled";'],
+        [bundled, "export type CoreEntityKind = string;"],
+      ]);
+      expect(contractPackageReach(files)).toEqual([]);
+    });
+
+    it("finds react, react-dom and next, through type imports and other files", () => {
+      expect(contractPackageReach(new Map([[CONTRACT, 'import type { ReactNode } from "react";']]))).toEqual([
+        `${CONTRACT} imports react`,
+      ]);
+      expect(contractPackageReach(new Map([[CONTRACT, 'type R = import("react-dom/client").Root;']]))).toEqual([
+        `${CONTRACT} imports react-dom/client`,
+      ]);
+      const files = new Map([
+        [CONTRACT, 'import type { CoreEntityKind } from "@/lib/plugins/bundled";'],
+        [bundled, 'import type { Metadata } from "next";\nexport type CoreEntityKind = string;'],
+      ]);
+      expect(contractPackageReach(files)).toEqual([`${CONTRACT} → ${bundled} imports next`]);
+    });
+
+    it("finds a package whose name is not React's, since its own types may import React", () => {
+      const files = new Map([
+        [CONTRACT, 'import type { CoreEntityKind } from "@/lib/plugins/bundled";'],
+        [bundled, 'import type { LucideIcon } from "lucide-react";\nexport type CoreEntityKind = string;'],
+      ]);
+      expect(contractPackageReach(files)).toEqual([`${CONTRACT} → ${bundled} imports lucide-react`]);
+      expect(contractPackageReach(new Map([[CONTRACT, 'export const load = (name: string) => import(name);']]))).toEqual([
+        `${CONTRACT} imports a computed module`,
+      ]);
+    });
+  });
+
+  describe("the contract type-checks without React", () => {
+    const bundled = "src/lib/plugins/bundled.ts";
+    const withCatalog = (contract: string, catalog = "export type CoreEntityKind = string;") =>
+      new Map([
+        [CONTRACT, `import type { CoreEntityKind } from "@/lib/plugins/bundled";\n${contract}`],
+        [bundled, catalog],
+      ]);
+
+    it("accepts a contract that uses only the plugin catalog's types", () => {
+      expect(contractCompileProblems(withCatalog("export type Kind = CoreEntityKind;"))).toEqual([]);
+    });
+
+    it("refuses React's global names, which need no import", () => {
+      for (const contract of ["export type Node = React.ReactNode;", "export type Element = JSX.Element;"]) {
+        expect(contractCompileProblems(withCatalog(contract)), contract).not.toEqual([]);
+      }
+    });
+
+    it("refuses a triple-slash reference to React's types", () => {
+      const problems = contractCompileProblems(
+        new Map([
+          [CONTRACT, '/// <reference types="react" />\nexport type Node = React.ReactNode;'],
+          [bundled, ""],
+        ]),
+      );
+      expect(problems).toContainEqual(expect.stringMatching(/^loads node_modules\/@types\/react\//));
+    });
+
+    it("refuses a package reached through the plugin catalog", () => {
+      const problems = contractCompileProblems(
+        withCatalog(
+          "export type Kind = CoreEntityKind;",
+          'import type { LucideIcon } from "lucide-react";\nexport type Icon = LucideIcon;\nexport type CoreEntityKind = string;',
+        ),
+      );
+      expect(problems).toContainEqual(expect.stringMatching(/^loads node_modules\/lucide-react\//));
+    });
+
+    it("refuses a type error, such as a name the catalog does not export", () => {
+      expect(contractCompileProblems(withCatalog("export type Kind = CoreEntityKind;", ""))).not.toEqual([]);
     });
   });
 
@@ -1033,11 +1321,12 @@ describe("the boundary checker catches each violation (self-tests)", () => {
       );
     });
 
-    it("treats host/client, host/shared, contract.ts, components and GUI packages as browser entry points", () => {
+    it("treats host/client, host/shared, the contract files, components and GUI packages as browser entry points", () => {
       const entries = [
         `${HOST_CLIENT}a.tsx`,
         `${HOST_SHARED}a.ts`,
         CONTRACT,
+        CONTRACT_REACT,
         "src/components/plain.tsx",
         "src/gui/probe/index.ts",
       ];
@@ -1087,7 +1376,8 @@ describe("the boundary checker catches each violation (self-tests)", () => {
       expect(
         check({
           "src/gui/probe/index.tsx": [
-            'import type { GuiPlugin } from "@/lib/gui/contract";',
+            'import type { GuiPlugin } from "@/lib/gui/contract-react";',
+            'import type { ViewProps } from "@/lib/gui/contract";',
             'import { KitView } from "@/lib/gui/kit";',
             'import { useState } from "react";',
             'import { createPortal } from "react-dom";',
@@ -1329,7 +1619,8 @@ describe("the boundary checker catches each violation (self-tests)", () => {
 
   describe("gui-installed", () => {
     const installed = [
-      'import type { GuiPlugin } from "@/lib/gui/contract";',
+      'import type { GuiPlugin } from "@/lib/gui/contract-react";',
+      'import type { GuiMeta } from "@/lib/gui/contract";',
       'import type { GuiName } from "./meta";',
       'import { ProbeGui } from "./probe";',
       "export const INSTALLED_GUIS: Record<GuiName, GuiPlugin> = { probe: ProbeGui };",
@@ -1351,6 +1642,7 @@ describe("the boundary checker catches each violation (self-tests)", () => {
       for (const source of [
         'import { GUI_META } from "./meta";',
         'import { GUI_CONTRACT } from "@/lib/gui/contract";',
+        'import { type GuiPlugin } from "@/lib/gui/contract-react";',
         'import { Shell } from "./probe/shell";',
         'import { kit } from "@/lib/gui/kit";',
         "const probe = await import(name);",
