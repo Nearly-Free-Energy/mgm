@@ -537,7 +537,11 @@ day always give the same samples. Each day follows one of five scenarios:
 a clear day, an evening power cut, a long cut in which the battery reaches
 its floor and the houses go dark, a battery at its floor before dawn, and a
 45-minute gateway gap. Time bins follow the microgrid's time zone, so a day
-with a daylight-saving change has 23 or 25 hours of bins.
+with a daylight-saving change has 23 or 25 hours of bins. A few days of the
+investigation cases' own microgrids are pinned with masks on top of their
+scenario, such as a silent meter or a refused read
+(`src/lib/metering/fixture/pinned-days.ts`, docs/investigation-cases.md §1);
+no other microgrid has a pinned day.
 
 It also generates each meter's energy per local day and hour for the
 tenant app's usage views (`src/lib/metering/fixture/meter-energy.ts`), from
