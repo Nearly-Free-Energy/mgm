@@ -524,8 +524,9 @@ every page file without the layout, as a client-side navigation renders it,
 and fails when one opens a Supabase client or loads a view before the
 redirect. Every staff entry point of the host also
 refuses them by their roles: `surfaceRequest`, `installationRequest`, `pluginGate`,
-`visibleOrganizations` (none), `resolveSegments` and `dispatchView` for any
-view that is not a tenant view. A tenant view opened without `?unit=` by a
+`visibleOrganizations` (none), `resolveSegments`, `dispatchView` for any
+view that is not a tenant view, and `buildActionCatalog` (no actions, or a
+404 when the query names an organization or an entity, with nothing read). A tenant view opened without `?unit=` by a
 person with several units shows a choice of them, and one whose plugin is
 off for the unit's organization shows the "not in this release" page. The
 choice leaves out a unit whose organization has the tenant app, or a plugin

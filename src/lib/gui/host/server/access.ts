@@ -68,8 +68,10 @@ function localeOf(headers: Headers): string {
  * organization. Each staff entry point refuses them on its own, by their
  * roles: surfaceRequest and installationRequest below, pluginGate
  * (./gate-state.ts), visibleOrganizations (./organization.ts),
- * resolveSegments (./entities.ts) and dispatchView (./view.ts). A context
- * says who the person is, never that they are staff.
+ * resolveSegments (./entities.ts), dispatchView (./view.ts) and
+ * buildActionCatalog (./catalog.ts), which gives them no actions, or a 404
+ * when they name an organization or an entity. A context says who the
+ * person is, never that they are staff.
  */
 export function hostContext(
   access: CurrentUserAccess,
