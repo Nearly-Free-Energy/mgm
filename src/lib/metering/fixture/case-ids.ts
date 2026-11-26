@@ -8,7 +8,9 @@
  * microgrid's UUID and a house meter on the device's UUID
  * (site-samples.ts), so these values are what make a case reproduce; a
  * changed id is a changed case. docs/investigation-cases.md §1 states the
- * same values; if either changes, change both.
+ * same values for microgrids 01 to 0a; if either changes, change both.
+ * Microgrids 0b to 14 serve the pending cases and reach §1 with A2-4; when
+ * they do, revisit this comment.
  */
 import type { DeviceType } from "@/lib/types/domain";
 import { SYNTHETIC_EDGE_ID_PREFIX } from "../fixture-provider";

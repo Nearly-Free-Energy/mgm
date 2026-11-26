@@ -2,13 +2,15 @@
  * The pins of #133's investigation cases (docs/investigation-cases.md §1
  * and §2): each microgrid's variant of the device set, and each case's
  * microgrid, date, scenario and expected read. A helper for
- * investigation-cases.test.ts (the regeneration test) and the seed's static
- * test, not production code: the identifiers themselves are in
- * `fixture/case-ids.ts`, which the fixture may read.
+ * investigation-cases.test.ts (the regeneration test) and, once A2-5 adds
+ * it, the seed's static test, not production code: the identifiers
+ * themselves are in `fixture/case-ids.ts`, which the fixture may read.
  *
- * The values restate docs/investigation-cases.md §1 and §2; if either
- * changes, change both. A2-3 fills each case's `evidence`, and A2-12 its
- * `result`.
+ * Variants 01 to 0a and cases C01 to C14 restate docs/investigation-cases.md
+ * §1 and §2; if either changes, change both. Variants 0b to 14 and the
+ * pending cases' microgrids and dates are A2-4's pins, which §1 and §2 do
+ * not hold yet (both say "pending"); when A2-4 writes them there, revisit
+ * this comment. A2-3 fills each case's `evidence`, and A2-12 its `result`.
  */
 import type { SiteScenario } from "../fixture/site-samples";
 import type { SiteSourceAvailability } from "../site-operations";

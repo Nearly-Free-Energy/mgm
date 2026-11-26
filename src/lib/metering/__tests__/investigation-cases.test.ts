@@ -5,10 +5,11 @@
  * and the synthetic provider, and its scenario and figures are checked
  * against §2. A pin that moves fails here.
  *
- * The stubs below stand in for the seeded installation. Each restates a fact
- * about another file, and says which; the seed's static test (A2-5) compares
- * the seed with `case-ids.ts` and `CASE_VARIANTS`, so the devices here and
- * the seeded ones come from one list.
+ * The stubs below stand in for the installation docs/investigation-cases.md
+ * §1 describes. Each restates §1 or another file, and says which. A2-5's
+ * seed will write that installation, and its static test will compare the
+ * seed with `case-ids.ts` and `CASE_VARIANTS`; until it merges, nothing
+ * checks these stubs against a database.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -51,7 +52,7 @@ function microgridNumber(microgridId: string): string | null {
 const orgOf = (nn: string) => (CASE_VARIANTS[nn].org === "B" ? CASE_ORG_B : CASE_ORG_A);
 
 /**
- * The microgrid's devices as `getManagedDevices` maps the seeded rows: every
+ * The microgrid's devices as `getManagedDevices` would map §1's rows: every
  * device on the microgrid's synthetic edge, and a legacy row's NULL
  * component id read as "" (infrastructure/supabase-repository.ts, the
  * `openems_component_id ?? ""` mapping). If that mapping changes, revisit.
@@ -73,10 +74,10 @@ function managedDevices(nn: string): ManagedDevice[] {
 /**
  * The tenant-linked meters on any pinned date. Restates
  * `getHouseMeterIds` (infrastructure/supabase-repository.ts): links whose
- * role is in `HOUSE_METER_ROLES` and whose period contains the day. The
- * seed links devices 11 to 13 as primary consumption meters from 2026-01-01,
- * open-ended, so every pinned date has all three. If the role filter or the
- * seeded links change, revisit.
+ * role is in `HOUSE_METER_ROLES` and whose period contains the day. §1
+ * "Devices" links devices 11 to 13 as primary consumption meters from
+ * 2026-01-01, open-ended, so every pinned date has all three. If the role
+ * filter or §1's links change, revisit.
  */
 function houseMeterIds(nn: string): string[] {
   const variant = CASE_VARIANTS[nn];
@@ -92,7 +93,7 @@ function stubRepository(): MeteringRepository {
   return {
     getAuthenticatedUserId: async () => "investigations-manager",
     getUserRoles: async () => [],
-    // §1's plugin states, which the seed writes: metering is on in
+    // §1's plugin states, which A2-5's seed will write: metering is on in
     // organization A and off in B, so the capability's own `requirePlugin`
     // (capability.ts) refuses C14. If §1's states change, revisit.
     isPluginEnabled: async (organizationId) => organizationId !== CASE_ORG_B,
