@@ -109,5 +109,13 @@ BEGIN
     RAISE EXCEPTION 'Expected 3 meter links in force on 2026-09-01 on every case microgrid; differs on: %', missing;
   END IF;
 
-  RAISE NOTICE 'OK: the investigation seed wrote 20 microgrids, 3 legacy devices, the plugin states and the meter links';
+  -- MGM's sign-in lookup finds the seeded manager, so /api/auth/sign-in-link
+  -- would send it a link (src/lib/auth/sign-in-link.ts asks this function
+  -- before generateLink; if the route stops asking it, revisit this check).
+  IF public.fn_auth_sign_in_target('investigations-manager@example.org')
+       IS DISTINCT FROM '00000000-0000-4000-8000-0000000f0001'::uuid THEN
+    RAISE EXCEPTION 'fn_auth_sign_in_target does not find investigations-manager@example.org';
+  END IF;
+
+  RAISE NOTICE 'OK: the investigation seed wrote 20 microgrids, 3 legacy devices, the plugin states, the meter links and a manager MGM sends a sign-in link to';
 END $$;

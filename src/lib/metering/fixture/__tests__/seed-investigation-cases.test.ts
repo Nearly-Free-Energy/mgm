@@ -382,6 +382,15 @@ describe("the investigation seed's rows", () => {
     expect(read("docs/setup.md")).toContain(`\`${MANAGER_EMAIL}\``);
   });
 
+  it("has the rehearsal ask MGM's sign-in lookup for the account", () => {
+    // fn_auth_sign_in_target is the check /api/auth/sign-in-link makes before
+    // it sends a link (src/lib/auth/sign-in-link.ts); the rehearsal asks it, in
+    // CI, for the address docs/setup.md signs in with.
+    const users = rawRows("auth.users");
+    expect(rehearsal).toContain(`public.fn_auth_sign_in_target('${MANAGER_EMAIL}')`);
+    expect(rehearsal).toContain(`${users[0].id}::uuid`);
+  });
+
   it("gives every unit the placeholder phone number, which no country uses", () => {
     const phones = new Set(rowsOf("tenants").map((t) => t.primary_phone));
     expect([...phones]).toEqual([PLACEHOLDER_PHONE]);
