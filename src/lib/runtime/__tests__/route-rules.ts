@@ -246,8 +246,8 @@ export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
 };
 
 /**
- * The name a property key spells (`readOnly`, `"readOnly"`, `["readOnly"]`
- * all → `readOnly`); null when it cannot be known statically.
+ * The name a property key spells (`gate`, `"gate"`, `["gate"]` all →
+ * `gate`); null when it cannot be known statically.
  */
 export function propertyKey(name: ts.PropertyName): string | null {
   if (ts.isIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name)) return name.text;

@@ -20,7 +20,9 @@
  *   - the insert guard refuses a signed-in caller's direct insert into a
  *     closed period, and lets through a draft's insert, the audited write of
  *     fn_record_line_item_with_audit (Q4=B, #173) and
- *     service_role.
+ *     service_role; and a direct insert racing a close that holds the
+ *     period first waits on the guard's lock, finds the period closed and
+ *     writes nothing.
  *
  * Self-fixturing; honors `SKIP_RLS_TESTS=1` for runs without local Supabase.
  */
@@ -64,6 +66,7 @@ const F = {
   raceClose: "f1b50000-0000-4000-8006-000000000003",
   raceInsert: "f1b50000-0000-4000-8006-000000000004",
   raceReviewed: "f1b50000-0000-4000-8006-000000000005",
+  raceGuard: "f1b50000-0000-4000-8006-000000000006",
 };
 
 // Tenants, one per case, so no case meets another's bill.
@@ -87,6 +90,7 @@ const T = Object.fromEntries(
     "guardUpsert",
     "guardService",
     "closedService",
+    "raceGuard",
   ].map((name, i) => [name, `f1b50000-0000-4000-8007-${String(i + 1).padStart(12, "0")}`]),
 ) as Record<string, string>;
 
@@ -229,6 +233,7 @@ desc("20261120130100_record_first_line_item.sql", () => {
       period(F.raceClose, "2025-03"),
       period(F.raceInsert, "2025-04"),
       period(F.raceReviewed, "2025-05"),
+      period(F.raceGuard, "2025-06"),
     ]);
 
     manager = await createTestUser({ email: EMAIL.manager, role: "org_manager", scopeId: F.org });
@@ -473,6 +478,23 @@ desc("20261120130100_record_first_line_item.sql", () => {
       expect(await auditOf(bill.id)).toMatchObject([
         { event_type: "line_item_generated", details: { period_was_closed: true } },
       ]);
+    });
+
+    it("a close holding the period first: a direct insert waits on the guard's lock, finds it closed and writes nothing", async () => {
+      const { holder, contender } = await raceAgainstHeldTransaction(
+        `  PERFORM 1 FROM billing_periods WHERE id = '${F.raceGuard}' FOR UPDATE;
+           UPDATE billing_periods SET status = 'closed', closed_at = now() WHERE id = '${F.raceGuard}';`,
+        () => manager.client.from("billing_line_items").insert(row(F.raceGuard, T.raceGuard)),
+      );
+      expect(holder.ok).toBe(true);
+      // The guard's own text: its FOR SHARE waited for the close and then
+      // read the period as closed. Without that lock it would read the
+      // period as the draft it was before the close committed, and the row
+      // would land in a closed period.
+      expect(contender.error?.code).toBe("23514");
+      expect(contender.error?.message).toMatch(/^billing_period_closed: a bill cannot be added to a closed billing period$/);
+      expect(contender.error?.details).toBe("closed");
+      expect(await billsOf(F.raceGuard, T.raceGuard)).toEqual([]);
     });
 
     it("lets service_role insert into a closed period", async () => {

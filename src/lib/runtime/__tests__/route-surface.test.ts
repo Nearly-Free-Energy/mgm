@@ -25,7 +25,6 @@ import {
   exemptionKey,
   handlerSources,
   paymentsGating,
-  propertyKey,
   type PaymentExemption,
 } from "./route-rules";
 
@@ -97,34 +96,10 @@ const COMPOSERS: Record<string, MgmPluginName[]> = {
 // the `/pay` GET. The payment write routes are therefore exemptions above,
 // each naming the method it reaches. A payments write route that must refuse
 // a disabled plugin outright calls `checkGate`/`gateRoute` itself.
-
-/**
- * Composer options that skip the composer's plugin check. A call passing one
- * of these does not count as entering the runtime; the route needs its own
- * `checkGate`/`gateRoute`. Keep in step with the option's handling in the
- * composer (`composeBilling` in src/lib/billing/compose.ts).
- */
-const SKIPS_PLUGIN_CHECK: Record<string, string[]> = {
-  composeBilling: ["readOnly"],
-};
-
-function skipsPluginCheck(call: ts.CallExpression, composer: string): boolean {
-  const options = call.arguments[0];
-  const names = SKIPS_PLUGIN_CHECK[composer] ?? [];
-  if (!names.length) return false;
-  // Options we cannot read statically (a variable, a spread, a computed key)
-  // are treated as skipping the check, so the route has to prove it gates.
-  if (!options || !ts.isObjectLiteralExpression(options)) return true;
-  return options.properties.some((property) => {
-    if (ts.isSpreadAssignment(property)) return true;
-    if (!property.name) return false;
-    const key = propertyKey(property.name);
-    if (key === null) return true;
-    if (!names.includes(key)) return false;
-    if (ts.isShorthandPropertyAssignment(property)) return true;
-    return !(ts.isPropertyAssignment(property) && property.initializer.kind === ts.SyntaxKind.FalseKeyword);
-  });
-}
+//
+// Every call to a composer above counts: none takes an option that skips its
+// plugin check. If one ever does, a call passing it must not count here, and
+// the route must gate itself (`checkGate`/`gateRoute`).
 
 function collectRoutes(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -194,8 +169,7 @@ function entersRuntime(source: string, owner: MgmPluginName): boolean {
     if (
       ts.isCallExpression(node) &&
       ts.isIdentifier(node.expression) &&
-      COMPOSERS[node.expression.text]?.includes(owner) &&
-      !skipsPluginCheck(node, node.expression.text)
+      COMPOSERS[node.expression.text]?.includes(owner)
     ) composed = true;
     ts.forEachChild(node, visit);
   };
@@ -504,21 +478,14 @@ describe("MGM runtime route surface", () => {
     expect(gatesPlugin('export async function POST() { const gate = await checkGate(db, { plugin: "billing" }); if (!gate.ok) return gateResponse(gate); mutate(); }', "billing")).toBe(true);
   });
 
-  it("does not count a composer call that skips the plugin check", () => {
+  it("counts a call to a composer that refuses a disabled plugin, and no other", () => {
     expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId }); }', "billing")).toBe(true);
-    expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId, readOnly: false }); }', "billing")).toBe(true);
-    expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId, readOnly: true }); }', "billing")).toBe(false);
-    expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId, readOnly }); }', "billing")).toBe(false);
-    expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId, "readOnly": true }); }', "billing")).toBe(false);
-    expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId, ["readOnly"]: true }); }', "billing")).toBe(false);
-    expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId, [key]: true }); }', "billing")).toBe(false);
-    expect(entersRuntime('export async function POST() { const c = await composeBilling({ ...options }); }', "billing")).toBe(false);
-    expect(entersRuntime('export async function POST() { const c = await composeBilling(options); }', "billing")).toBe(false);
+    // Only for the plugin the composer refuses.
+    expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId }); }', "payments")).toBe(false);
     expect(entersRuntime('export async function POST() { const c = await composeBillingReview({ supabase, organizationId }); }', "billing")).toBe(false);
     expect(entersRuntime('export async function POST() { const c = await composePayments({ supabase, organizationId }); }', "payments")).toBe(false);
     expect(entersRuntime('export async function POST() { const c = await composePaymentsPublic({ supabase, organizationId }); }', "pesapal")).toBe(false);
     expect(entersRuntime('export async function POST() { const gate = await checkGate(db, { plugin: "payments" }); if (!gate.ok) return gateResponse(gate); const c = await composePayments({ supabase, organizationId }); }', "payments")).toBe(true);
-    expect(entersRuntime('export async function POST() { const gate = await checkGate(db, { plugin: "billing" }); if (!gate.ok) return gateResponse(gate); const c = await composeBilling({ supabase, organizationId, readOnly: true }); }', "billing")).toBe(true);
   });
 
   // Inline route files for the payment exemption checks, run the way the

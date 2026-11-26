@@ -151,33 +151,12 @@ describe.each([
   });
 });
 
-describe("GenerateBillsBody seedReadings", () => {
-  const body = (seedReadings: unknown) => ({ billingPeriodId: PERIOD, seedReadings });
-
-  it.each([
-    ["a full timestamp", [SEED]],
-    ["a bare date, which Date.parse reads", [{ ...SEED, readAt: "2026-08-20" }]],
-    ["a start equal to the dial reading", [{ ...SEED, startKwh: SEED.dialReadingKwh }]],
-    ["a plausible but wrong start below the dial reading (not re-derived)", [{ ...SEED, startKwh: 1 }]],
-    ["two meters", [SEED, { ...SEED, deviceId: TENANT }]],
-    ["none", []],
-  ])("accepts %s", (_label, seeds) => {
-    expect(firstIssue(GenerateBillsBody, body(seeds))).toBe("ok");
-  });
-
-  it.each([
-    [{ deviceId: DEVICE }, "seedReadings must be an array"],
-    [[SEED, "x"], "seedReadings[1] must be an object"],
-    [[{ ...SEED, deviceId: "not-a-uuid" }], "seedReadings[0].deviceId must be a UUID"],
-    [[{ ...SEED, dialReadingKwh: -1 }], "seedReadings[0].dialReadingKwh must be a non-negative finite number"],
-    [[{ ...SEED, startKwh: null }], "seedReadings[0].startKwh must be a non-negative finite number"],
-    [[{ ...SEED, readAt: "yesterday" }], "seedReadings[0].readAt must be an ISO timestamp"],
-    [[{ ...SEED, readAt: 1755680400000 }], "seedReadings[0].readAt must be an ISO timestamp"],
-    [[SEED, { ...SEED, deviceId: TENANT, startKwh: 5000 }], "seedReadings[1].startKwh cannot exceed dialReadingKwh"],
-    [[SEED, { ...SEED, startKwh: 1 }], `seedReadings has more than one entry for device ${DEVICE}`],
-    [[{ ...SEED, extra: 1 }], "seedReadings[0] has an unknown field: extra"],
-  ])("refuses %j", (seeds, message) => {
-    expect(firstIssue(GenerateBillsBody, body(seeds))).toEqual({ field: "seedReadings", message });
+describe("GenerateBillsBody without seed readings (version 2)", () => {
+  it("refuses seedReadings as an unknown field: no run it parses for takes them", () => {
+    expect(firstIssue(GenerateBillsBody, { billingPeriodId: PERIOD, seedReadings: [SEED] })).toEqual({
+      field: undefined,
+      message: "Unknown field: seedReadings",
+    });
   });
 });
 
@@ -292,6 +271,14 @@ const GENERATE_BILLS_SHAPES: Record<number, unknown> = {
     required: ["billingPeriodId"],
     additionalProperties: false,
   },
+  // Version 2 dropped seedReadings.
+  2: {
+    $schema: SCHEMA,
+    type: "object",
+    properties: GENERATION_PROPERTIES,
+    required: ["billingPeriodId"],
+    additionalProperties: false,
+  },
 };
 
 const PREVIEW_BILLING_REVIEW_SHAPES: Record<number, unknown> = {
@@ -325,9 +312,9 @@ describe("pinned input versions", () => {
     ).toEqual(shapes[version]);
   });
 
-  it("starts every version at 1", () => {
+  it("pins every version", () => {
     expect(CREATE_PERIOD_BODY_VERSION).toBe(1);
-    expect(GENERATE_BILLS_BODY_VERSION).toBe(1);
+    expect(GENERATE_BILLS_BODY_VERSION).toBe(2);
     expect(PREVIEW_BILLING_REVIEW_BODY_VERSION).toBe(1);
   });
 });

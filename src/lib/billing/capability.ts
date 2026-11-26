@@ -727,16 +727,15 @@ export class BillingCapability implements BillingCapabilityContract {
     return { ok: true as const, data: { periodId, microgridId: period.microgrid_id, name } };
   }
 
+  /** Every run here writes, so each re-checks the plugin before the engine runs. */
   private async runGeneration(
     input: unknown,
-    mode: "write" | "preview",
     options: { expectedBill?: ExpectedBill; guardExistingBills?: true; newBillOnly?: true } = {},
   ) {
     const { expectedBill, guardExistingBills, newBillOnly } = options;
     const inactive = this.ensureActive();
     if (inactive) return inactive;
     // Parsing here holds every caller, route or not, to the same rules.
-    // Preview accepts seeds as it always has.
     const body = GenerateBillsBody.safeParse(input);
     if (!body.success) {
       const issue = body.error.issues[0];
@@ -753,7 +752,7 @@ export class BillingCapability implements BillingCapabilityContract {
     if (!resolved || resolved.orgId !== this.scope.organizationId) {
       return this.scopeMismatch();
     }
-    const gated = mode === "write" ? await this.requirePlugin() : null;
+    const gated = await this.requirePlugin();
     if (gated) return gated;
 
     const out = await this.generation.run({
@@ -761,8 +760,7 @@ export class BillingCapability implements BillingCapabilityContract {
       tenantIds: parsed.tenantIds,
       manualReadings: parsed.manualReadings,
       revertToEdgeTenantIds: parsed.revertToEdgeTenantIds,
-      seedReadings: parsed.seedReadings,
-      mode,
+      mode: "write",
       actorUserId: this.scope.userId,
       ...(expectedBill ? { expectedBill } : {}),
       ...(guardExistingBills ? { guardExistingBills } : {}),
@@ -785,10 +783,6 @@ export class BillingCapability implements BillingCapabilityContract {
     return { ok: true as const, data: out as GenerationOutput };
   }
 
-  async previewBills(input: unknown) {
-    return this.runGeneration(input, "preview");
-  }
-
   async generateBills(input: unknown, options: { expectedBill: ExpectedBill }) {
     // The type requires the bill, but a cast could still omit it. The engine
     // refuses a write with no guard too (unguarded_write, generate.ts step
@@ -801,7 +795,7 @@ export class BillingCapability implements BillingCapabilityContract {
         message: "A bill can only be regenerated as it was read.",
       };
     }
-    return this.runGeneration(input, "write", { expectedBill: options.expectedBill });
+    return this.runGeneration(input, { expectedBill: options.expectedBill });
   }
 
   async generateFromMeters(periodId: string) {
@@ -816,7 +810,7 @@ export class BillingCapability implements BillingCapabilityContract {
       };
     }
     // Scope and the plugin re-check run in runGeneration, as for every write.
-    return this.runGeneration({ billingPeriodId: periodId }, "write", { guardExistingBills: true });
+    return this.runGeneration({ billingPeriodId: periodId }, { guardExistingBills: true });
   }
 
   async billFromReadings(periodId: string, tenantId: string, readings: { startKwh: number; endKwh: number; reason?: string }) {
@@ -847,7 +841,6 @@ export class BillingCapability implements BillingCapabilityContract {
         tenantIds: [tenantId],
         manualReadings: [{ tenantId, startKwh: readings.startKwh, endKwh: readings.endKwh, ...(reason ? { reason } : {}) }],
       },
-      "write",
       { newBillOnly: true },
     );
   }

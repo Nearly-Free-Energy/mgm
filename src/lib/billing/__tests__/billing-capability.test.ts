@@ -523,16 +523,21 @@ describe("BillingCapability", () => {
     });
   });
 
-  it("delegates preview without writing and maps fatal errors", async () => {
+  it("maps the engine's fatal errors", async () => {
     const run = vi.fn(async () => ({
       kind: "fatal" as const,
       status: 404,
       body: { error: "Billing period not found" },
     }));
-    const { capability } = setup({ isPluginEnabled: async () => false }, { run });
-    const result = await capability.previewBills({ billingPeriodId: PERIOD_ID });
-    expect(result).toMatchObject({ ok: false, status: 404 });
-    expect(run).toHaveBeenCalledWith(expect.objectContaining({ mode: "preview" }));
+    const { capability } = setup({}, { run });
+    const result = await capability.generateFromMeters(PERIOD_ID);
+    expect(result).toMatchObject({ ok: false, status: 404, code: "billing_generation_failed", message: "Billing period not found" });
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ mode: "write" }));
+  });
+
+  it("offers no preview: every generation it runs writes, behind the plugin re-check", () => {
+    const { capability } = setup({}, { run: vi.fn() });
+    expect("previewBills" in capability).toBe(false);
   });
 
   it("passes revertToEdgeTenantIds to the generation delegate", async () => {
@@ -602,7 +607,7 @@ describe("BillingCapability", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("parses generation with GenerateBillsBody, seeds included in preview", async () => {
+  it("parses generation with GenerateBillsBody", async () => {
     const run = vi.fn(async () => ({ results: [] }));
     const { capability } = setup({}, { run });
     expect(
@@ -612,14 +617,12 @@ describe("BillingCapability", () => {
       code: "billing_invalid_body",
       message: "Unknown field: extra",
     });
-    expect(await capability.previewBills(null)).toMatchObject({
+    expect(await capability.generateBills(null, { expectedBill: expectedBill(TENANT_ID) })).toMatchObject({
       status: 400,
       code: "billing_invalid_body",
       message: "Body must be an object",
     });
-    const seed = { deviceId: MG_ID, dialReadingKwh: 10, readAt: "2026-08-20", startKwh: 4 };
-    expect(await capability.previewBills({ billingPeriodId: PERIOD_ID, seedReadings: [seed] })).toMatchObject({ ok: true });
-    expect(run).toHaveBeenCalledWith(expect.objectContaining({ mode: "preview", seedReadings: [seed] }));
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("generates a period from meter data as a guarded whole-period run, and nothing else", async () => {
@@ -632,7 +635,6 @@ describe("BillingCapability", () => {
       tenantIds: undefined,
       manualReadings: undefined,
       revertToEdgeTenantIds: undefined,
-      seedReadings: undefined,
       mode: "write",
       actorUserId: "user-1",
       guardExistingBills: true,
@@ -681,7 +683,6 @@ describe("BillingCapability", () => {
       tenantIds: [TENANT_ID],
       manualReadings: [{ tenantId: TENANT_ID, startKwh: 100.5, endKwh: 150, reason: "Read on site" }],
       revertToEdgeTenantIds: undefined,
-      seedReadings: undefined,
       mode: "write",
       actorUserId: "user-1",
       newBillOnly: true,
@@ -979,14 +980,5 @@ describe("BillingCapability plugin re-check before each write", () => {
     const { capability, calledAfterRecheck } = spiedSetup(async () => true);
     await run(capability);
     expect(calledAfterRecheck()).not.toEqual([]);
-  });
-
-  it("previews bills without reading plugin state", async () => {
-    const { capability, repo } = spiedSetup(async () => {
-      throw new Error("canceling statement due to statement timeout");
-    });
-    const result = await capability.previewBills({ billingPeriodId: PERIOD_ID });
-    expect(result).toMatchObject({ ok: true });
-    expect(repo.isPluginEnabled).not.toHaveBeenCalled();
   });
 });

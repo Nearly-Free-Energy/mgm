@@ -26,7 +26,7 @@ import { BILL_FROM_READINGS_COPY } from "../schemas";
 import { pageAfter, readAllPages, readAllPagesInOrder } from "./pages";
 import { PERIOD_REVIEW_REFUSALS } from "./period-review";
 import { PERIOD_REVIEW_MAX_ROWS, periodLabel } from "./period-review-model";
-import { buildNotBilledModel } from "./not-billed-model";
+import { buildNotBilledModel, notBilledTenants } from "./not-billed-model";
 
 type Refusal = Extract<Loaded<never>, { ok: false }>;
 
@@ -65,10 +65,10 @@ export async function loadNotBilled(req: SurfaceRequest): Promise<Loaded<LoadedM
   const microgridId = req.params.id;
   const { data: period, error } = await req.supabase
     .from("billing_periods")
-    .select("id, start_date, end_date, status")
+    .select("id, start_date, end_date, status, timezone, closed_at")
     .eq("id", req.params.periodId)
     .eq("microgrid_id", microgridId)
-    .maybeSingle<{ id: string; start_date: string; end_date: string; status: "draft" | "closed" }>();
+    .maybeSingle<{ id: string; start_date: string; end_date: string; status: "draft" | "closed"; timezone: string; closed_at: string | null }>();
   if (error) return NOT_BILLED_REFUSALS.unavailable;
   if (!period) return NOT_BILLED_REFUSALS.notFound;
 
@@ -77,10 +77,11 @@ export async function loadNotBilled(req: SurfaceRequest): Promise<Loaded<LoadedM
       pageAfter(req.supabase.from("billing_line_items").select("id, tenant_id", { count: "exact" }).eq("billing_period_id", period.id), after),
     ),
     // In name order, as the review lists tenants; only listed, never summed.
-    readAllPagesInOrder<TenantRow>((from, to) =>
+    // created_at, so a closed period can leave out the tenants who joined after it closed.
+    readAllPagesInOrder<TenantRow & { created_at: string }>((from, to) =>
       req.supabase
         .from("tenants")
-        .select(TENANT_COLUMNS, { count: "exact" })
+        .select(`${TENANT_COLUMNS}, created_at`, { count: "exact" })
         .eq("microgrid_id", microgridId)
         .eq("tenant_devices.role", "primary_consumption_meter")
         .order("display_name")
@@ -90,14 +91,15 @@ export async function loadNotBilled(req: SurfaceRequest): Promise<Loaded<LoadedM
   ]);
   if (bills === null || tenants === null) return NOT_BILLED_REFUSALS.unavailable;
   const billed = new Set(bills.map((b) => b.tenant_id));
-  if (tenants.filter((t) => !billed.has(t.id)).length > PERIOD_REVIEW_MAX_ROWS) return NOT_BILLED_REFUSALS.tooLarge;
+  const listed = tenants.map((t) => ({ id: t.id, display_name: t.display_name, primaryLinks: t.tenant_devices ?? [], created_at: t.created_at }));
+  if (notBilledTenants(listed, billed, period).length > PERIOD_REVIEW_MAX_ROWS) return NOT_BILLED_REFUSALS.tooLarge;
 
   return {
     ok: true,
     model: buildNotBilledModel({
       microgridId,
       period,
-      tenants: tenants.map((t) => ({ id: t.id, display_name: t.display_name, primaryLinks: t.tenant_devices ?? [] })),
+      tenants: listed,
       billedTenantIds: billed,
       fmt: req.fmt,
     }),

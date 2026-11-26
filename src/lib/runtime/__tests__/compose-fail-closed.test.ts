@@ -440,19 +440,3 @@ describe("composeBillingReview", () => {
     expect(runtime.root.registry.size).toBe(before);
   });
 });
-
-describe("composeBilling readOnly", () => {
-  it("skips the plugin-state read, so an unreadable state does not block a read-only caller", async () => {
-    const runtime = await getMgmRuntime();
-    const before = runtime.root.registry.size;
-    state.read = "unreachable";
-    const supabase = client();
-
-    const result = await composeBilling({ supabase, organizationId: ORG, readOnly: true });
-
-    expect(result.ok, JSON.stringify(result)).toBe(true);
-    expect(supabase.rpc).not.toHaveBeenCalled();
-    if (result.ok) await result.data.dispose();
-    expect(runtime.root.registry.size).toBe(before);
-  });
-});

@@ -112,7 +112,7 @@ its composer does not:
 | Composer | Authenticates and checks org access | Refuses a disabled plugin |
 |---|---|---|
 | `composeCommunityManagement`, `composeMetering` | yes (`authorizeOrganization`) | yes: `409`, or `503` when plugin state cannot be read |
-| `composeBilling` | yes | yes: `409` or `503` — except with `readOnly: true` |
+| `composeBilling` | yes | yes: `409`, or `503` when plugin state cannot be read |
 | `composePayments` | yes | new checkouts only, in the Payments capability (see "Payments" below) |
 | `composePaymentsPublic` | no — no user session; see below | new checkouts only, in the Payments capability |
 | `composeBillingReview` | no | no |
@@ -144,10 +144,10 @@ metering write or provider call, and `requireCommunityPlugin` in
 `src/lib/community-management/operations/shared.ts` before each community
 write. They read through their Supabase repository, which also uses
 `isPluginEnabledForOrg` and rejects when the state cannot be read, and refuse
-with the same `409` or `503` before anything is written or called. Billing's
-`previewBills` saves no bills and does not re-check, though preview mode can
-re-pin an empty draft period's tariff, so a route that calls it gates itself
-(see `readOnly` below). The capabilities' unit tests
+with the same `409` or `503` before anything is written or called. Every
+bill generation the billing capability runs writes, so each re-checks; the
+bill engine's preview runs only through `composeBillingReview`, whose route
+gates itself (below). The capabilities' unit tests
 check that each method in their `WRITES` / `GATED` tables re-checks before it
 acts; the tables are kept by hand, so a new gated method is covered only once
 it has a row there. `compose-fail-closed.test.ts` also writes through each
@@ -878,21 +878,17 @@ mutation routes; a composer call alone does not prove its result is checked.
 
 A composer call counts as gating only if the composer refuses a disabled
 plugin before opening its scope (the table above; the test's `COMPOSERS` map
-is the list it checks against). `composeBillingReview` does not count, and
-neither does `composeBilling` called with `readOnly: true` (or with options
-the test cannot read statically): routes using them call `checkGate`/`gateRoute`
-themselves. A route that calls `previewBills` is one: preview can re-pin an
-empty draft period's tariff, so it is a billing write even though it saves no
-bills, and preview mode skips the capability's plugin check (the capability
-checks only for generation in write mode), so the route's gate is the only
-check on that path. Such a route composes first, so the composer settles
-organization access (`401`/`403`) before the gate's `409`/`503` can reveal
-whether billing is on; calls `checkGate` inside the `try` whose `finally`
-disposes the scope; and answers `404` unless the gate resolved the target to
-the organization the scope was authorized for. `POST
-/api/billing/regenerate-preview` was the worked example until it was removed
-with nothing left calling it (#201's Deletes); no route passes `readOnly`
-today.
+is the list it checks against). No composer takes an option that skips that
+check; `composeBilling`'s `readOnly` did, and went once nothing passed it
+(#287), with `BillingCapability.previewBills`, the one generation that skipped
+the capability's re-check. `composeBillingReview` does not count, so a route
+using it calls `checkGate`/`gateRoute` itself. `POST /api/billing-review/preview`
+is one: preview can re-pin an empty draft period's tariff, so it is a billing
+write even though it saves no bills, and its gate is the only plugin check on
+that path. It asks the gate for the period before it composes, and answers
+`404` unless the gate resolved the period to an organization. If a composer
+gains an option that skips its plugin check, `route-surface.test.ts` must stop
+counting a call that passes it, and the route must gate itself.
 
 ### Payments
 
