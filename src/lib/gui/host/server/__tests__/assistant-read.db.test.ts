@@ -37,12 +37,12 @@ import { getCurrentUserAccess } from "@/lib/auth/access";
 import { readForAssistant, WITHHELD_NOTE } from "../assistant-read";
 import { routeHostContext } from "../http";
 
-const ORG = "e7a10000-0000-4000-8000-000000000001";
-const COMMUNITY = "e7a10000-0000-4000-8001-000000000001";
-const MICROGRID = "e7a10000-0000-4000-8002-000000000001";
-const EDGE = "e7a10000-0000-4000-8003-000000000001";
-const HOUSE_METER = "e7a10000-0000-4000-8004-000000000001";
-const TENANT = "e7a10000-0000-4000-8005-000000000001";
+const ORG = "e7ad0000-0000-4000-8000-000000000001";
+const COMMUNITY = "e7ad0000-0000-4000-8001-000000000001";
+const MICROGRID = "e7ad0000-0000-4000-8002-000000000001";
+const EDGE = "e7ad0000-0000-4000-8003-000000000001";
+const HOUSE_METER = "e7ad0000-0000-4000-8004-000000000001";
+const TENANT = "e7ad0000-0000-4000-8005-000000000001";
 const EMAIL = "assistant-read-manager@test.local";
 
 const COUNTRY = "CANARY-COUNTRY-7f20";
@@ -100,9 +100,10 @@ describe.skipIf(shouldSkip())("readForAssistant: metering.site-day against a dat
     expect(out.value.model.ext?.data).toMatchObject({ state: "day", synthetic: true, timezoneNotice: null, sources: { houses: true } });
     expect(out.value.withheld).toContainEqual({ what: "field", path: "ext.data.timezoneNotice", note: WITHHELD_NOTE });
 
+    expect(out.value.model.kind).toBe("metrics");
     const tiles = out.value.model.kind === "metrics" ? out.value.model.body.tiles : [];
     const houses = tiles.find((t) => t.key === "houses-evening");
-    expect(houses?.value.t).not.toBe("empty");
+    expect(houses?.value.t).toBe("energy");
 
     const json = JSON.stringify(out);
     expect(json).not.toContain(DEVICE);
