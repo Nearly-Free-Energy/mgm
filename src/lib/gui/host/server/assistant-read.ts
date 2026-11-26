@@ -13,7 +13,10 @@ import "server-only";
  *   `admit`); so is every view attached to it, listed in `withheld` from the
  *   surface whatever its plugin state, so the answer does not tell another
  *   plugin's state. An attached view that is admitted is read as the view
- *   itself is. The list has no such view yet.
+ *   itself is; one the model leaves out (attachedViews in ./view.ts: its
+ *   plugin off or its gate unreadable, or its path unfilled here) is given
+ *   with the gate's refusal or as not found, never just left out. While
+ *   ASSISTANT_READS lists no attached view, no answer has one.
  * - Signals come from assistantSignals (./signals.ts): only marked and
  *   listed watchers run, and the counts are over them alone.
  * - Every action, proposal and composer is removed (a proposal is not
@@ -51,10 +54,12 @@ import "server-only";
  */
 import { isDeepStrictEqual } from "node:util";
 import { rolesIncludeStaff } from "@/lib/auth/access";
+import type { GateDecision } from "@/lib/runtime/gate";
 import { ASSISTANT_READS } from "../../assistant-reads";
 import type { Id, Signal, ViewModel } from "../../contract";
 import { requireIssued, type HostContext } from "./access";
 import { findRefusedReference } from "./assistant-references";
+import { pluginGate } from "./gate-state";
 import { isPageHref, parseHref } from "./hrefs";
 import { matchView } from "./match-view";
 import { selectOrganization } from "./organization";
@@ -130,6 +135,7 @@ const NOT_FOUND = fail(404, "gui_not_found", "This page could not be found.");
 const REFERENCE_REFUSED = fail(500, "assistant_reference_refused", "This view could not be given to an assistant.");
 const TOO_LARGE = fail(500, "assistant_output_too_large", "This answer is too large to give to an assistant.");
 const VIEW_FAILED = fail(500, "gui_view_failed", "This view could not be loaded.");
+const NOT_ATTACHED = fail(404, "gui_not_found", "This view is not available for this page.");
 
 export const WITHHELD_NOTE = "Withheld: an assistant may not read this.";
 
@@ -187,6 +193,25 @@ function withheldEmbeds(model: ViewModel): AssistantWithheld[] {
   });
 }
 
+/**
+ * Why an attached view an assistant may read is not in the model's list
+ * (attachedViews in ./view.ts leaves one out when its plugin's gate refuses
+ * it or cannot be read, or when its path cannot be filled here): the gate's
+ * own refusal, else NOT_ATTACHED. So an assistant can tell a view that could
+ * not be read from one that is not there. If attachedViews leaves a view out
+ * for another reason, revisit.
+ */
+async function whyNotAttached(ctx: HostContext, org: string, candidate: RegisteredView): Promise<HostFailure> {
+  let decision: GateDecision;
+  try {
+    decision = await pluginGate(ctx, org)(candidate.plugin);
+  } catch {
+    return fail(503, `${candidate.plugin}_gate_unavailable`, "Could not check whether this part of MGM is enabled.");
+  }
+  if (!decision.ok) return { ok: false, status: decision.status, code: decision.code, message: decision.message };
+  return NOT_ATTACHED;
+}
+
 /** `href`'s view read for an assistant, with its attached views at depth 0. */
 async function readView(
   ctx: HostContext,
@@ -207,15 +232,21 @@ async function readView(
     // From the surface, not from the model's list, which leaves out a
     // disabled plugin's tabs (attachedViews in ./view.ts) and would tell
     // that plugin's state.
-    for (const candidate of attachmentCandidates(snapshot.views, view.def)) {
-      if (o.admit(candidate.def.id)) continue;
+    const candidates = attachmentCandidates(snapshot.views, view.def).sort(
+      (a, b) => a.def.attach!.order - b.def.attach!.order || a.def.id.localeCompare(b.def.id),
+    );
+    for (const candidate of candidates) {
       const hint = candidate.def.attach!.hint;
-      withheld.push({ what: "view", view: candidate.def.id, title: attachmentTitle(snapshot, candidate), hint, note: WITHHELD_NOTE });
-    }
-    for (const a of loaded.attached) {
-      if (!o.admit(a.view)) continue;
-      const outcome = await readView(ctx, snapshot, a.href, { within: org, depth: 1, admit: o.admit });
-      attached.push({ view: a.view, title: a.title, hint: a.hint, outcome });
+      const title = attachmentTitle(snapshot, candidate);
+      if (!o.admit(candidate.def.id)) {
+        withheld.push({ what: "view", view: candidate.def.id, title, hint, note: WITHHELD_NOTE });
+        continue;
+      }
+      const shown = loaded.attached.find((a) => a.view === candidate.def.id);
+      const outcome = shown
+        ? await readView(ctx, snapshot, shown.href, { within: org, depth: 1, admit: o.admit })
+        : await whyNotAttached(ctx, org, candidate);
+      attached.push({ view: candidate.def.id, title: shown?.title ?? title, hint, outcome });
     }
   }
   withheld.push(...withheldEmbeds(loaded));

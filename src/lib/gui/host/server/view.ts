@@ -168,7 +168,9 @@ type Place = {
 /**
  * The views that attach to `def`: those whose `attach.to` is its entity
  * kind or names it, never itself. attachedViews lists them; the assistant
- * read interface (./assistant-read.ts) withholds every one it may not read.
+ * read interface (./assistant-read.ts) withholds every one it may not read
+ * and accounts for every one it may. If readForAssistant stops building its
+ * `withheld` and `attached` from this list, revisit.
  */
 export function attachmentCandidates(views: readonly RegisteredView[], def: ViewDef): RegisteredView[] {
   const kind = def.entity === undefined ? undefined : def.params[def.entity];
@@ -394,7 +396,8 @@ async function takenSignals(ctx: HostContext, organizationId: string): Promise<S
  * is refused as NOT_LISTED before anything is read, and a feed's embed of
  * one is withheld (embedViews). Left out, every view is admitted, as for a
  * page. It decides nothing about attached views, which are only listed here;
- * the read interface withholds those itself.
+ * the read interface withholds those itself, from attachmentCandidates. If
+ * it stops doing so, decide attached views here with `admit`.
  */
 export async function dispatchView(
   ctx: HostContext,

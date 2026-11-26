@@ -301,22 +301,72 @@ describe("readForAssistant, for a view", () => {
       expect(loadOf(rates)).not.toHaveBeenCalled();
     });
 
-    it("reads a listed one as the view itself is read, in the same organization", async () => {
-      const tile = view("metering", {
-        id: "metering.tile",
-        path: "/microgrids/[id]/setup/edges",
+    /** A listed tile of community management's, attached to the site day. */
+    function listedTile(path = "/microgrids/[id]/setup/edges") {
+      const tile = view("community-management", {
+        id: "community-management.tile",
+        path,
         agent: "read",
         attach: { to: { view: "metering.site-day" }, order: 3, hint: "tile" },
       } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
       snapshot = snapshotOf([siteDay, tile, rates], { actions: [action("billing", "billing.edit", "/api/microgrids/[id]")] });
-      list({ kind: "view", id: "metering.site-day" }, { kind: "view", id: "metering.tile" });
+      list({ kind: "view", id: "metering.site-day" }, { kind: "view", id: "community-management.tile" });
+      return tile;
+    }
+
+    it("reads a listed one as the view itself is read, in the same organization", async () => {
+      listedTile();
       const out = await read(DAY);
       if (!out.ok) throw new Error("refused");
       expect(out.value.attached).toHaveLength(1);
       const [attached] = out.value.attached;
-      expect(attached).toMatchObject({ view: "metering.tile", hint: "tile", outcome: { ok: true, value: { view: "metering.tile", org: ORG_A, attached: [] } } });
+      expect(attached).toMatchObject({
+        view: "community-management.tile",
+        hint: "tile",
+        outcome: { ok: true, value: { view: "community-management.tile", org: ORG_A, attached: [] } },
+      });
       expect(attached.outcome.ok && attached.outcome.value.model.actions).toEqual([]);
       expect(out.value.withheld.map((w) => (w.what === "view" ? w.view : w.what))).toEqual(["billing.rates"]);
+    });
+
+    it("does not read a listed one in another organization than the view's", async () => {
+      roles = [superAdmin()];
+      const tile = listedTile();
+      // The site day resolves to ORG_A; once its loader has run, the tile's path resolves to ORG_B.
+      composeMetering.mockImplementation(async () => {
+        resolveTargetOrganization.mockResolvedValue(ORG_B);
+        return { ok: true, data: { metering: { getSiteDay }, dispose } };
+      });
+      const out = await read(DAY, ORG_A);
+      if (!out.ok) throw new Error("refused");
+      expect(out.value.org).toBe(ORG_A);
+      expect(out.value.attached).toEqual([
+        { view: "community-management.tile", title: expect.any(String), hint: "tile", outcome: expect.objectContaining({ ok: false, status: 404, code: "gui_not_found" }) },
+      ]);
+      expect(loadOf(tile)).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["is off", { ok: false, status: 409, code: "community-management_disabled", message: "Community management is disabled." }],
+      ["cannot be read", { ok: false, status: 503, code: "community-management_gate_unavailable", message: "Could not check." }],
+    ])("gives a listed one whose plugin %s with the gate's answer, never leaving it out", async (_name, decision) => {
+      const tile = listedTile();
+      gates.set("community-management", decision as GateDecision);
+      const out = await read(DAY);
+      if (!out.ok) throw new Error("refused");
+      expect(out.value.attached).toEqual([{ view: "community-management.tile", title: "community-management.tile example", hint: "tile", outcome: decision }]);
+      expect(loadOf(tile)).not.toHaveBeenCalled();
+    });
+
+    it("gives a listed one whose path cannot be filled here as not found", async () => {
+      const tile = listedTile("/microgrids/[id]/setup/edges/[edgeId]");
+      tile.def.params = { id: "microgrid", edgeId: "edge" };
+      const out = await read(DAY);
+      if (!out.ok) throw new Error("refused");
+      expect(out.value.attached).toEqual([
+        { view: "community-management.tile", title: "community-management.tile example", hint: "tile", outcome: expect.objectContaining({ ok: false, status: 404, code: "gui_not_found" }) },
+      ]);
+      expect(loadOf(tile)).not.toHaveBeenCalled();
     });
   });
 
