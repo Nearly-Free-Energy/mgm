@@ -56,7 +56,7 @@ async function draw(model: ViewModel, use: GuiKit = kit): Promise<Recorded> {
 /** The live region's text, which a repeated announcement ends with REPEAT. */
 const spoken = () => document.querySelector("[aria-live='polite']")?.textContent ?? "";
 const said = () => spoken().replace(new RegExp(`${REPEAT}$`), "");
-const region = () => screen.getByRole("region", { name: /^Bills, / });
+const region = () => screen.getByRole("grid", { name: /^Bills, / });
 const cards = () => screen.getByRole("list", { name: "Bills" });
 const tableRow = (i: number) => within(region()).getAllByRole("row")[i + 1];
 const clipboard = () => {
@@ -154,6 +154,28 @@ describe("Gridtop's period-review renderer: drawing", () => {
     expect(region().className).toContain("gt:overflow-x-auto");
     expect(region().parentElement!.className).toContain("gt:medium:block");
     expect(cards().parentElement!.className).toContain("gt:medium:hidden");
+  });
+
+  it("gives screen readers a read-only grid of rows and cells, and leaves the cards a list", async () => {
+    await draw(draftModel());
+    const grid = region();
+    expect(grid.getAttribute("aria-label")).toBe(`Bills, ${draftModel().title}, 3 tenants`);
+    expect(grid.getAttribute("aria-readonly")).toBe("true");
+    expect(grid.tabIndex).toBe(0);
+    // The table under it is presentation only, so the grid owns the rows.
+    expect(grid.querySelector("table")!.getAttribute("role")).toBe("presentation");
+    expect(within(grid).queryByRole("table")).toBeNull();
+    const rows = within(grid).getAllByRole("row");
+    expect(rows).toHaveLength(1 + TENANTS.length);
+    const width = draftModel().body.columns.length + 1;
+    for (const row of rows.slice(1)) {
+      expect(within(row).getAllByRole("rowheader")).toHaveLength(1);
+      expect(within(row).getAllByRole("gridcell")).toHaveLength(width - 1);
+    }
+    // Every figure a person copies is a gridcell.
+    for (const cell of grid.querySelectorAll("td[data-copy]")) expect(cell.getAttribute("role")).toBe("gridcell");
+    expect(within(cards()).queryAllByRole("grid")).toHaveLength(0);
+    expect(within(cards()).queryAllByRole("gridcell")).toHaveLength(0);
   });
 
   it("prints a bare figure without its currency, which the header names", async () => {
@@ -287,7 +309,7 @@ describe("Gridtop's period-review renderer: copying", () => {
     await draw(draftModel());
     // 8 figures, 4 and 8: Brian K. has no end, usage or second tier.
     expect(region().querySelectorAll("td[data-copy]")).toHaveLength(20);
-    const usage = within(tableRow(1)).getAllByRole("cell")[2];
+    const usage = within(tableRow(1)).getAllByRole("gridcell")[2];
     expect(usage.textContent).toBe("—");
     expect(usage.hasAttribute("data-copy")).toBe(false);
     await act(async () => fireEvent.click(usage));
@@ -571,7 +593,7 @@ describe("Gridtop's period-review renderer: the empty state", () => {
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("No billing data yet.");
     expect(document.body.textContent).toContain("Generate bills from meter data to read each tenant's meter for this period and calculate their bills.");
     expect(screen.getAllByRole("button", { name: GENERATE.label })).toHaveLength(1);
-    expect(screen.queryByRole("region", { name: /^Bills, / })).toBeNull();
+    expect(screen.queryByRole("grid", { name: /^Bills, / })).toBeNull();
     expect(screen.queryByRole("list", { name: "Bills" })).toBeNull();
     expect(document.querySelector("[data-totals]")).toBeNull();
     expect(screen.getByRole("link", { name: "View history" }).getAttribute("href")).toBe(HISTORY.href);
