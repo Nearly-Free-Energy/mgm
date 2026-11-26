@@ -590,6 +590,10 @@ export function createSupabasePaymentsRepository(
         _attempt_id: input.attemptId, _action: input.action,
         _external_amount: input.externalAmount ?? 0, _reference: input.externalReference ?? null,
         _notes: input.notes ?? null, _actor: input.actorUserId,
+        // The service role's value is kept as given (20261126180000), so the
+        // person's client is passed here; omitted for a browser session. If
+        // that trigger starts filling the column for the service role, revisit.
+        _actor_client_id: input.actorClientId ?? undefined,
       });
       return { error: error ? toError(error) : null };
     },

@@ -47,6 +47,19 @@ export type CallerResult = { ok: true; caller: Caller } | { ok: false; reason: C
 
 export const BROWSER: Caller = Object.freeze({ kind: "browser" });
 
+/**
+ * The client id an audit row records for `caller`: the OAuth client's id
+ * for a client, null for a browser session. Code that writes an audit row
+ * on the service role on a person's behalf passes it explicitly, because
+ * the trigger that fills `actor_client_id` from the request's token
+ * (20261126180000_audit_actor_client_id.sql) keeps the service role's
+ * value as given. If that trigger changes which roles it fills the column
+ * for, revisit.
+ */
+export function clientIdOf(caller: Caller): string | null {
+  return caller.kind === "browser" ? null : caller.clientId;
+}
+
 const KIND_CLAIM = "mgm_client_kind";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

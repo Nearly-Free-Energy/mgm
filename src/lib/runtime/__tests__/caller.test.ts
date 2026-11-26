@@ -5,7 +5,7 @@
  * that kind runs as.
  */
 import { describe, expect, it } from "vitest";
-import { BROWSER, callerFromClaims, callerOf, claimsOfToken, recordCaller } from "../caller";
+import { BROWSER, callerFromClaims, callerOf, claimsOfToken, clientIdOf, recordCaller } from "../caller";
 import { CLIENT_ID, agentClaims, browserClaims, operatorClaims, tokenWith } from "./token-fixtures";
 
 describe("callerFromClaims", () => {
@@ -82,5 +82,13 @@ describe("callerOf", () => {
     recordCaller(client, { kind: "operator", clientId: CLIENT_ID });
     expect(callerOf(client)).toEqual({ kind: "operator", clientId: CLIENT_ID });
     expect(callerOf({})).toBe(BROWSER);
+  });
+});
+
+describe("clientIdOf", () => {
+  it("gives a client's id for an audit row, and null for a browser session", () => {
+    expect(clientIdOf({ kind: "operator", clientId: CLIENT_ID })).toBe(CLIENT_ID);
+    expect(clientIdOf({ kind: "agent", clientId: CLIENT_ID })).toBe(CLIENT_ID);
+    expect(clientIdOf(BROWSER)).toBeNull();
   });
 });

@@ -189,3 +189,34 @@ was dropped (`20261118100100_tenant_role_access.sql`).
   `fn_tenant_shared_meter_days` for the days, which reads the other units'
   primary links of the unit's meters in the database and returns dates
   only, never whose they are.
+
+## Audit rows and the client
+
+Three audit tables record an actor: `billing_audit_log`,
+`payment_events` and `mgm_plugin_audit_log`. Each names the person
+(`actor_user_id`, with `actor_kind` on the first two) and, since
+`20261126180000_audit_actor_client_id.sql`, the client the person acted
+through (`actor_client_id`, RFC #259 § 2, ADR-008). Other columns that
+name who acted, such as `billing_line_items.entered_by_user_id` or
+`payment_attempts.resolved_by`, name only the person.
+
+- `actor_client_id` is the OAuth client's id (`client_id`) when the person
+  used a client: the CLI, or later the assistant bridge. It is NULL for a
+  browser session, for the system, and for rows written before that
+  migration. It has no foreign key, so a client that is removed keeps its
+  rows.
+- The database fills it. A trigger on each table reads the request's own
+  token claims. When the request runs on a token whose role is
+  `authenticated`, `anon` or `mgm_agent` (a person's token, the anonymous
+  key, or the assistant's role that #274 adds), it sets the column from
+  the token's `client_id` and ignores any value the statement gave, so nobody
+  can record another client. This holds inside `SECURITY DEFINER`
+  functions too, since the claims belong to the request, not to the role
+  the function runs as. An update that names the column keeps the recorded
+  value.
+- The service role's value is kept as given. Code that writes an audit
+  row on the service role for a person passes the client's id itself.
+  Today that is `fn_payment_reconcile` (`_actor_client_id`), called by
+  Payments' reconcile with `clientIdOf(mgmRequest.caller)`
+  (`src/lib/runtime/caller.ts`). A new service-role write of an audit row
+  for a person does the same, or its rows read as a browser session's.

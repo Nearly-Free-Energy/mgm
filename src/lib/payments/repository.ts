@@ -12,6 +12,12 @@ export type PaymentsScope = {
   organizationId: string;
   userId: string | null;
   roles: UserRoleRecord[];
+  /**
+   * The OAuth client the person acts through (`clientIdOf(mgmRequest.caller)`),
+   * null for a browser session and the public surfaces. Recorded on the
+   * audit rows Payments writes for the person on the service role.
+   */
+  clientId: string | null;
 };
 
 export type PaymentsResult<T> =
@@ -291,6 +297,8 @@ export interface PaymentsRepository {
     externalReference?: string | null;
     notes?: string | null;
     actorUserId: string;
+    /** Recorded on the payment event as actor_client_id; null for a browser session. */
+    actorClientId: string | null;
   }): Promise<{ error: RepositoryError | null }>;
 }
 

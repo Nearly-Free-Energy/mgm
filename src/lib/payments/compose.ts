@@ -17,6 +17,7 @@ import {
   PAYMENTS_PLUGIN_VERSION,
   PESAPAL_PLUGIN_VERSION,
 } from "@/lib/plugins/bundled";
+import { clientIdOf } from "@/lib/runtime/caller";
 import { authorizeOrganization, openOrganizationScope } from "@/lib/runtime/scope";
 import { requireOrganizationAudience } from "@/lib/runtime/services";
 import { PaymentsCapability } from "./capability";
@@ -64,6 +65,10 @@ export const PaymentsPlugin = {
       organizationId: request.organizationId,
       userId: request.userId,
       roles: request.roles,
+      // From the client the request scope read its caller from, never from
+      // the composer (openOrganizationScope). If openOrganizationScope stops
+      // reading the caller from the client, revisit.
+      clientId: clientIdOf(request.caller),
     };
     const registry = ctx.paymentProviderRegistry;
     let active = true;
@@ -90,7 +95,7 @@ export const PaymentsPlugin = {
 } satisfies Plugin.Object<PaymentsPluginConfig>;
 
 async function loadPayments(input: {
-  request: PaymentsScope & { supabase: SupabaseClient };
+  request: Omit<PaymentsScope, "clientId"> & { supabase: SupabaseClient };
   repository: PaymentsRepository;
 }): Promise<PaymentsResult<PaymentsComposition>> {
   let requestScope: Awaited<ReturnType<typeof openOrganizationScope>> | null = null;
