@@ -124,9 +124,26 @@ const inputUnavailable = (source: SourceKey): ExpectedItem => ({
 const KAMPALA: SiteDayZone = { tz: "Africa/Kampala", zone: "microgrid" };
 
 /**
+ * A pinned day the fixture refuses with a provider code (C19, C20, C24): the
+ * sources were read and chosen, so all four are facts; the fixture's 502
+ * reaches the capture as 503 (capability.ts, `fromMeteringError`). If that
+ * mapping changes, revisit.
+ */
+function providerRefusal(reason: SiteDayRefusalReason, code: string): CaseEvidence {
+  return {
+    outcome: "refused",
+    items: { src_battery: { c: "fact" }, src_grid: { c: "fact" }, src_load: { c: "fact" }, src_pv: { c: "fact" } },
+    read: { reason, from: { status: 503, code } },
+    provider: "synthetic",
+    zoneRead: KAMPALA,
+    window: KAMPALA,
+  };
+}
+
+/**
  * The cases' expected evidence (docs/investigation-cases.md §2). C15 to
- * C24 enter with their scenarios (A2-4), in whichever of A2-3 and A2-4
- * merges second.
+ * C24's pointer positions and counter readings are pinned from their days
+ * in `fixture/pinned-days.ts`; if a mask there changes, re-derive them.
  */
 export const CASE_EVIDENCE: Readonly<Partial<Record<CaseId, CaseEvidence>>> = {
   C01: { outcome: "read" },
@@ -211,4 +228,53 @@ export const CASE_EVIDENCE: Readonly<Partial<Record<CaseId, CaseEvidence>>> = {
     // The operation's window: refused before the zone read.
     window: KAMPALA,
   },
+  // Meter 11 is silent over the whole start search, so its end is not searched.
+  C15: {
+    outcome: "read",
+    meterOutcomes: { "11": "no_start" },
+    meterReadings: { "11": { start: null, end: null } },
+  },
+  // A gateway down from 23:20: every meter's end search finds nothing.
+  C16: {
+    outcome: "read",
+    items: { no_data: { c: "calculated" } },
+    ranges: { no_data: [[1400, 1440]] },
+    ruledOut: [{ grid: "/items/series/gridV/279", soc: "/items/series/soc/279" }],
+    meterOutcomes: { "11": "no_end", "12": "no_end", "13": "no_end" },
+  },
+  // Meter 12's counter restarts from 0 at 20:00.
+  C17: {
+    outcome: "read",
+    meterOutcomes: { "12": "backwards" },
+    meterReadings: { "12": { start: [215, 19902759], end: [287, 1502] } },
+  },
+  // Its `timestamps` dropped 30 is the pins' `unreadableTimestamps`.
+  C18: {
+    outcome: "read",
+    items: { no_data: { c: "calculated" } },
+    ranges: { no_data: [[840, 990]] },
+    ruledOut: [{ grid: "/items/series/gridV/167", soc: "/items/series/soc/167" }],
+  },
+  C19: providerRefusal("provider_unreadable_timestamps", "METERING_UNREADABLE_TIMESTAMPS"),
+  C20: providerRefusal("provider_unavailable", "METERING_UNAVAILABLE"),
+  // The gap starts the day before: the carry-in's last readings rule out dark.
+  C21: {
+    outcome: "read",
+    items: { no_data: { c: "calculated" } },
+    ranges: { no_data: [[0, 180]] },
+    ruledOut: [{ grid: "/items/carry_in/gridV/1", soc: "/items/carry_in/soc/1" }],
+  },
+  // Meter 12's counter holds its 17:00 value: counted at 0 kWh, no outcome.
+  C22: {
+    outcome: "read",
+    meterReadings: { "12": { start: [215, 22175129], end: [287, 22175129] } },
+  },
+  C23: {
+    outcome: "read",
+    items: { m_unreadable: { c: "unavailable", reason: "tenant_meter_unreadable" } },
+    unreadable: { tenant_meter_unreadable: ["13"] },
+    meterOutcomes: { "12": "backwards" },
+    meterReadings: { "12": { start: [215, 22134472], end: [287, 1670] } },
+  },
+  C24: providerRefusal("provider_invalid_data", "METERING_INVALID_DATA"),
 };
