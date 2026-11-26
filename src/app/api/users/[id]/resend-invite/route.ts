@@ -11,6 +11,7 @@ import { invitationNotice } from "@/lib/auth/invitation-notice";
 import { sendNotice } from "@/lib/email/notices";
 import { getMgmRuntime } from "@/lib/runtime/root";
 import { checkRateLimit } from "@/lib/rate-limit/in-memory";
+import { checkInvitation } from "@/lib/organization-directory/invite-limit";
 import type { UserRole, RoleScopeType } from "@/lib/types/domain";
 import { ResendInviteBody } from "@/lib/organization-directory/schemas";
 import { parseJsonBody } from "@/lib/validation/parse-body";
@@ -59,6 +60,13 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *           super_admin target → caller must be super_admin.
  *           org_manager target → caller must pass currentUserCanAccessOrg.
  *
+ *   Step C2 — the per-inviter limit (invite-limit.ts), shared with
+ *           POST /api/users/invite, since a resend emails the invitation
+ *           too: past INVITATIONS_PER_WINDOW authorized attempts by the
+ *           caller in the window → 429 `rate_limited` with Retry-After.
+ *           Counted before the target is looked up, so the 429 says
+ *           nothing about the account.
+ *
  *   Step D — target user lookup via svc.auth.admin.getUserById.
  *           Both error.code === 'user_not_found' AND !data.user → 404.
  *
@@ -73,8 +81,9 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *   Step G — the invitation notice, through the target's organization's
  *           mail sender, or the deployment's (super admin, or an
  *           organization without one). It carries no token.
- *           - more than 3 resends for one person in 10 minutes → 429;
- *             Supabase no longer sends, so it no longer limits this;
+ *           - more than 3 resends for one person in 10 minutes → 429
+ *             with Retry-After; Supabase no longer sends, so it no
+ *             longer limits this;
  *           - a notice that cannot be sent → 502.
  *
  * Returns 200 { resent: true } on success.
@@ -246,6 +255,21 @@ export async function POST(
     );
   }
 
+  // ── Step C2: per-inviter limit ─────────────────────────────────────
+  // The invite route's limiter, keyed by the getUser() id (invite-limit.ts):
+  // invitations and resends by one person share one count. Every
+  // authorized attempt counts, before the target is looked up.
+  const counted = checkInvitation(caller.id);
+  if (!counted.ok) {
+    return NextResponse.json(
+      {
+        error: "Too many invitations sent recently. Try again later.",
+        code: "rate_limited",
+      },
+      { status: 429, headers: { "Retry-After": String(counted.retryAfter ?? 1) } }
+    );
+  }
+
   // ── Step D: target user lookup (after permission has passed) ───────
   const svc = createServiceClient();
   const lookup = await svc.auth.admin.getUserById(targetId);
@@ -285,15 +309,17 @@ export async function POST(
   });
 
   // ── Step G: send the notice again ──────────────────────────────────
-  // Per process, like the payment-link limiter; enough to stop a stuck
-  // button from flooding someone's inbox.
-  if (!checkRateLimit(`resend-invite:${targetId}`, 3, 10 * 60_000).ok) {
+  // Per invitee, besides Step C2's per-inviter count. Per process, like
+  // the payment-link limiter; enough to stop a stuck button from flooding
+  // someone's inbox.
+  const resent = checkRateLimit(`resend-invite:${targetId}`, 3, 10 * 60_000);
+  if (!resent.ok) {
     return NextResponse.json(
       {
         error: "Too many invitations sent recently. Try again in a few minutes.",
         code: "rate_limited",
       },
-      { status: 429 }
+      { status: 429, headers: { "Retry-After": String(resent.retryAfter ?? 1) } }
     );
   }
   const runtime = await getMgmRuntime();

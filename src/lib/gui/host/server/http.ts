@@ -69,13 +69,16 @@ export function hostJson(body: unknown, status = 200): NextResponse {
  * (../client/kit-runtime.tsx) reads only `error`; if the two keys could
  * ever differ, revisit which one each reads.
  */
-export function hostFailure(status: number, code: string, message: string): NextResponse {
+export function hostFailure(status: number, code: string, message: string, retryAfter?: number): NextResponse {
   const body: HostFailureBody = { type: "result", ok: false, status, code, message, error: message };
-  return hostJson(body, status);
+  const response = hostJson(body, status);
+  // A rate limit's refusal (HostFailure in ./view.ts) says when to ask again.
+  if (retryAfter !== undefined) response.headers.set("Retry-After", String(retryAfter));
+  return response;
 }
 
 export function hostOutcome<T>(
-  out: { ok: true; value: T } | { ok: false; status: number; code: string; message: string },
+  out: { ok: true; value: T } | { ok: false; status: number; code: string; message: string; retryAfter?: number },
 ): NextResponse {
-  return out.ok ? hostJson(out.value) : hostFailure(out.status, out.code, out.message);
+  return out.ok ? hostJson(out.value) : hostFailure(out.status, out.code, out.message, out.retryAfter);
 }

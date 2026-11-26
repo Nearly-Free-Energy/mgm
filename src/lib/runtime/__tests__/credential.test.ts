@@ -4,7 +4,7 @@
  * token, and the switch that turns client tokens off (ADR-008 decision 9).
  */
 import { describe, expect, it } from "vitest";
-import { clientTokensAccepted } from "@/lib/config/client-tokens";
+import { clientTokensAccepted, readClientTokens } from "@/lib/config/client-tokens";
 import { bearerCredential, credentialMark, credentialMarkMatches, sessionCookiePresent } from "../credential";
 import { operatorClaims, tokenWith } from "./token-fixtures";
 
@@ -79,5 +79,11 @@ describe("clientTokensAccepted (MGM_CLIENT_TOKENS)", () => {
 
   it.each(["off", "0", "false", "no", "of", "disabled"])("refuses them for %j, a mistyped value included", (value) => {
     expect(clientTokensAccepted({ MGM_CLIENT_TOKENS: value })).toBe(false);
+  });
+
+  it("reads a value that is neither on nor off as invalid, which the start-up check logs", () => {
+    expect(readClientTokens({ MGM_CLIENT_TOKENS: undefined })).toBe("on");
+    expect(readClientTokens({ MGM_CLIENT_TOKENS: " Off " })).toBe("off");
+    expect(readClientTokens({ MGM_CLIENT_TOKENS: "no" })).toBe("invalid");
   });
 });

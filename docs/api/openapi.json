@@ -3872,6 +3872,19 @@
               "metering_disabled"
             ]
           },
+          "429": {
+            "description": "- `gui_rate_limited`: The caller is an app, not a browser (the CLI or an assistant), and has loaded views that call an outside system too often for this person and app. Nothing was read; the Retry-After header says how many seconds to wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostFailureBody"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "gui_rate_limited"
+            ]
+          },
           "500": {
             "description": "- `gui_output_invalid`: What the host built, or what a contribution returned, broke the contract's schema, so none of it is sent.\n- `gui_view_failed`: The view's loader threw, or the view could not be completed.\n- `gui_view_refused`: The view's loader refused, for a reason other than not finding its record. The status and the message are the loader's.",
             "content": {
@@ -12863,6 +12876,13 @@
         500
       ],
       "meaning": "The action's own prepare threw."
+    },
+    {
+      "code": "gui_rate_limited",
+      "status": [
+        429
+      ],
+      "meaning": "The caller is an app, not a browser (the CLI or an assistant), and has loaded views that call an outside system too often for this person and app. Nothing was read; the Retry-After header says how many seconds to wait."
     },
     {
       "code": "gui_unauthenticated",

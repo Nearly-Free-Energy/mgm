@@ -10,6 +10,10 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import {
+  INVITATIONS_PER_WINDOW,
+  _resetInvitationLimiterForTests,
+} from "@/lib/organization-directory/invite-limit";
 
 // ── Mocks ────────────────────────────────────────────────────────────
 
@@ -175,6 +179,7 @@ function makeRequest(body: Record<string, unknown>): NextRequest {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  _resetInvitationLimiterForTests();
   vi.stubEnv("MGM_APP_URL", "https://mgm.example.org");
   sendNoticeSpy.mockReset();
   sendNoticeSpy.mockResolvedValue({ ok: true, via: "organization" });
@@ -706,6 +711,49 @@ describe("POST /api/users/invite", () => {
       user_id: "00000000-0000-4000-8000-000000000099",
       existing_account: false,
       email_sent: true,
+    });
+  });
+
+  // ── 429: the per-inviter limit (invite-limit.ts) ───────────────────
+  describe("the per-inviter limit", () => {
+    const ORG_B = "bbbbbbbb-bbbb-4000-8000-000000000002";
+    const invite = async (email: string, scopeId = ORG_A) => {
+      const { POST } = await import("../route");
+      return POST(makeRequest({ email, role: "org_manager", scope_id: scopeId }));
+    };
+
+    beforeEach(() => {
+      mockCallerRoles = [{ role: "org_manager", scope_type: "org", scope_id: ORG_A }];
+    });
+
+    it("answers 429 rate_limited with Retry-After past the limit, before anything is looked up, written or emailed", async () => {
+      for (let i = 0; i < INVITATIONS_PER_WINDOW; i++) {
+        expect((await invite(`person-${i}@example.com`)).status).toBe(201);
+      }
+      createUserSpy.mockClear();
+      rpcSpy.mockClear();
+      sendNoticeSpy.mockClear();
+
+      const res = await invite("one-more@example.com");
+      expect(res.status).toBe(429);
+      expect(Number(res.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+      expect(await res.json()).toEqual({ error: expect.any(String), code: "rate_limited" });
+      expect(createUserSpy).not.toHaveBeenCalled();
+      expect(rpcSpy).not.toHaveBeenCalled();
+      expect(sendNoticeSpy).not.toHaveBeenCalled();
+    });
+
+    it("counts each inviter apart", async () => {
+      for (let i = 0; i < INVITATIONS_PER_WINDOW; i++) await invite(`person-${i}@example.com`);
+      mockCaller = { id: "11111111-1111-4000-8000-000000000002", email: "other@example.com" };
+      expect((await invite("one-more@example.com")).status).toBe(201);
+    });
+
+    it("does not count an invitation the inviter may not send", async () => {
+      for (let i = 0; i < INVITATIONS_PER_WINDOW; i++) {
+        expect((await invite(`person-${i}@example.com`, ORG_B)).status).toBe(403);
+      }
+      expect((await invite("allowed@example.com")).status).toBe(201);
     });
   });
 

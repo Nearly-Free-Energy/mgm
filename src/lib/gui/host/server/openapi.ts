@@ -455,6 +455,7 @@ export const HOST_ROUTES: readonly HostRoute[] = [
       "gui_not_found",
       "gui_not_released",
       "gui_output_invalid",
+      "gui_rate_limited",
       "gui_unauthenticated",
       "gui_unavailable",
       "gui_unit_required",

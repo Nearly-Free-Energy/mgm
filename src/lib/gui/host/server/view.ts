@@ -27,6 +27,7 @@ import { installationRequest, requireIssued, surfaceRequest, tenantRequest, type
 import { resolveSegments, type Scope } from "./entities";
 import { pluginGate, type PluginGate } from "./gate-state";
 import { isPageHref, parseHref } from "./hrefs";
+import { checkClientVendorRead } from "@/lib/runtime/client-limits";
 import { assistantGate, isAgentCaller } from "./agent";
 import { resolveActions } from "./merge";
 import { viewModelSchema } from "./model-schema";
@@ -36,7 +37,11 @@ import { MODEL_CAPS, parseOrFail, strictParseModel } from "./parse";
 import { surfaceSnapshot } from "./snapshot";
 import type { RegisteredView, SurfaceSnapshot } from "./surface-registry";
 
-export type HostFailure = { ok: false; status: number; code: string; message: string };
+/**
+ * A refusal. `retryAfter`, in whole seconds, is set only on a rate limit's
+ * refusal, and hostOutcome (./http.ts) sends it as Retry-After.
+ */
+export type HostFailure = { ok: false; status: number; code: string; message: string; retryAfter?: number };
 export type HostOutcome<T> = { ok: true; value: T } | HostFailure;
 
 const fail = (status: number, code: string, message: string): HostFailure => ({ ok: false, status, code, message });
@@ -89,6 +94,25 @@ export const MIN_REFRESH_SECONDS = { db: 15, vendor: 60 } as const;
 export const LOADER_STATUSES: ReadonlySet<number> = new Set([403, 404, 409, 500, 503]);
 const MAX_MESSAGE = 300;
 const NOT_AVAILABLE = { type: "values", values: [{ t: "text", text: "Not available" }] } as const;
+
+/**
+ * Null when `ctx`'s caller may load a view of `cost` now, else the refusal.
+ * A vendor view calls an outside system on every load, so a client that is
+ * not a browser (the CLI, the assistant bridge) counts each load of one per
+ * person and client (checkClientVendorRead in @/lib/runtime/client-limits),
+ * on top of middleware's count of its requests. A browser session is never
+ * counted: the GUI already refreshes a vendor view sparingly
+ * (MIN_REFRESH_SECONDS).
+ */
+function vendorReadRefused(ctx: HostContext, cost: ViewDef["cost"]): HostFailure | null {
+  if (cost !== "vendor" || ctx.caller.kind === "browser") return null;
+  const counted = checkClientVendorRead({ userId: ctx.access.user.id, clientId: ctx.caller.clientId });
+  if (counted.ok) return null;
+  return {
+    ...fail(429, "gui_rate_limited", "This app has read this kind of view too often. Try again shortly."),
+    retryAfter: counted.retryAfter ?? 1,
+  };
+}
 
 const isCore = (kind: EntityKind): kind is CoreEntityKind => (CORE_ENTITY_KINDS as readonly string[]).includes(kind);
 
@@ -309,6 +333,10 @@ async function dispatchTenantView(
   if (depth !== 0) return NOT_FOUND;
   const unit = chooseTenantUnit(ctx.access.roles, search.getAll(TENANT_UNIT_PARAM));
   if (!unit.ok) return unit.reason === "choose" ? UNIT_REQUIRED : NOT_FOUND;
+  // Counted before the loader, whose composeTenantApp is what asks the
+  // tenant app's gate, so a load refused there is still counted.
+  const limited = vendorReadRefused(ctx, def.cost);
+  if (limited) return limited;
 
   let loaded: unknown;
   try {
@@ -443,6 +471,9 @@ export async function dispatchView(
   // A vendor view calls an outside system, so a disabled plugin gets the gate's refusal and no load.
   if (!decision.ok && def.cost === "vendor") return fail(decision.status, decision.code, decision.message);
   const notice = decision.ok ? undefined : { tone: "warning" as const, text: decision.message };
+  // Counted only when the loader is about to run, so a refused view costs a client nothing.
+  const limited = vendorReadRefused(ctx, def.cost);
+  if (limited) return limited;
 
   const search = querySearch(def.query, parsed.search);
   // The registration check allows takesSignals only on an organization's view.

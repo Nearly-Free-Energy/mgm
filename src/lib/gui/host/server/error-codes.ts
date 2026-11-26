@@ -125,6 +125,11 @@ export const HOST_CODES = {
     status: [500],
     meaning: "The action's own prepare threw.",
   },
+  gui_rate_limited: {
+    status: [429],
+    meaning:
+      "The caller is an app, not a browser (the CLI or an assistant), and has loaded views that call an outside system too often for this person and app. Nothing was read; the Retry-After header says how many seconds to wait.",
+  },
   gui_unauthenticated: {
     status: [401],
     meaning: "No signed-in person: Supabase Auth does not accept the session.",

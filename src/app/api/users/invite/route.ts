@@ -15,6 +15,7 @@ import { invitationNotice } from "@/lib/auth/invitation-notice";
 import { sendNotice } from "@/lib/email/notices";
 import { getMgmRuntime } from "@/lib/runtime/root";
 import type { UserRole } from "@/lib/types/domain";
+import { checkInvitation } from "@/lib/organization-directory/invite-limit";
 import { INVITE_USER_REFUSALS, InviteUserBody } from "@/lib/organization-directory/schemas";
 import { parseJsonBody } from "@/lib/validation/parse-body";
 
@@ -94,6 +95,9 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *   409 — the email's account already has access (see step 2), or, for a
  *         tenant made staff, fn_change_user_role's 40000.
  *   422 — validation error.
+ *   429 — `rate_limited`: the inviter made INVITATIONS_PER_WINDOW
+ *         invitation attempts in the window, answered or not, counting
+ *         resends (invite-limit.ts); Retry-After says when to try again.
  *   500 — unexpected.
  */
 
@@ -172,6 +176,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json(
       { error: "Authentication required." },
       { status: 401 }
+    );
+  }
+
+  // ── Per-inviter limit ────────────────────────────────────────────────
+  // Its own limiter, keyed by the getUser() id (invite-limit.ts), whatever
+  // the caller. Every authorized attempt counts, before the address is
+  // looked up, so the 429 shows nothing about the address.
+  const counted = checkInvitation(caller.id);
+  if (!counted.ok) {
+    return NextResponse.json(
+      {
+        error: "Too many invitations sent recently. Try again later.",
+        code: "rate_limited",
+      },
+      { status: 429, headers: { "Retry-After": String(counted.retryAfter ?? 1) } }
     );
   }
 

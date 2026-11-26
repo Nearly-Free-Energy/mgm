@@ -18,7 +18,9 @@
  * GUI whose contract range excludes this build is different: the runtime root
  * refuses to install it, which stops every request that opens a scope.
  * An invalid MGM_METERING_FIXTURES is logged and counts as off; an "on" value
- * is logged as a warning. Neither throws.
+ * is logged as a warning. Neither throws. An MGM_CLIENT_TOKENS that is
+ * neither on nor off is logged the same way, naming the variable and never
+ * the value; middleware refuses every client token while it is set so.
  * Do not call process.exit() here; it would break Vercel.
  */
 export async function register() {
@@ -29,6 +31,9 @@ export async function register() {
   const { validateGuiAtStartup } = await import("@/lib/config/gui");
   const { validateMeteringFixturesAtStartup } = await import(
     "@/lib/config/metering-fixtures"
+  );
+  const { validateClientTokensAtStartup } = await import(
+    "@/lib/config/client-tokens"
   );
   const { validatePublicRuntimeConfigAtStartup } = await import(
     "@/lib/config/public-runtime-config"
@@ -53,5 +58,6 @@ export async function register() {
     );
   }
   validateMeteringFixturesAtStartup();
+  validateClientTokensAtStartup();
   validatePublicRuntimeConfigAtStartup();
 }

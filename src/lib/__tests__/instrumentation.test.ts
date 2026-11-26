@@ -1,7 +1,8 @@
 /**
  * Server-start validation (#46): register() warns about names retired after
- * v0.0.2 (#79), validates MGM_APP_URL, MGM_GUI, MGM_METERING_FIXTURES and
- * the Supabase runtime configuration on the Node.js runtime, and does nothing
+ * v0.0.2 (#79), validates MGM_APP_URL, MGM_GUI, MGM_METERING_FIXTURES,
+ * MGM_CLIENT_TOKENS and the Supabase runtime configuration on the Node.js
+ * runtime, and does nothing
  * during `next build` or on the Edge runtime.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -26,6 +27,7 @@ function stubValid() {
   vi.stubEnv("MGM_APP_URL", "https://mgm.example.org");
   vi.stubEnv("MGM_GUI", "");
   vi.stubEnv("MGM_METERING_FIXTURES", "");
+  vi.stubEnv("MGM_CLIENT_TOKENS", "");
   for (const name of [
     "NEXT_PUBLIC_SUPABASE_URL",
     "NEXT_PUBLIC_SUPABASE_ANON_KEY",
@@ -100,6 +102,33 @@ describe("instrumentation register()", () => {
     expect(String(warn.mock.calls[0][0])).toMatch(/MGM_METERING_FIXTURES is on/);
     warn.mockRestore();
   });
+
+  it("logs an MGM_CLIENT_TOKENS that is neither on nor off, naming the variable and not the value, and does not throw", async () => {
+    stubValid();
+    vi.stubEnv("MGM_CLIENT_TOKENS", "sk_live_not_a_switch");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect((await loadRegister())()).resolves.toBeUndefined();
+    expect(error).toHaveBeenCalledTimes(1);
+    const logged = String(error.mock.calls[0][0]);
+    expect(logged).toContain("MGM_CLIENT_TOKENS must be on or off; client tokens are refused until it is.");
+    expect(logged).not.toContain("sk_live_not_a_switch");
+    error.mockRestore();
+  });
+
+  it.each(["", "on", "ON", "1", "true", "off", "0", "false"])(
+    "logs nothing for MGM_CLIENT_TOKENS=%j",
+    async (value) => {
+      stubValid();
+      vi.stubEnv("MGM_CLIENT_TOKENS", value);
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await expect((await loadRegister())()).resolves.toBeUndefined();
+      expect(error).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+      error.mockRestore();
+      warn.mockRestore();
+    },
+  );
 
   it("rejects register() on missing Supabase settings", async () => {
     stubValid();
