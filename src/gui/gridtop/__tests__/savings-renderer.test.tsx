@@ -9,7 +9,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ModelView, checkModel, renderModel, renderShell, withPoke, POKE_LABEL } from "@/lib/gui/conformance";
-import type { ActionResult, GuiKit, LinkRef, ModelOf, Value, ViewModel, ViewState } from "@/lib/gui/contract";
+import type { ActionResult, LinkRef, ModelOf, Value, ViewModel, ViewState } from "@/lib/gui/contract";
+import type { GuiKit } from "@/lib/gui/contract-react";
 import { kit as realKit } from "@/lib/gui/kit";
 import { GridtopGui } from "..";
 import { EAST, EAST_TRAIL, KASANA, ORG, placesFixture } from "./places-fixture";

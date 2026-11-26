@@ -16,8 +16,11 @@ import {
   EDGE_STATUS_READ_TIMEOUT_MS,
   _resetEdgeStatusCacheForTests,
   cachedEdgeStatus,
+  cachedMeterActivity,
   fingerprintOf,
   lastReadAt,
+  meterFingerprintOf,
+  onlineOf,
   summarize,
   type EdgeStatusRead,
 } from "../edge-status-cache";
@@ -52,13 +55,65 @@ describe("summarize and fingerprintOf", () => {
     expect(fingerprintOf(["b", "a", "a"])).toBe(fingerprintOf(["a", "b"]));
     expect(fingerprintOf(["a"])).not.toBe(fingerprintOf(["a", "b"]));
   });
+
+  it("lists the online edges asked about once each, and names the same meters the same", () => {
+    expect(onlineOf(["edge1", "edge0", "edge0", "edge9", ""], [{ edgeId: "edge0", online: true }, { edgeId: "edge1", online: false }, { edgeId: "edge9", online: true }])).toEqual(["edge0", "edge9"]);
+    const m = (edgeId: string, componentId: string) => ({ edgeId, componentId });
+    expect(meterFingerprintOf([m("e1", "meter0"), m("e0", "meter0"), m("e0", "meter0")])).toBe(meterFingerprintOf([m("e0", "meter0"), m("e1", "meter0")]));
+    expect(meterFingerprintOf([m("e0", "meter0")])).not.toBe(meterFingerprintOf([m("e0", "meter1")]));
+  });
+});
+
+describe("cachedMeterActivity", () => {
+  const METERS = [{ edgeId: "edge0", componentId: "meter0" }];
+
+  it("keeps its answer apart from the status answer, keyed by the meters asked about", async () => {
+    const meterRead = vi.fn(async () => ({ quiet: METERS, failedEdges: [] }));
+    const statusRead = answering(ONE_OFF);
+    expect(await cachedMeterActivity(MG, METERS, meterRead, roomy())).toEqual({ state: "read", quiet: METERS, failedEdges: [], readAt: Date.now() });
+    await cachedEdgeStatus(MG, EDGES, statusRead, roomy());
+    expect(await cachedMeterActivity(MG, METERS, meterRead, roomy())).toMatchObject({ state: "read" });
+    expect(meterRead).toHaveBeenCalledTimes(1);
+    expect(statusRead).toHaveBeenCalledTimes(1);
+    await cachedMeterActivity(MG, [...METERS, { edgeId: "edge0", componentId: "meter1" }], meterRead, roomy());
+    expect(meterRead).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(EDGE_STATUS_FRESH_MS);
+    await cachedMeterActivity(MG, [...METERS, { edgeId: "edge0", componentId: "meter1" }], meterRead, roomy());
+    expect(meterRead).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps an answer with a failed edge for one minute only, so the edge is asked again soon", async () => {
+    const meterRead = vi.fn(async () => ({ quiet: [], failedEdges: ["edge0"] }));
+    expect(await cachedMeterActivity(MG, METERS, meterRead, roomy())).toMatchObject({ state: "read", failedEdges: ["edge0"] });
+    vi.advanceTimersByTime(EDGE_STATUS_FAILURE_MS - 1);
+    await cachedMeterActivity(MG, METERS, meterRead, roomy());
+    expect(meterRead).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
+    await cachedMeterActivity(MG, METERS, meterRead, roomy());
+    expect(meterRead).toHaveBeenCalledTimes(2);
+  });
+
+  it(`shares the process's ${EDGE_STATUS_CONCURRENCY} slots with the status reads`, async () => {
+    const releases: (() => void)[] = [];
+    const hold = <T>(value: T) => vi.fn(() => new Promise<T>((resolve) => releases.push(() => resolve(value))));
+    const statusReads = Array.from({ length: EDGE_STATUS_CONCURRENCY }, (_, i) => cachedEdgeStatus(`mg${i}`, EDGES, hold<EdgeStatusRead>([]), roomy()));
+    const meterRead = hold({ quiet: [], failedEdges: [] });
+    const waiting = cachedMeterActivity(MG, METERS, meterRead, roomy());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(meterRead).not.toHaveBeenCalled();
+    releases.shift()!();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(meterRead).toHaveBeenCalledTimes(1);
+    releases.splice(0).forEach((release) => release());
+    await Promise.all([...statusReads, waiting]);
+  });
 });
 
 describe("cachedEdgeStatus", () => {
   it("reads, then serves the answer from the cache until it is five minutes old", async () => {
     const read = answering(ONE_OFF);
     const first = await cachedEdgeStatus(MG, EDGES, read, roomy());
-    expect(first).toEqual({ state: "read", total: 2, offline: 1, readAt: Date.now() });
+    expect(first).toEqual({ state: "read", total: 2, offline: 1, online: ["edge0"], readAt: Date.now() });
     vi.advanceTimersByTime(EDGE_STATUS_FRESH_MS - 1);
     expect(await cachedEdgeStatus(MG, EDGES, read, roomy())).toEqual(first);
     expect(read).toHaveBeenCalledTimes(1);

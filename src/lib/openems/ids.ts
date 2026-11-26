@@ -27,6 +27,30 @@ export function parseOpenEmsId(value: unknown): string | null {
   return parsed.success ? parsed.data : null;
 }
 
+/**
+ * The first id that `values` name more than once after trimming, else null.
+ * Values outside the stored format are passed over, so check those with
+ * `parseOpenEmsId` first. A save that upserts several rows keyed on one of
+ * these ids calls it before any database call: Postgres refuses an
+ * `INSERT … ON CONFLICT DO UPDATE` that reaches the same row twice, so two
+ * entries that differ only by surrounding spaces (`meter0`, ` meter0`) would
+ * otherwise fail the whole save with a 500. Ids compare exactly, case
+ * included, as the plain TEXT unique constraints on both columns compare them
+ * (`00001_schema.sql`): if either becomes case-insensitive (citext, a
+ * nondeterministic collation, a unique index on `lower()`), compare the same
+ * way here, or `Meter0` and `meter0` reach one row again.
+ */
+export function firstDuplicateOpenEmsId(values: readonly unknown[]): string | null {
+  const seen = new Set<string>();
+  for (const value of values) {
+    const id = parseOpenEmsId(value);
+    if (id === null) continue;
+    if (seen.has(id)) return id;
+    seen.add(id);
+  }
+  return null;
+}
+
 /** Shown to an operator next to a refused id. */
 export const OPENEMS_ID_FORMAT_HINT =
   "1 to 64 characters: letters, digits, '_', '.', ':' or '-'";

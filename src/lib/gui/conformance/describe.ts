@@ -6,7 +6,7 @@
  * only the index (gui-boundary.test.ts, rule 8).
  */
 import { expect } from "vitest";
-import type { GuiPlugin } from "../contract";
+import type { GuiPlugin } from "../contract-react";
 import { CHECKS, type CheckId, type CheckOptions, type Finding } from "./checks";
 
 export interface TestApi {

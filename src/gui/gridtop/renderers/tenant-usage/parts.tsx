@@ -14,7 +14,8 @@
  * is a follow-up that needs the budgets measured again.
  */
 import { useId, useState, type ReactNode } from "react";
-import type { ActionRef, GuiKit, Href, LinkRef, ModelOf, Tone, Value } from "@/lib/gui/contract";
+import type { ActionRef, Href, LinkRef, ModelOf, Tone, Value } from "@/lib/gui/contract";
+import type { GuiKit } from "@/lib/gui/contract-react";
 import { cls, type Problem, type Step } from "./ext";
 
 // The window bar's control style (../../shell/window-bar.tsx), at least 44 px high on a touch screen.

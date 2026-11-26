@@ -6,7 +6,8 @@
  */
 import { lazy, Suspense, type ComponentType } from "react";
 import { describe, expect, it } from "vitest";
-import type { GuiPlugin, ViewModel, ViewProps } from "../../contract";
+import type { ViewModel, ViewProps } from "../../contract";
+import type { GuiPlugin } from "../../contract-react";
 import { kit } from "../../kit";
 import { checkModel, loadLazyRenderers, MODEL_FIXTURES, withPoke } from "..";
 import { referenceGui } from "./reference-gui";

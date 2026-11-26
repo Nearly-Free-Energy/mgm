@@ -9,11 +9,14 @@
  *   - an org_manager of another organization resolves nothing (RLS hides
  *     the row and the gate does not leak plugin state across orgs);
  *   - writes are refused with 409 `<plugin>_disabled` while the plugin is
- *     off, reads pass, and enabling the plugin lets the write through.
+ *     off, reads pass, and enabling the plugin lets the write through;
+ *   - the operations plugin is off without a row, and only the
+ *     organization's staff can turn it on.
  *
  * Requires a running local Supabase (same harness as rls.test.ts).
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   assertEnvironmentReady,
   cleanupTestData,
@@ -22,7 +25,13 @@ import {
   shouldSkip,
   type TestUser,
 } from "@/lib/supabase/__tests__/rls.helpers";
-import { CORE_ENTITY_KINDS, MGM_BUNDLED_PLUGINS, getBundledPlugin } from "@/lib/plugins/bundled";
+import {
+  CORE_ENTITY_KINDS,
+  MGM_BUNDLED_PLUGINS,
+  OPERATIONS_PLUGIN_NAME,
+  OPERATIONS_PLUGIN_VERSION,
+  getBundledPlugin,
+} from "@/lib/plugins/bundled";
 import { MgmGate, resolveTargetOrganization, type GateTarget } from "../gate";
 import type { MgmCatalog } from "../services";
 
@@ -45,6 +54,7 @@ const EMAILS = {
   managerA: "gate-db-manager-a@test.local",
   managerB: "gate-db-manager-b@test.local",
   superAdmin: "gate-db-super@test.local",
+  tenantA: "gate-db-tenant-a@test.local",
 };
 
 const catalog: MgmCatalog = {
@@ -70,6 +80,7 @@ const TARGETS: GateTarget[] = [
 let managerA: TestUser;
 let managerB: TestUser;
 let superAdmin: TestUser;
+let tenantA: TestUser;
 
 async function setPlugin(plugin: string, enabled: boolean) {
   const svc = await serviceClient();
@@ -185,6 +196,7 @@ beforeAll(async () => {
   managerA = await createTestUser({ email: EMAILS.managerA, role: "org_manager", scopeId: F.orgA });
   managerB = await createTestUser({ email: EMAILS.managerB, role: "org_manager", scopeId: F.orgB });
   superAdmin = await createTestUser({ email: EMAILS.superAdmin, role: "super_admin" });
+  tenantA = await createTestUser({ email: EMAILS.tenantA, role: "tenant", scopeId: F.tenantA });
 }, 60_000);
 
 afterAll(async () => {
@@ -288,5 +300,63 @@ describe.skipIf(shouldSkip())("MGM runtime gate against the database", () => {
         method: "PATCH",
       })
     ).resolves.toEqual({ ok: true, organizationId: F.orgA });
+  });
+  it("keeps the operations plugin off without a row; its organization's manager turns it on, a tenant cannot", async () => {
+    const svc = await serviceClient();
+    const enabledFor = async (client: SupabaseClient) => {
+      const { data, error } = await client.rpc("mgm_plugin_enabled_for_org", {
+        _org_id: F.orgA,
+        _plugin_name: OPERATIONS_PLUGIN_NAME,
+      });
+      expect(error).toBeNull();
+      return data as boolean;
+    };
+    const setOperations = (client: SupabaseClient, enabled: boolean) =>
+      client.rpc("fn_mgm_set_plugin_enabled", {
+        _org_id: F.orgA,
+        _plugin_name: OPERATIONS_PLUGIN_NAME,
+        _plugin_version: OPERATIONS_PLUGIN_VERSION,
+        _enabled: enabled,
+      });
+
+    await svc.from("mgm_plugins").delete().eq("org_id", F.orgA).eq("plugin_name", OPERATIONS_PLUGIN_NAME);
+    try {
+      for (const client of [svc, managerA.client, tenantA.client]) expect(await enabledFor(client)).toBe(false);
+      await expect(
+        gate.check(managerA.client, {
+          plugin: OPERATIONS_PLUGIN_NAME,
+          target: { kind: "organization", id: F.orgA },
+          method: "POST",
+        })
+      ).resolves.toMatchObject({ ok: false, status: 409, code: "operations_disabled" });
+
+      // Turning a plugin on needs organization access, which a tenant and
+      // another organization's manager do not hold.
+      for (const client of [tenantA.client, managerB.client]) {
+        const { error } = await setOperations(client, true);
+        expect(error?.code).toBe("42501");
+      }
+      expect(await enabledFor(svc)).toBe(false);
+
+      const on = await setOperations(managerA.client, true);
+      expect(on.error).toBeNull();
+      expect(on.data).toMatchObject({
+        org_id: F.orgA,
+        plugin_name: OPERATIONS_PLUGIN_NAME,
+        version: OPERATIONS_PLUGIN_VERSION,
+        enabled: true,
+      });
+      expect(await enabledFor(managerA.client)).toBe(true);
+      // The audit log's plugin-name CHECK accepts the name too.
+      const audit = await svc
+        .from("mgm_plugin_audit_log")
+        .select("action, new_enabled")
+        .eq("org_id", F.orgA)
+        .eq("plugin_name", OPERATIONS_PLUGIN_NAME);
+      expect(audit.error).toBeNull();
+      expect(audit.data).toEqual([{ action: "enabled", new_enabled: true }]);
+    } finally {
+      await svc.from("mgm_plugins").delete().eq("org_id", F.orgA).eq("plugin_name", OPERATIONS_PLUGIN_NAME);
+    }
   });
 });

@@ -5,9 +5,11 @@ import {
   composeCommunityManagement,
   type CommunityManagementError,
 } from "@/lib/community-management";
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import {
+  CREATE_MICROGRID_REFUSALS,
+  CreateMicrogridBody,
+} from "@/lib/community-management/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 function mapError(error: CommunityManagementError): NextResponse {
   const { ok, status, code, message, field, reason } = error;
@@ -24,14 +26,17 @@ function mapError(error: CommunityManagementError): NextResponse {
 }
 
 /**
- * POST /api/microgrids — create a new microgrid under a parent community (#76).
+ * POST /api/microgrids — create a new microgrid under a parent community
+ * (#76), as `community.create-microgrid`.
  *
  * Released mutations route through the community-management Cordis
  * capability. The route resolves the parent organization needed for the
  * request-scoped composition; the capability re-validates scope, plugin
  * state, and organization access before writing.
  *
- * Validation:
+ * Validation: the body is CreateMicrogridBody
+ * (src/lib/community-management/schemas.ts), refused with this route's own
+ * answers (CREATE_MICROGRID_REFUSALS) before anything is read:
  *   - `name` required (422 with field='name').
  *   - `community_id` required UUID (400 malformed; 403 if not accessible).
  *   - `currency` required + validated via Intl.NumberFormat RangeError (422).
@@ -42,25 +47,12 @@ function mapError(error: CommunityManagementError): NextResponse {
  *   "A microgrid named '{name}' already exists in this community."
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, CreateMicrogridBody, CREATE_MICROGRID_REFUSALS);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
+  const communityId = body.community_id;
 
   const supabase = await createClient();
-  const communityId =
-    typeof body.community_id === "string" ? body.community_id : "";
-  if (!UUID_RE.test(communityId)) {
-    return NextResponse.json(
-      {
-        error: "Invalid community_id — expected UUID.",
-        field: "community_id",
-      },
-      { status: 400 }
-    );
-  }
   const { data: parent } = await supabase
     .from("communities")
     .select("org_id")

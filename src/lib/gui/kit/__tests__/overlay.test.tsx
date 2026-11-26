@@ -2,7 +2,7 @@ import { act as flush, fireEvent, render, screen, waitFor } from "@testing-libra
 import { isValidElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { DialogFooter } from "@/components/ui/dialog";
-import type { OverlayProps } from "../../contract";
+import type { OverlayProps } from "../../contract-react";
 import { KitProvider } from "../../host/client/kit-provider";
 import { act, hostAct, KitRuntimeProvider } from "../../host/client/kit-runtime";
 import type { PreparedAction } from "../../host/server/prepare";

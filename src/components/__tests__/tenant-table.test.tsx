@@ -18,11 +18,15 @@
  *     (j) Kebab menu present per row when canManage
  *     (k) Kebab hidden when canManage=false (View link instead)
  *     (l) Address summary uses address_city · address_region · address_country (#146)
+ *
+ *   Delete (#278):
+ *     (m) The delete dialog asks for the tenant's name typed, and the DELETE
+ *         carries it as the route requires; the route's refusal is shown.
  */
 
 import * as React from "react";
-import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, beforeAll, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import type { Device, Tenant } from "@/lib/types/domain";
 import type { BillingDeviceOption } from "../TenantTable";
 
@@ -486,5 +490,65 @@ describe("TenantTable — refactor surfaces (#145)", () => {
     // TENANT_BETA has no address — should show em-dash
     const dashCells = screen.getAllByText(/—/);
     expect(dashCells.length).toBeGreaterThan(0);
+  });
+});
+
+describe("TenantTable — delete asks for the tenant's name typed (#278)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function openDeleteDialog(tenant: Tenant) {
+    render(
+      <TenantTable
+        microgridId={MICROGRID_ID}
+        tenants={[tenant]}
+        devices={[DEVICE]}
+        billingDevices={BILLING_DEVICES}
+        primaryDeviceAssignments={{}}
+        canManage={true}
+      />
+    );
+    openKebab(new RegExp(`Actions for ${tenant.display_name.trim()}`, "i"));
+    fireEvent.click(within(screen.getByRole("menu")).getByText("Delete tenant"));
+    return screen.getByRole("alertdialog");
+  }
+
+  it("(m) enables Delete only once the name is typed, and sends it with the DELETE", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const dialog = openDeleteDialog({ ...TENANT, display_name: " Tenant Alpha " });
+
+    expect(dialog.textContent).toContain("Delete tenant “Tenant Alpha”?");
+    const confirm = within(dialog).getByRole("button", { name: "Delete tenant" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    const input = within(dialog).getByLabelText("Type tenant name to confirm");
+    fireEvent.change(input, { target: { value: "Tenant" } });
+    expect(confirm.disabled).toBe(true);
+    fireEvent.change(input, { target: { value: "Tenant Alpha " } });
+    expect(confirm.disabled).toBe(false);
+
+    fireEvent.click(confirm);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/tenants/hh-1");
+    expect(init.method).toBe("DELETE");
+    expect(JSON.parse(init.body as string)).toEqual({ confirmation: { acknowledged: [], typed: "Tenant Alpha" } });
+  });
+
+  it("(m) shows the route's refusal in the dialog and keeps it open", async () => {
+    const refusal = "Cannot delete a tenant with billing history. Unlink its meter instead.";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: refusal }), { status: 409, headers: { "content-type": "application/json" } })
+      )
+    );
+    const dialog = openDeleteDialog(TENANT);
+    fireEvent.change(within(dialog).getByLabelText("Type tenant name to confirm"), { target: { value: "Tenant Alpha" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete tenant" }));
+
+    expect(await within(dialog).findByText(refusal)).toBeTruthy();
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
   });
 });

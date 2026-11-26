@@ -240,6 +240,7 @@ describe("MgmGate", () => {
       payments: "payments_disabled",
       pesapal: "pesapal_disabled",
       "tenant-app": "tenant_app_disabled",
+      operations: "operations_disabled",
     });
   });
 

@@ -8,7 +8,7 @@ import NextLink from "next/link";
 import { usePathname as useNextPathname, useSearchParams } from "next/navigation";
 import { useState, type MouseEvent } from "react";
 import { announceNavigationStart, isCurrentLocation, isSameTabClick, locationKey } from "@/components/ui/navigation-progress";
-import type { LinkProps } from "../../contract";
+import type { LinkProps } from "../../contract-react";
 import { isHref } from "../shared/href";
 import { useKitRuntime } from "./kit-runtime";
 
