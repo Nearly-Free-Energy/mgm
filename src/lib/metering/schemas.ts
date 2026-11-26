@@ -249,12 +249,13 @@ const DeviceRow = z.strictObject(
  * New devices only: the route refuses a body naming any device already
  * saved on the edge (the same trimmed component id) with 409
  * `metering_devices_already_saved`, naming each, and saves none of the body.
- * A saved device is changed by PATCH /api/devices/[id]
- * (metering.edit-device), with the checks it makes. The pages send only
- * devices not saved yet: the Edges page and the tenant form's meter picker
- * leave out each one discover-devices marks `alreadyAdded`. If the route
- * comes to save over a saved device, revisit the action's title and the
- * description below.
+ * That refusal is what keeps a saved device out, not the pages: the Edges
+ * page and the tenant form's meter picker leave out each device
+ * discover-devices marks `alreadyAdded`, but a list can be out of date by
+ * the time it is sent, and any caller can send one. A saved device is
+ * changed by PATCH /api/devices/[id] (metering.edit-device), with the
+ * checks it makes. If the route stops refusing a saved device, or comes to
+ * save over one, revisit the action's title and the description below.
  */
 export const SaveDevicesBody = z.strictObject(
   {

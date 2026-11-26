@@ -18,6 +18,7 @@
  *   (m) Component ids outside the stored format → listed in `skipped`, left
  *       out of `devices` and of the dedup query
  *   (n) A skipped id is cut to 100 characters in the response
+ *   (o) The dedup read fails → 503, not every device marked new
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -364,6 +365,36 @@ describe("GET /api/edges/[id]/discover-devices", () => {
     const json = await res.json();
     expect(json.devices).toHaveLength(1);
     expect(json.devices[0].alreadyAdded).toBe(true);
+  });
+
+  // (o) The saved devices cannot be read: answer 503, not every device as new.
+  it("(o) returns 503 when the saved devices cannot be read", async () => {
+    getMicrogridEmsConfigMock.mockResolvedValue(defaultEmsConfig);
+    registerEdgeLookup(true);
+    registerFrom(() => ({
+      select: () => ({
+        eq: () => ({
+          in: () =>
+            Promise.resolve({
+              data: null,
+              error: { code: "57014", message: "canceling statement due to statement timeout" },
+            }),
+        }),
+      }),
+    }));
+
+    getEdgesStatusMock.mockResolvedValue([{ edgeId: OPENEMS_EDGE_ID, online: true }]);
+    getEdgeConfigMock.mockResolvedValue(singleComponentConfig);
+
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), {
+      params: Promise.resolve({ id: EDGE_DB_ID }),
+    });
+    expect(res.status).toBe(503);
+    const json = await res.json();
+    expect(json).toEqual({
+      error: "Could not check which devices are already saved on this edge. Try again shortly.",
+    });
   });
 
   // (l) A hybrid-inverter edge, shaped like the SRNE driver's config: the ESS

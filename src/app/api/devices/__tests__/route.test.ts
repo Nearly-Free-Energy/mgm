@@ -227,7 +227,7 @@ describe("POST /api/devices", () => {
       expect(res.status).toBe(409);
       const json = await res.json();
       expect(json).toEqual({
-        error: "Already saved on this edge: meter0. Nothing was saved. Discover devices again to see which are new.",
+        error: "Already saved on this edge: meter0. Nothing was saved. Discover again to see which are new.",
         code: "metering_devices_already_saved",
         componentIds: ["meter0"],
       });

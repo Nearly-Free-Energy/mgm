@@ -60,6 +60,8 @@ const UUID_RE =
  *   - getEdgesStatus: not wrapped in catch — errors surface as 503
  *   - getEdgeConfig: wrapped in .catch(() => null) — offline edge → 200 with
  *     { online: false, devices: [] }, preserving the old route's lenient behavior
+ *   - the read of the edge's saved devices: a failure answers 503, so no
+ *     device is marked new (`alreadyAdded: false`) without that read
  */
 export async function GET(
   _request: NextRequest,
@@ -299,8 +301,11 @@ export async function GET(
   // Dedup: query devices by (edge_id DB UUID, openems_component_id).
   // Dedup key is (edge_id, openems_component_id) — UNIQUE constraint
   // in 00001_schema.sql:144. No channel-address fallback.
+  // A failed read answers 503 rather than listing every device as new: the
+  // pages save what this marks new, and a saved device sent to
+  // POST /api/devices refuses the whole list (409).
   if (discovered.length > 0) {
-    const { data: existingDevices } = await supabase
+    const { data: existingDevices, error: existingErr } = await supabase
       .from("devices")
       .select("openems_component_id")
       .eq("edge_id", edgeId)
@@ -308,6 +313,27 @@ export async function GET(
         "openems_component_id",
         discovered.map((d) => d.componentId)
       );
+
+    if (existingErr) {
+      console.info(
+        JSON.stringify({
+          event: "openems.discover_devices",
+          microgrid_id: edge.microgrid_id,
+          edge_id: edgeId,
+          openems_edge_id: openemsEdgeId,
+          actor_user_id: user?.id ?? null,
+          online,
+          status: "saved_devices_unread",
+          device_count: discovered.length,
+          duration_ms: Date.now() - startedAt,
+          at: new Date().toISOString(),
+        })
+      );
+      return NextResponse.json(
+        { error: "Could not check which devices are already saved on this edge. Try again shortly." },
+        { status: 503 }
+      );
+    }
 
     const existingComponentIds = new Set(
       (existingDevices ?? []).map((d) => d.openems_component_id ?? "")

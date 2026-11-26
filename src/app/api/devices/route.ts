@@ -150,7 +150,7 @@ async function alreadySaved(supabase: Client, edgeId: string, componentIds: stri
 function alreadySavedResponse(componentIds: string[]): NextResponse {
   return NextResponse.json(
     {
-      error: `Already saved on this edge: ${componentIds.join(", ")}. Nothing was saved. Discover devices again to see which are new.`,
+      error: `Already saved on this edge: ${componentIds.join(", ")}. Nothing was saved. Discover again to see which are new.`,
       code: DEVICES_ALREADY_SAVED,
       componentIds,
     },
