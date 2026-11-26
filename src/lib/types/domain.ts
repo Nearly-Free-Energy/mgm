@@ -54,7 +54,7 @@ export type MgmPlugin = Database["public"]["Tables"]["mgm_plugins"]["Row"];
 export type MgmPluginAuditLog =
   Database["public"]["Tables"]["mgm_plugin_audit_log"]["Row"];
 /**
- * An investigation of one microgrid's finished day (migration 20261126120000;
+ * An investigation of one microgrid's finished day (migration 20261126160000;
  * docs/investigation-evidence.md § 3). Written only by the fn_operation_*
  * functions.
  */

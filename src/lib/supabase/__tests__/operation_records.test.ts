@@ -1,5 +1,5 @@
 /**
- * operation_records.test.ts (migration 20261126120000)
+ * operation_records.test.ts (migration 20261126160000)
  *
  * The operations plugin's records (#133 A2-8; docs/investigation-evidence.md
  * § 3 and § 10), against a live local Supabase:
@@ -350,7 +350,7 @@ const EVIDENCE_COLUMNS = [
 
 // Owner queries go through the supabase CLI, about a second each, so the
 // guard tests take longer than the default five seconds.
-desc("20261126120000_operation_records.sql", { timeout: 60_000 }, () => {
+desc("20261126160000_operation_records.sql", { timeout: 60_000 }, () => {
   beforeAll(async () => {
     if (skip) return;
     await assertEnvironmentReady();

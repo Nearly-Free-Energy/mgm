@@ -469,7 +469,7 @@ export const OPERATIONS_PLUGIN: BundledPlugin = {
   // at its default.
   defaultEnabled: false,
   provides: ["investigations"],
-  // Its tables arrive with migration 20261126120000 (#133 A2-8); its
+  // Its tables arrive with migration 20261126160000 (#133 A2-8); its
   // composer, routes and views arrive with their first consumer (ADR-007
   // decision 2).
   routes: [],

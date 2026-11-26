@@ -370,7 +370,7 @@ async function insertStaffRows(svc: SupabaseClient): Promise<void> {
   await insert(svc, "payment_notifications", [{ org_id: F.org, tracking_id: TRACKING, merchant_reference: REFERENCE }]);
   await insert(svc, "pilot_import_batches", [{ billing_period_id: F.period, source_label: "synthetic-pilot" }]);
   await insert(svc, "auth_sign_in_requests", [{ email_hash: SIGN_IN_HASH, outcome: "no_access" }]);
-  // No API role writes the operations tables (20261126120000), so the owner
+  // No API role writes the operations tables (20261126160000), so the owner
   // does. They go with the organization by cascade.
   const operation = runAsDatabaseOwner(
     `DO $$ BEGIN
