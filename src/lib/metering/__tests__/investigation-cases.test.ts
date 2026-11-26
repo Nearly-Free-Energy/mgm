@@ -6,10 +6,12 @@
  * against §2. A pin that moves fails here.
  *
  * The stubs below stand in for the installation docs/investigation-cases.md
- * §1 describes. Each restates §1 or another file, and says which. A2-5's
- * seed will write that installation, and its static test will compare the
- * seed with `case-ids.ts` and `CASE_VARIANTS`; until it merges, nothing
- * checks these stubs against a database.
+ * §1 describes, which supabase/scripts/seed-investigation-cases.sql writes.
+ * Each restates §1 or another file, and says which. The seed's static test
+ * (fixture/__tests__/seed-investigation-cases.test.ts) compares the seed
+ * with `case-ids.ts` and `CASE_VARIANTS`, which these stubs read, so the
+ * devices here and the seeded ones come from one list; the Test job's
+ * rehearsal runs the seed against a database.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -93,7 +95,7 @@ function stubRepository(): MeteringRepository {
   return {
     getAuthenticatedUserId: async () => "investigations-manager",
     getUserRoles: async () => [],
-    // §1's plugin states, which A2-5's seed will write: metering is on in
+    // §1's plugin states, which the seed writes: metering is on in
     // organization A and off in B, so the capability's own `requirePlugin`
     // (capability.ts) refuses C14. If §1's states change, revisit.
     isPluginEnabled: async (organizationId) => organizationId !== CASE_ORG_B,

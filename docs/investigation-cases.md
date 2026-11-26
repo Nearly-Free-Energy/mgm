@@ -10,7 +10,7 @@ All cases and their answers are public, as #133's A3 acceptance requires: the de
 
 ### Installation
 
-One disposable installation with `MGM_METERING_FIXTURES` on (docs/setup.md, "Synthetic site data"), so the `synthetic` provider serves every microgrid below. Every value here is pinned, because the generator keys a day on `SITE_FIXTURE_SEED`, the microgrid's UUID and the date, and house meters on the device's UUID (`src/lib/metering/fixture/site-samples.ts`); a case named only by microgrid and date would not reproduce on another installation.
+One disposable installation with `MGM_METERING_FIXTURES` on (docs/setup.md, "Synthetic site data"), so the `synthetic` provider serves every microgrid below, loaded by `scripts/seed-investigation-cases.sh` (docs/setup.md, "Investigation cases"). Every value here is pinned, because the generator keys a day on `SITE_FIXTURE_SEED`, the microgrid's UUID and the date, and house meters on the device's UUID (`src/lib/metering/fixture/site-samples.ts`); a case named only by microgrid and date would not reproduce on another installation.
 
 | Item | Pinned value |
 |---|---|
@@ -37,9 +37,9 @@ Every microgrid starts from the full set below; §2 lists each microgrid's chang
 | `12` | `consumption_meter` | `meter2` | Unit 2's, as above |
 | `13` | `consumption_meter` | `meter3` | Unit 3's, as above |
 
-Units are `tenants` rows named `Unit 1` to `Unit 3` on the device's own microgrid, with no contact details. Device names do not affect the cases (one device per site type, so `pickSiteSources` never chooses by name) and never reach evidence. The solar meter changes no figure in §2: the generator draws the same numbers with or without it, and solar output does not decide whether a bin is online.
+Units are `tenants` rows named `Unit 1` to `Unit 3` on the device's own microgrid, with no contact details but a placeholder phone number, `+000000000000`, since `tenants.primary_phone` is required; no country uses it. Device names do not affect the cases (one device per site type, so `pickSiteSources` never chooses by name) and never reach evidence. The solar meter changes no figure in §2: the generator draws the same numbers with or without it, and solar output does not decide whether a bin is online.
 
-**Legacy rows.** C09, C11 and C23 need a device with no component id. `trg_device_openems_component_valid` refuses that on every insert and update since `00018`, and #258's format check refuses an empty string, but rows written before `00018` can still hold `NULL`, and the capability reads them as unreadable devices. The seed script writes these rows as such legacy rows: on the disposable installation only, it inserts them with that trigger disabled for the one statement (the column's CHECK allows `NULL`), and says so in its output. Nothing else in the set bypasses a check.
+**Legacy rows.** C09, C11 and C23 need a device with no component id. `trg_device_openems_component_valid` refuses that on every insert and update since `00018`, and #258's format check refuses an empty string, but rows written before `00018` can still hold `NULL`, and the capability reads them as unreadable devices. The seed (`supabase/scripts/seed-investigation-cases.sql`) writes these rows as such legacy rows: on the disposable installation only, it inserts them with that trigger disabled for the one statement and enabled again in the same block (the column's CHECK allows `NULL`), and says so in its output. Nothing else in the set bypasses a check.
 
 ### Variants
 
@@ -56,7 +56,7 @@ Units are `tenants` rows named `Unit 1` to `Unit 3` on the device's own microgri
 | 09 | a second, real edge `edge0` | C13 |
 | 0a | in organization B, where metering is off | C14 |
 
-Pending cases (§2) get microgrids `0b` onwards, in the same hexadecimal numbering, pinned when their scenarios land.
+Pending cases (§2) get microgrids `0b` onwards, in the same hexadecimal numbering, pinned when their scenarios land. The seed already writes `0b` to `14` from the full set, with meter `13` of microgrid `13` as a legacy row for C23.
 
 ### Rules that keep the set deterministic
 
@@ -64,7 +64,7 @@ Pending cases (§2) get microgrids `0b` onwards, in the same hexadecimal numberi
 - **Finished days only.** Every date is in the past and finished in its zone, as investigation creation requires (`window_not_closed`, evidence §3 O2).
 - **Synthetic only.** Every edge id starts with `SYNTHETIC-EDGE-`, except microgrid 09's `edge0`, which exists to be refused.
 
-Two pieces of code make the set usable, and both are tasks in the A1/A2 split, not part of this document. A **seed script** inserts the pinned rows on a disposable installation, for the manual baseline and for local runs. A **regeneration test** rebuilds each existing case from its pins, asserts the scenario and the figures in §2, and, once A2's capture method exists, the evidence keys and the expected result.
+Two pieces of code make the set usable, and both are tasks in the A1/A2 split, not part of this document. A **seed script**, `scripts/seed-investigation-cases.sh`, inserts the pinned rows on a disposable installation, for the manual baseline and for local runs; a static test compares its SQL with the pins, and the `Test` job runs it in a transaction it rolls back. A **regeneration test** rebuilds each existing case from its pins, asserts the scenario and the figures in §2, and, once A2's capture method exists, the evidence keys and the expected result.
 
 ## 2. Cases
 
@@ -190,7 +190,7 @@ The manual baseline is the first of A3's three arms: an operator answering each 
 
 **Who.** The operator evaluator, arindahills. The answers are public, so this measures time and what MGM's screens make visible, not independent judgement; A3's evidence packet says so.
 
-**Setup.** A disposable local installation (docs/setup.md) with `MGM_METERING_FIXTURES` on, loaded by the seed script, and the operator signed in as an organization manager of both organizations. No production system and no real data.
+**Setup.** A disposable local installation (docs/setup.md) with `MGM_METERING_FIXTURES` on, loaded by `scripts/seed-investigation-cases.sh --disposable` (docs/setup.md, "Investigation cases"), and the operator signed in as `investigations-manager@example.org`, which the seed makes an organization manager of both organizations. No production system and no real data.
 
 **For each existing case, in order:**
 
