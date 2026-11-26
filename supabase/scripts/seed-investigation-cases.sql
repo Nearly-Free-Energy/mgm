@@ -112,7 +112,8 @@ INSERT INTO public.organizations (id, name) VALUES
 -- no actor, so no audit row. SQL does not check plugin dependencies, so the
 -- rows themselves keep B consistent: metering is off there (case C14), and so
 -- is every plugin that depends on it, as Settings → Plugins would insist
--- (validatePluginToggle). The tenant app is off in A. Community management is
+-- (validatePluginToggle). The tenant app is off in A. The operations plugin,
+-- off without a row, is on in both: it depends only on community management. Community management is
 -- on in both, as it must be for a manager to write these rows through the
 -- app. The 00056 trigger that refuses those writes while the plugin is off
 -- exempts postgres, which runs this file, so the order here is not
@@ -125,13 +126,15 @@ INSERT INTO public.mgm_plugins (org_id, plugin_name, version, enabled) VALUES
   ('00000000-0000-4000-8000-0000000c00a0', 'payments', '0.1.0', true),
   ('00000000-0000-4000-8000-0000000c00a0', 'pesapal', '0.1.0', true),
   ('00000000-0000-4000-8000-0000000c00a0', 'tenant-app', '0.1.0', false),
+  ('00000000-0000-4000-8000-0000000c00a0', 'operations', '0.1.0', true),
   ('00000000-0000-4000-8000-0000000c00b0', 'organization-directory', '0.1.0', true),
   ('00000000-0000-4000-8000-0000000c00b0', 'community-management', '0.1.0', true),
   ('00000000-0000-4000-8000-0000000c00b0', 'metering', '0.1.0', false),
   ('00000000-0000-4000-8000-0000000c00b0', 'billing', '0.1.0', false),
   ('00000000-0000-4000-8000-0000000c00b0', 'payments', '0.1.0', false),
   ('00000000-0000-4000-8000-0000000c00b0', 'pesapal', '0.1.0', false),
-  ('00000000-0000-4000-8000-0000000c00b0', 'tenant-app', '0.1.0', false);
+  ('00000000-0000-4000-8000-0000000c00b0', 'tenant-app', '0.1.0', false),
+  ('00000000-0000-4000-8000-0000000c00b0', 'operations', '0.1.0', true);
 
 -- ── 3. Communities ──────────────────────────────────────────────────────────
 INSERT INTO public.communities (id, org_id, name) VALUES

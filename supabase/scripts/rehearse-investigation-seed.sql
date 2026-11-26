@@ -70,13 +70,15 @@ BEGIN
       (org_a, 'payments', true),
       (org_a, 'pesapal', true),
       (org_a, 'tenant-app', false),
+      (org_a, 'operations', true),
       (org_b, 'organization-directory', true),
       (org_b, 'community-management', true),
       (org_b, 'metering', false),
       (org_b, 'billing', false),
       (org_b, 'payments', false),
       (org_b, 'pesapal', false),
-      (org_b, 'tenant-app', false)
+      (org_b, 'tenant-app', false),
+      (org_b, 'operations', true)
     ) AS t(org_id, plugin_name, enabled)
   LOOP
     IF mgm_plugin_enabled_for_org(expected.org_id, expected.plugin_name) IS DISTINCT FROM expected.enabled THEN
