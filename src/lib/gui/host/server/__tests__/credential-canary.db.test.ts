@@ -64,6 +64,7 @@ import {
   OPENEMS_PATHS,
   ROW_KEY,
   prepareEveryAction,
+  repeatedCanaryIds,
   seedCanaries,
   TENANT_METER_COMPONENT,
   type Canary,
@@ -86,6 +87,7 @@ const IDS: CanaryIds = {
   tenantId: "e7400000-0000-4000-8004-000000000001",
   lineItemId: "e7400000-0000-4000-8005-000000000001",
   paymentAttemptId: "e7400000-0000-4000-8008-000000000001",
+  tenantAccessId: "e7400000-0000-4000-800a-000000000001",
   rateScheduleId: "e7400000-0000-4000-8006-000000000001",
   edgeId: "e7400000-0000-4000-800c-000000000001",
   deviceId: "e7400000-0000-4000-800b-000000000001",
@@ -94,6 +96,8 @@ const IDS: CanaryIds = {
 const MICROGRIDS = canaryMicrogrids(IDS);
 const EMAIL = "gui-canary-manager@test.local";
 const TENANT_EMAIL = "gui-canary-tenant@test.local";
+/** The person whose access to the canary tenant (IDS.tenantAccessId) the access removal's prepare reads. */
+const ACCESS_EMAIL = "gui-canary-access@test.local";
 const COLUMNS = Object.entries(CREDENTIAL_COLUMNS).flatMap(([t, cs]) => cs.map((c) => `${t}.${c}`));
 
 let manager: TestUser;
@@ -121,7 +125,7 @@ async function cleanup() {
   const svc = await serviceClient();
   const { error } = await svc.from("payment_merchant_versions").delete().eq("org_id", IDS.orgId);
   if (error) throw new Error(`[cleanup] payment_merchant_versions: ${error.message}`);
-  await cleanupTestData({ orgIds: [IDS.orgId], userEmails: [EMAIL, TENANT_EMAIL] });
+  await cleanupTestData({ orgIds: [IDS.orgId], userEmails: [EMAIL, TENANT_EMAIL, ACCESS_EMAIL] });
 }
 
 beforeAll(async () => {
@@ -163,6 +167,11 @@ beforeAll(async () => {
   const held = await svc.from("user_roles").select("*").eq("user_id", tenant.userId);
   if (held.error || held.data?.length !== IDS.unitIds.length) throw new Error(`[fixture] tenant user_roles: ${held.error?.message ?? "count"}`);
   tenantRoles = held.data as UserRoleRecord[];
+  const holder = await createTestUser({ email: ACCESS_EMAIL, role: null });
+  const access = await svc
+    .from("user_roles")
+    .insert({ id: IDS.tenantAccessId, user_id: holder.userId, role: "tenant", scope_type: "tenant", scope_id: IDS.tenantId });
+  if (access.error) throw new Error(`[fixture] tenant access: ${access.error.message}`);
 }, 60_000);
 
 afterAll(async () => {
@@ -220,6 +229,14 @@ async function decrypted(c: Canary): Promise<string> {
 }
 
 describe.skipIf(shouldSkip())("credential canary", () => {
+  it("gives every seeded row its own id", () => {
+    // seedCanaries refuses a repeated id too; a repeat would leave a row's
+    // parent out of seededParams without failing.
+    expect(repeatedCanaryIds(IDS)).toEqual([]);
+    expect(repeatedCanaryIds({ ...IDS, edgeId: IDS.tenantId })).toEqual([IDS.tenantId]);
+    expect(repeatedCanaryIds({ ...IDS, unitIds: [...IDS.unitIds, IDS.microgridIds.basic] })).toEqual([IDS.microgridIds.basic]);
+  });
+
   it("seeds every encrypted credential column the schema has", () => {
     expect(encryptedColumnsInSchema()).toEqual([...COLUMNS].sort());
     // The synthetic and mixed microgrids hold a second Basic password and a second bearer token.

@@ -96,6 +96,14 @@ export interface CommunityManagementRepository {
     id: string,
     patch: MicrogridUpdateInput
   ): Promise<RepositoryResult<Microgrid | null>>;
+  /**
+   * The microgrid's stored currency and how many of its billing periods are
+   * closed, read before a currency change (updateMicrogridOperation); null
+   * data when the microgrid is not found.
+   */
+  getMicrogridCurrencyUse(
+    microgridId: string
+  ): Promise<RepositoryResult<{ currency: string; closedPeriods: number }>>;
   createTenant(
     args: Record<string, unknown>,
     withMeter: boolean

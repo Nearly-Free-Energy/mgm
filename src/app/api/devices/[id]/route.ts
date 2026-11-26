@@ -90,7 +90,7 @@ export async function PATCH(
   // An unsupported field (unsupported_field), an unknown device_type
   // (invalid_device_type) or a blank name (name_required) is refused by the
   // schema, with the reason the route always sent.
-  const parsed = await parseJsonBody(request, EditDeviceBody, { refusal: editDeviceRefusal });
+  const parsed = await parseJsonBody(request, EditDeviceBody, { refusalKeys: editDeviceRefusal });
   if (!parsed.ok) return parsed.response;
   const update: DeviceUpdate = {};
   if (parsed.data.device_type !== undefined) update.device_type = parsed.data.device_type;

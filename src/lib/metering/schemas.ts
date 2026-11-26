@@ -300,7 +300,7 @@ export const EditDeviceBody = z.strictObject(
 );
 export const EDIT_DEVICE_BODY_VERSION = 1;
 
-/** The `reason` PATCH /api/devices/[id] sends with each refusal of its body, for parseJsonBody's `refusal`. */
+/** The `reason` PATCH /api/devices/[id] sends with each refusal of its body, for parseJsonBody's `refusalKeys`. */
 export function editDeviceRefusal(issue: z.core.$ZodIssue): Record<string, string> | undefined {
   if (issue.code === "unrecognized_keys") return { reason: "unsupported_field" };
   if (issue.path[0] === "device_type") return { reason: "invalid_device_type" };

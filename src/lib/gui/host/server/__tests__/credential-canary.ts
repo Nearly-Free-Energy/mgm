@@ -120,6 +120,13 @@ export type CanaryIds = {
   edgeId: string;
   deviceId: string;
   /**
+   * A person's access to `tenantId`'s pages: the id of their tenant role
+   * row, which is the `community.tenant-access` entity the access removal's
+   * path names, so its prepare runs. The test creates the person and the
+   * row, since seedCanaries creates no account.
+   */
+  tenantAccessId: string;
+  /**
    * One tenant unit per seeded microgrid, in canaryMicrogrids order: tenant
    * views are dispatched as a tenant holding every one of them. Each unit
    * has that microgrid's house meter (TENANT_METER_COMPONENT, on its first
@@ -145,6 +152,22 @@ export const canaryMicrogrids = (ids: CanaryIds): string[] => [
 ];
 
 /**
+ * The ids `ids` gives more than once. Each seeded row needs its own: the
+ * rows of one kind or table would otherwise collide, and seededParams keys
+ * each row's parent by the row's id, so a repeated id leaves a parent out
+ * without failing.
+ */
+export function repeatedCanaryIds(ids: CanaryIds): string[] {
+  const all: string[] = [];
+  const walk = (value: unknown): void => {
+    if (typeof value === "string") all.push(value);
+    else if (value !== null && typeof value === "object") Object.values(value).forEach(walk);
+  };
+  walk(ids);
+  return [...new Set(all.filter((id, i) => all.indexOf(id) !== i))];
+}
+
+/**
  * Seeds an organization, a community, one microgrid per OpenEMS credential
  * path, a synthetic microgrid with the Basic path's configuration, a mixed
  * one with the bearer path's, and a merchant account. Each credential column holds a new canary,
@@ -167,6 +190,8 @@ export const canaryMicrogrids = (ids: CanaryIds): string[] => [
  * meter on its first edge, and the tenant app turned on.
  */
 export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise<Canary[]> {
+  const repeated = repeatedCanaryIds(ids);
+  if (repeated.length > 0) throw new Error(`[canary] ids given to more than one row: ${repeated.join(", ")}`);
   const canaries: Canary[] = [];
   const secret = async (table: string, field: string, rowId: string) => {
     const plaintext = `CANARY-${field}-${randomBytes(16).toString("hex")}`;
@@ -392,6 +417,7 @@ function seededParams(ids: CanaryIds, kinds: Record<string, EntityKind>, what: s
     paymentAttempt: [ids.paymentAttemptId],
     edge: [ids.edgeId],
     device: [ids.deviceId],
+    "community.tenant-access": [ids.tenantAccessId],
   };
   /** Each seeded row's parent, by the parent's kind. */
   const parentOf: Record<string, { kind: EntityKind; id: string }> = {
@@ -401,6 +427,7 @@ function seededParams(ids: CanaryIds, kinds: Record<string, EntityKind>, what: s
     [ids.tenantId]: { kind: "microgrid", id: ids.microgridIds.basic },
     [ids.edgeId]: { kind: "microgrid", id: ids.microgridIds.basic },
     [ids.deviceId]: { kind: "edge", id: ids.edgeId },
+    [ids.tenantAccessId]: { kind: "tenant", id: ids.tenantId },
   };
   let combos: Record<string, string>[] = [{}];
   for (const [name, kind] of Object.entries(kinds)) {
