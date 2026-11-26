@@ -90,6 +90,26 @@ describe("readMeterActivity", () => {
     expect(query.mock.calls.map((c) => c[1])).toEqual([["meter0/ActivePower", "meter1/ActivePower"]]);
   });
 
+  it("asks about remembered channels a few at a time", async () => {
+    const meters = Array.from({ length: 40 }, (_, i) => ({ edgeId: "e", componentId: `meter${i}` }));
+    const refuseAll = vi.fn(async () => {
+      throw noHistory();
+    });
+    await readMeterActivity({ queryHistoricSamples: refuseAll }, MG, meters, NOW, signal);
+    let open = 0;
+    let most = 0;
+    const query = vi.fn(async () => {
+      most = Math.max(most, ++open);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      open--;
+      throw noHistory();
+    });
+    const out = await readMeterActivity({ queryHistoricSamples: query }, MG, meters, NOW, signal);
+    expect(out.quiet).toHaveLength(40);
+    expect(query).toHaveBeenCalledTimes(40);
+    expect(most).toBeLessThanOrEqual(8);
+  });
+
   it("lists an edge whose request is refused, or whose answer cannot be read, as failed, and still reads the others", async () => {
     const query = vi.fn(async (edgeId: string, channels: string[]) => {
       if (edgeId === "gone") throw new OpenEmsError("backend text", "OPENEMS_HTTP_ERROR", 502, { status: 502 });

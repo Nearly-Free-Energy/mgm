@@ -21,9 +21,9 @@
  * that never reported, or stopped before yesterday, is as silent as one
  * that stopped an hour ago. Such channels are remembered per process
  * (NO_HISTORY_MAX), so the next read asks the others in one batch and each
- * remembered one on its own, instead of having the batch refused and every
- * channel asked one by one again; a remembered channel that answers is
- * forgotten.
+ * remembered one on its own, SINGLE_CONCURRENCY at a time, instead of
+ * having the batch refused and every channel asked one by one again; a
+ * remembered channel that answers is forgotten.
  *
  * Each edge answers on its own: an edge whose requests fail (an edge the
  * backend does not know, a timeout), or whose answer MGM cannot read
@@ -180,11 +180,12 @@ export async function readMeterActivity(
       const known = channels.filter((c) => noHistory.has(key(c)));
       const rest = channels.filter((c) => !noHistory.has(key(c)));
       try {
-        const answers = await Promise.all([
-          reportedChannels(query, rest, sinceMs, remember, forget),
-          ...known.map((channel) => reportedChannels(query, [channel], sinceMs, remember, forget)),
+        const reported = new Set<string>();
+        const add = (set: Set<string>) => set.forEach((c) => reported.add(c));
+        await Promise.all([
+          reportedChannels(query, rest, sinceMs, remember, forget).then(add),
+          mapLimited(known, SINGLE_CONCURRENCY, async (channel) => add(await reportedChannels(query, [channel], sinceMs, remember, forget))),
         ]);
-        const reported = new Set(answers.flatMap((set) => [...set]));
         for (const componentId of components) {
           if (!reported.has(powerChannel(componentId))) quiet.push({ edgeId, componentId });
         }

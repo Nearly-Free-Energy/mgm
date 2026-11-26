@@ -39,7 +39,8 @@ import "server-only";
  */
 export const EDGE_STATUS_FRESH_MS = 5 * 60_000;
 /**
- * How long a failed or timed-out read is kept: long enough that a backend
+ * How long a failed or timed-out read is kept, and a read that answered only
+ * in part (a meter read with a failed edge): long enough that a backend
  * that is down is not asked again on every poll, short enough that a fix
  * (a saved credential, a restarted backend) shows within a minute.
  */
@@ -165,7 +166,6 @@ export function onlineOf(edgeIds: readonly string[], statuses: EdgeStatusRead): 
   return [...new Set(edgeIds.filter((id) => id !== "" && online.has(id)))];
 }
 
-const keepFor = (answer: Settled<object>) => (answer.state === "read" ? EDGE_STATUS_FRESH_MS : EDGE_STATUS_FAILURE_MS);
 
 /** Resolves to "late" at `deadlineMs`, at once when it has passed. */
 function lateAt(deadlineMs: number, now: () => number): { promise: Promise<"late">; cancel(): void } {
@@ -206,10 +206,12 @@ async function readOnce<A extends object>(read: (signal: AbortSignal) => Promise
  * One kind of read's answers, by microgrid id, oldest read first (a new read
  * of a microgrid moves it to the end), each remembering what it asked about
  * as a fingerprint; and the reads under way, which concurrent callers share.
+ * An answer `partial` says is incomplete is kept only as long as a failure.
  * Every kind draws on the one pool of slots above.
  */
-function createReadCache<A extends object>() {
+function createReadCache<A extends object>(partial: (answer: A) => boolean = () => false) {
   type Entry = { fingerprint: string; answer: Settled<A> };
+  const keepFor = (answer: Settled<A>) => (answer.state === "read" && !partial(answer) ? EDGE_STATUS_FRESH_MS : EDGE_STATUS_FAILURE_MS);
   const cache = new Map<string, Entry>();
   const inFlight = new Map<string, Promise<Settled<A>>>();
 
@@ -299,7 +301,8 @@ function createReadCache<A extends object>() {
 }
 
 const statusCache = createReadCache<{ total: number; offline: number; online: readonly string[] }>();
-const meterCache = createReadCache<MeterActivityRead>();
+/** A meter read with a failed edge is kept as briefly as a failure, so the edge is asked again soon. */
+const meterCache = createReadCache<MeterActivityRead>((answer) => answer.failedEdges.length > 0);
 
 /**
  * When the microgrid's kept status answer for these edges was read, fresh or

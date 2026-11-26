@@ -82,6 +82,17 @@ describe("cachedMeterActivity", () => {
     expect(meterRead).toHaveBeenCalledTimes(3);
   });
 
+  it("keeps an answer with a failed edge for one minute only, so the edge is asked again soon", async () => {
+    const meterRead = vi.fn(async () => ({ quiet: [], failedEdges: ["edge0"] }));
+    expect(await cachedMeterActivity(MG, METERS, meterRead, roomy())).toMatchObject({ state: "read", failedEdges: ["edge0"] });
+    vi.advanceTimersByTime(EDGE_STATUS_FAILURE_MS - 1);
+    await cachedMeterActivity(MG, METERS, meterRead, roomy());
+    expect(meterRead).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
+    await cachedMeterActivity(MG, METERS, meterRead, roomy());
+    expect(meterRead).toHaveBeenCalledTimes(2);
+  });
+
   it(`shares the process's ${EDGE_STATUS_CONCURRENCY} slots with the status reads`, async () => {
     const releases: (() => void)[] = [];
     const hold = <T>(value: T) => vi.fn(() => new Promise<T>((resolve) => releases.push(() => resolve(value))));
