@@ -11,7 +11,9 @@
 -- Four guards come first, in this order, and refuse before anything is
 -- written:
 --   1. ON_ERROR_STOP, so a raw `psql -f` stops at the first error too.
---   2. The `disposable` variable, which only the wrapper sets.
+--   2. The `disposable` variable, which a caller sets only for a disposable
+--      database: the wrapper, or the Test job inside a transaction it rolls
+--      back.
 --   3. The development opt-in in Vault (`mgm_allow_dev_credential_key` = '1'),
 --      the marker migration 00018 reads before it generates a throwaway
 --      credential key. The CLI writes it when MGM_ALLOW_DEV_CREDENTIAL_KEY=1
@@ -111,8 +113,10 @@ INSERT INTO public.organizations (id, name) VALUES
 -- rows themselves keep B consistent: metering is off there (case C14), and so
 -- is every plugin that depends on it, as Settings → Plugins would insist
 -- (validatePluginToggle). The tenant app is off in A. Community management is
--- on in both before any community, microgrid or tenant is written, since a
--- trigger refuses those writes while it is off (00056).
+-- on in both, as it must be for a manager to write these rows through the
+-- app. The 00056 trigger that refuses those writes while the plugin is off
+-- exempts postgres, which runs this file, so the order here is not
+-- load-bearing.
 INSERT INTO public.mgm_plugins (org_id, plugin_name, version, enabled) VALUES
   ('00000000-0000-4000-8000-0000000c00a0', 'organization-directory', '0.1.0', true),
   ('00000000-0000-4000-8000-0000000c00a0', 'community-management', '0.1.0', true),
