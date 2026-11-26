@@ -330,7 +330,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/api/auth/oauth/approvals/route.ts": {
     kind: "session",
     reason:
-      "Refuses any Authorization header and a cross-site request before reading anything, then getUser() answers 401, and a client's token in the cookie 401, before fn_client_approval_record writes the approval for that user's id as the service role (ADR-008 decision 2). Unreleased until the CLI ships; it stays \"session\" when released.",
+      "Middleware answers a bearer request it does not accept and a client's token in the cookie first; the route itself refuses any Authorization header and a cross-site request before reading anything, then getUser() answers 401, and a client's token in the cookie 401, before fn_client_approval_record writes the approval for that user's id as the service role (ADR-008 decision 2). Unreleased until the CLI ships; it stays \"session\" when released.",
   },
   "src/app/api/users/invite/route.ts": {
     kind: "session",

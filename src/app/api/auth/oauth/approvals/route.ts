@@ -15,10 +15,17 @@
  * 409 one already answered; 410 one expired; 415 a body that is not JSON;
  * 422 a malformed id.
  *
+ * Middleware answers most bearer requests before this runs (src/middleware.ts,
+ * bearerRequest): 400 with a session cookie as well, 403 while client tokens
+ * are off or for an agent client, 401 for a token Supabase Auth does not
+ * accept; and it answers 401 for a client's token in the session cookie. An
+ * operator client's accepted token reaches this route, which refuses it.
+ * The checks below stay as the route's own fence, whatever middleware does.
+ *
  * Only the person's browser session may approve, from MGM's own page:
  *   - any Authorization header is refused before anything is read, so a
- *     client's token, which works at MGM's API routes once #272's resolver
- *     accepts bearer tokens, can never approve a sign-in;
+ *     client's token, which works at MGM's API routes, can never approve a
+ *     sign-in;
  *   - a cookie session whose token carries client_id is a client's token put
  *     in a cookie, and is refused too;
  *   - the request must come from this site's own pages (Sec-Fetch-Site, or
