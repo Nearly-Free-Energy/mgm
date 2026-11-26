@@ -68,7 +68,7 @@ Runs local Supabase via CLI with hot reload and full dev tooling.
 | Node.js | 24 (see `.nvmrc`) | `nvm install` or `fnm install` (reads `.nvmrc`), or `brew install node@24` (keg-only: add it to your `PATH`). `brew install node` installs the newest release, not 24. |
 | npm | 9+ | Bundled with Node.js |
 | Docker Desktop | 4.0+ | [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/) |
-| Supabase CLI | 2.75+ | `brew install supabase/tap/supabase` or [docs](https://supabase.com/docs/guides/cli/getting-started) |
+| Supabase CLI | 3.4+ (`package-lock.json` pins 3.4.0, which `npx supabase` runs; `./setup.sh` refuses an older global CLI) | `brew install supabase/tap/supabase` or [docs](https://supabase.com/docs/guides/cli/getting-started); upgrading from 2.x: [Upgrading to Supabase CLI 3](#upgrading-to-supabase-cli-3) |
 
 ### Quick Start — Local Supabase (recommended)
 
@@ -105,6 +105,28 @@ On the Docker path, see *Reset to fresh state* above.
 `npm run dev` builds the interface's stylesheet once before it starts. While
 you change classes under `src/gui/` or the tokens in `src/styles/tokens.css`,
 run `npm run gui:styles:watch` beside it to rebuild the stylesheet.
+
+### Upgrading to Supabase CLI 3
+
+`supabase/config.toml` is written for Supabase CLI 3.4 or later, whose local
+stack runs Supabase Auth v2.198.0
+([ADR-008](adr/ADR-008-sign-in-for-clients-that-are-not-a-browser.md)). A
+checkout set up before that keeps its old CLI and its old Auth until you:
+
+1. Run `npm ci`, so `npx supabase` and the `db:types` scripts use the pinned
+   3.4.0. Until then `npm run db:types` and the pre-commit check refuse to
+   run.
+2. Upgrade the global CLI (`brew upgrade supabase`), or run the commands
+   below as `npx supabase`.
+3. Restart the stack so it pulls the new images: `supabase stop`, then
+   `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase start`. `supabase stop` keeps the
+   database.
+4. Check that `docker ps` shows `gotrue:v2.198.0`.
+
+In a checkout where you ran `supabase link`, `supabase start` runs the Auth
+version in `supabase/.temp/gotrue-version` instead, the linked project's
+version when you linked it, which may be older or newer. Delete that file to
+run the pinned version; the next `supabase link` writes it again.
 
 ### Quick Start — Cloud Supabase
 
@@ -161,7 +183,7 @@ Usage:
 4. Prints summary with URLs and credentials
 
 **Local mode:**
-1. Checks prerequisites (Node.js, npm, Docker, Supabase CLI)
+1. Checks prerequisites (Node.js, npm, Docker, Supabase CLI 3.4 or later)
 2. Starts local Supabase containers (`supabase start`)
 3. Applies database migrations and seeds a dev admin user (`supabase db reset`).
    Both run with `MGM_ALLOW_DEV_CREDENTIAL_KEY=1`, so the local database gets a
@@ -407,7 +429,7 @@ After `./setup.sh` in local mode, these services are running:
 |---------|-----|-------------|
 | API (PostgREST) | http://127.0.0.1:54321 | REST API used by the app |
 | Studio | http://127.0.0.1:54323 | Database admin UI |
-| Inbucket | http://127.0.0.1:54324 | Email testing (catches auth emails) |
+| Mailpit | http://127.0.0.1:54324 | Email testing (catches auth emails) |
 | Database | postgresql://postgres:postgres@127.0.0.1:54322/postgres | Direct psql access |
 
 ### Useful commands
@@ -446,8 +468,8 @@ MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase start
 MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset
 
 # 3. Get the JWT secret (needed to mint impersonation JWTs)
-supabase status | grep "JWT secret"
-# Output: JWT secret: super-secret-jwt-token-with-at-least-32-characters-long
+supabase status -o env | grep '^JWT_SECRET='
+# Output: JWT_SECRET="super-secret-jwt-token-with-at-least-32-characters-long"
 
 # 4. Add SUPABASE_JWT_SECRET to .env.local
 echo 'SUPABASE_JWT_SECRET=super-secret-jwt-token-with-at-least-32-characters-long' >> .env.local
@@ -594,6 +616,8 @@ If using local/dev mode, run `npm run dev` after setup.
 | `function gen_salt(unknown) does not exist` | Verify seed.sql uses `extensions.crypt()` / `extensions.gen_salt()`. Run `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset` to re-apply. |
 | `.env.local already exists` | Use `./setup.sh --force` to overwrite |
 | `[mgm] NEXT_PUBLIC_… is set but no longer read` at `npm run dev` | Rename the variable in `.env.local` ([Upgrading from v0.0.1 or v0.0.2](#upgrading-from-v001-or-v002)), or rerun `./setup.sh --force` (in local mode this also resets the local database) |
+| `inbucket in supabase/config.toml is no longer supported` | The branch predates the move to Supabase CLI 3, which renamed the section to `[local_smtp]`. Rebase it on `main`, or run `npm ci` on that branch so `npx supabase` is its pinned 2.x CLI (and `npm ci` again after switching back). Until then its pre-commit `db:types:check` skips as if no database were running. |
+| `./setup.sh` says the Supabase CLI is older than 3.4.0, or an older global `supabase` refuses `supabase/config.toml` | [Upgrading to Supabase CLI 3](#upgrading-to-supabase-cli-3) |
 | `No credential encryption key` from `supabase start` or `supabase db reset` | Local database: rerun with `MGM_ALLOW_DEV_CREDENTIAL_KEY=1`. Shared database: follow [docs/runbooks/dek.md](runbooks/dek.md) |
 | No sign-in email arrives | Check the server log for `auth.sign_in_link`: `no_access` means the address has no MGM role (run `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset`, or `./setup.sh --docker --force` in docker mode, to re-seed the admin user); `send_failed` with a setting name means `MGM_SMTP_URL` or `MGM_MAIL_FROM` is missing; `limited` means wait a minute (1 a minute, 5 an hour per address). In production, if a super admin must get in before the mail server is fixed, follow `docs/runbooks/emergency-sign-in.md` |
 | `Failed to reach OpenEMS at localhost:8075` | Start the docker-openems stack first (see Full-Stack Setup) |
