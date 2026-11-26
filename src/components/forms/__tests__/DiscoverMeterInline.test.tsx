@@ -1,49 +1,172 @@
 // @vitest-environment jsdom
 /**
- * DiscoverMeterInline component tests (#279).
+ * DiscoverMeterInline component tests.
  *
- * POST /api/devices refuses a device already saved on the edge (409
- * metering_devices_already_saved), so a meter saved from the inline picker
- * must leave its candidates rather than be offered, and sent, again.
+ * The "Not listed" note (#262). The wizard offers only consumption meters,
+ * so its note names only the skipped components discovery would have
+ * suggested as consumption meters. A skipped battery or inverter is no meter
+ * left out. `<DiscoverDevices>`, which lists every type, names all of them
+ * (its own tests).
  *
- * Covers:
+ * A meter saved from the picker (#279). POST /api/devices refuses a device
+ * already saved on the edge (409 metering_devices_already_saved), so a
+ * saved meter leaves the candidates rather than be offered, and sent,
+ * again:
  *   (a) after Save & select, the saved meter leaves the candidates, the
  *       others stay, and the device is posted once
  *   (b) after the only candidate is saved, the picker says there is no new
  *       consumption meter, without the online hint and without calling the
  *       saved meter unclassified
  *   (c) a discovery whose consumption meters are all saved says the same
+ *
+ * The rest of this component is covered through the wizard in
+ * TenantWizard.test.tsx § (k).
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { DiscoverMeterInline } from "../DiscoverMeterInline";
-import type { DiscoveredDevice } from "@/lib/openems/types";
+import type {
+  DiscoveredDevice,
+  EdgeDiscoveryResponse,
+  SkippedComponent,
+} from "@/lib/openems/types";
 
-const EDGE = { id: "550e8400-e29b-41d4-a716-446655440001", name: "Metering Pi", openems_edge_id: "edge0" };
+// Radix RadioGroup needs ResizeObserver, which jsdom lacks.
+beforeAll(() => {
+  if (typeof globalThis.ResizeObserver === "undefined") {
+    globalThis.ResizeObserver = class ResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+  }
+});
 
-function meter(componentId: string, alias: string, alreadyAdded = false): DiscoveredDevice {
+const EDGE = { id: "edge-1", name: "Metering Pi", openems_edge_id: "edge1" };
+
+function skippedAs(
+  componentId: string,
+  suggestedDeviceType: SkippedComponent["suggestedDeviceType"]
+): SkippedComponent {
+  return { componentId, reason: "invalid_component_id", suggestedDeviceType };
+}
+
+function meter(componentId: string): DiscoveredDevice {
   return {
     componentId,
     factoryId: "io.openems.impl.meter.consumption.ConsumptionMeter",
-    alias,
+    alias: `House ${componentId}`,
     nature: "io.openems.edge.meter.api.ElectricityMeter",
     openemsChannelAddress: `${componentId}/ActiveConsumptionEnergy`,
     suggestedDeviceType: "consumption_meter",
-    alreadyAdded,
+    alreadyAdded: false,
   };
 }
 
-function respond(body: unknown, status = 200): Response {
-  return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
+function respond(body: EdgeDiscoveryResponse) {
+  fetchMock.mockResolvedValueOnce({
+    ok: true,
+    status: 200,
+    json: async () => body,
+  } as Response);
 }
 
-function savedResponse(id: string, name: string, componentId: string): Response {
-  return respond({ saved: [{ id, name, device_type: "consumption_meter", openems_component_id: componentId }] });
+async function discover() {
+  render(
+    <DiscoverMeterInline
+      edges={[EDGE]}
+      edgeIdsWithoutConsumptionMeter={[EDGE.id]}
+      microgridId="mg-1"
+      onDevicePersisted={vi.fn()}
+    />
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Discover meters/i }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: /Discover meters/i })).toHaveProperty(
+      "disabled",
+      false
+    )
+  );
 }
 
-describe("DiscoverMeterInline", () => {
-  let fetchMock: ReturnType<typeof vi.spyOn>;
+let fetchMock: ReturnType<typeof vi.spyOn>;
+
+describe("DiscoverMeterInline — skipped components", () => {
+  beforeEach(() => {
+    fetchMock = vi.spyOn(globalThis, "fetch");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("names only the skipped consumption meters", async () => {
+    respond({
+      edgeId: "edge1",
+      online: true,
+      devices: [meter("meter0")],
+      skipped: [
+        skippedAs("meter 1", "consumption_meter"),
+        skippedAs("ess 0", "battery"),
+        skippedAs("inverter/0", "inverter"),
+        skippedAs("grid meter", "grid_meter"),
+      ],
+    });
+    await discover();
+
+    expect(screen.getByText(/Not listed: 1 consumption meter whose/)).toBeDefined();
+    expect(screen.getByText("meter 1")).toBeDefined();
+    expect(screen.queryByText(/ess 0/)).toBeNull();
+    expect(screen.queryByText(/inverter\/0/)).toBeNull();
+    expect(screen.queryByText(/grid meter/)).toBeNull();
+    // The listed meter is still offered.
+    expect(screen.getByRole("radio")).toBeDefined();
+  });
+
+  it("counts several skipped consumption meters in the plural", async () => {
+    respond({
+      edgeId: "edge1",
+      online: true,
+      devices: [],
+      skipped: [
+        skippedAs("meter 1", "consumption_meter"),
+        skippedAs("ess 0", "battery"),
+        skippedAs("meter/2", "consumption_meter"),
+      ],
+    });
+    await discover();
+
+    expect(screen.getByText(/Not listed: 2 consumption meters whose/)).toBeDefined();
+    expect(screen.getByText("meter 1, meter/2")).toBeDefined();
+  });
+
+  it("shows no note when only components of other types were skipped", async () => {
+    respond({
+      edgeId: "edge1",
+      online: true,
+      devices: [],
+      skipped: [skippedAs("ess 0", "battery"), skippedAs("pv meter", "pv_meter")],
+    });
+    await discover();
+
+    expect(screen.getByText(/No new consumption meters on this edge/i)).toBeDefined();
+    expect(screen.queryByText(/Not listed:/)).toBeNull();
+    // The edge answered with components, so the online hint stays out.
+    expect(screen.queryByText(/Make sure the edge is online/i)).toBeNull();
+  });
+
+  it("shows no note and keeps the online hint when nothing was skipped", async () => {
+    respond({ edgeId: "edge1", online: true, devices: [] });
+    await discover();
+
+    expect(screen.getByText(/No new consumption meters on this edge/i)).toBeDefined();
+    expect(screen.queryByText(/Not listed:/)).toBeNull();
+    expect(screen.getByText(/Make sure the edge is online/i)).toBeDefined();
+  });
+});
+
+describe("DiscoverMeterInline — a meter saved from the picker", () => {
   const onDevicePersisted = vi.fn();
 
   beforeEach(() => {
@@ -54,6 +177,16 @@ describe("DiscoverMeterInline", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
+
+  function respondSaved(id: string, name: string, componentId: string) {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        saved: [{ id, name, device_type: "consumption_meter", openems_component_id: componentId }],
+      }),
+    } as Response);
+  }
 
   function renderPicker() {
     render(
@@ -72,13 +205,12 @@ describe("DiscoverMeterInline", () => {
     (fetchMock.mock.calls as FetchCall[]).filter(([url]) => url === "/api/devices");
 
   it("(a) takes a saved meter out of the candidates, so it is not posted again", async () => {
-    fetchMock
-      .mockResolvedValueOnce(respond({ edgeId: "edge0", online: true, devices: [meter("meter9", "M9"), meter("meter8", "M8")] }))
-      .mockResolvedValueOnce(savedResponse("dev-9", "M9", "meter9"));
+    respond({ edgeId: "edge1", online: true, devices: [meter("meter9"), meter("meter8")] });
+    respondSaved("dev-9", "House meter9", "meter9");
     renderPicker();
 
     fireEvent.click(screen.getByRole("button", { name: /Discover meters/i }));
-    await waitFor(() => expect(screen.getByText("M9")).toBeDefined());
+    await waitFor(() => expect(screen.getByText("House meter9")).toBeDefined());
     expect(screen.getAllByRole("radio")).toHaveLength(2);
 
     fireEvent.click(screen.getAllByRole("radio")[0]);
@@ -87,22 +219,21 @@ describe("DiscoverMeterInline", () => {
     await waitFor(() => expect(onDevicePersisted).toHaveBeenCalledTimes(1));
     expect(onDevicePersisted).toHaveBeenCalledWith(expect.objectContaining({ id: "dev-9", edge_id: EDGE.id }));
 
-    // M9 is gone; M8, not saved, is still offered.
-    await waitFor(() => expect(screen.queryByText("M9")).toBeNull());
-    expect(screen.getByText("M8")).toBeDefined();
+    // meter9 is gone; meter8, not saved, is still offered.
+    await waitFor(() => expect(screen.queryByText("House meter9")).toBeNull());
+    expect(screen.getByText("House meter8")).toBeDefined();
     expect(screen.getAllByRole("radio")).toHaveLength(1);
     expect(devicePosts()).toHaveLength(1);
     expect(JSON.parse(devicePosts()[0][1]!.body as string).devices[0].componentId).toBe("meter9");
   });
 
   it("(b) says there is no new meter once the only candidate is saved", async () => {
-    fetchMock
-      .mockResolvedValueOnce(respond({ edgeId: "edge0", online: true, devices: [meter("meter9", "M9")] }))
-      .mockResolvedValueOnce(savedResponse("dev-9", "M9", "meter9"));
+    respond({ edgeId: "edge1", online: true, devices: [meter("meter9")] });
+    respondSaved("dev-9", "House meter9", "meter9");
     renderPicker();
 
     fireEvent.click(screen.getByRole("button", { name: /Discover meters/i }));
-    await waitFor(() => expect(screen.getByText("M9")).toBeDefined());
+    await waitFor(() => expect(screen.getByText("House meter9")).toBeDefined());
     fireEvent.click(screen.getAllByRole("radio")[0]);
     fireEvent.click(screen.getByRole("button", { name: /Save & select/i }));
 
@@ -115,9 +246,7 @@ describe("DiscoverMeterInline", () => {
   });
 
   it("(c) says there is no new meter when every consumption meter found is saved", async () => {
-    fetchMock.mockResolvedValueOnce(
-      respond({ edgeId: "edge0", online: true, devices: [meter("meter9", "M9", true)] })
-    );
+    respond({ edgeId: "edge1", online: true, devices: [{ ...meter("meter9"), alreadyAdded: true }] });
     renderPicker();
 
     fireEvent.click(screen.getByRole("button", { name: /Discover meters/i }));

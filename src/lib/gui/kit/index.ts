@@ -1,16 +1,17 @@
 /**
- * The kit: the only I/O a GUI has (GuiKit in ../contract.ts). Each part lives
+ * The kit: the only I/O a GUI has (GuiKit in ../contract-react.ts). Each part lives
  * in a "use client" module; this file only gathers them.
  *
  * `act` reaches the ActionHost that KitProvider mounts, and `useFeed` is
  * inert. The write itself (host/client/invoke.ts) is not exported
  * (write-path.test.ts).
  *
- * ActionForm and Overlay are not members of GuiKit (../contract.ts): the host
+ * ActionForm and Overlay are not members of GuiKit (../contract-react.ts): the host
  * uses them when a GUI brings no form or frame, and a GUI may name them as
  * its own. If GuiKit gains them, export them through `kit` instead.
  */
-import type { FormProps, GuiKit, OverlayProps, SyncComponent } from "../contract";
+import type { FormProps } from "../contract";
+import type { GuiKit, OverlayProps, SyncComponent } from "../contract-react";
 import { useManifest, useSignals, useView } from "../host/client/kit-provider";
 import { act, loadView, open, search } from "../host/client/kit-runtime";
 import { useFeed, useLive } from "../host/client/live";

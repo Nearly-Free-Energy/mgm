@@ -244,7 +244,8 @@ const DeviceRow = z.strictObject(
 /**
  * POST /api/devices: save devices newly discovered on an edge. `edgeId` is
  * the edge's own id (bound by the host), not OpenEMS's. The component id's
- * format is the route's rule (`invalid_component_id`).
+ * format, and naming each component once after trimming, are the route's
+ * rules (400 `invalid_component_id`, `duplicate_component_id`).
  *
  * New devices only: the route refuses a body naming any device already
  * saved on the edge (the same trimmed component id) with 409

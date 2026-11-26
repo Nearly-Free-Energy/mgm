@@ -9,7 +9,8 @@
  * the view can be imported directly.
  */
 import { lazy, Suspense } from "react";
-import type { SyncNode, ViewProps } from "@/lib/gui/contract";
+import type { ViewProps } from "@/lib/gui/contract";
+import type { SyncNode } from "@/lib/gui/contract-react";
 import { kit } from "@/lib/gui/kit";
 
 const PeriodReviewView = lazy(() => import("./view"));

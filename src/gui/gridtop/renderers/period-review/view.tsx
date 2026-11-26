@@ -19,7 +19,8 @@
  * renderer). If a shared import is added, measure the budgets again.
  */
 import { useCallback, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
-import type { GuiKit, ModelOf, SyncNode, ViewProps } from "@/lib/gui/contract";
+import type { ModelOf, ViewProps } from "@/lib/gui/contract";
+import type { GuiKit, SyncNode } from "@/lib/gui/contract-react";
 import { BillCards } from "./cards";
 import { ActionControl, ControlList, OutcomeLine, TONE, type ActionOutcome } from "./controls";
 import { useCopier } from "./copy";

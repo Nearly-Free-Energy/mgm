@@ -25,7 +25,8 @@
  * chunk saves it.
  */
 import { Component, useEffect, useState, type ReactNode } from "react";
-import type { ActionResult, GuiKit, GuiPlugin, SyncComponent, ViewModel, ViewProps } from "@/lib/gui/contract";
+import type { ActionResult, ViewModel, ViewProps } from "@/lib/gui/contract";
+import type { GuiKit, GuiPlugin, SyncComponent } from "@/lib/gui/contract-react";
 
 type Entry = ViewModel["attached"][number];
 export type Renderers = NonNullable<GuiPlugin["renderers"]>;

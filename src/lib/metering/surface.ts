@@ -9,8 +9,9 @@ import "server-only";
  * `metering.live` is reserved for a later live view of a microgrid. Its
  * watchers: `metering.connection` reports each microgrid whose last OpenEMS
  * connection check failed, leading to its OpenEMS Backend page, and
- * `metering.edge-status` each microgrid with a gateway offline now, or whose
- * gateways' status could not be read, from a cached read of the backend.
+ * `metering.edge-status` each microgrid with a gateway offline now, with a
+ * meter on an online gateway that stopped reporting, or whose gateways or
+ * meters could not be read, from cached reads of the backend.
  *
  * Its actions are its write routes (RFC #259 § 3): saving and checking a
  * microgrid's OpenEMS connection, registering, editing and deleting edges,

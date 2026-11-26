@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { gateRoute } from "@/lib/runtime/gate";
+import { firstDuplicateOpenEmsId } from "@/lib/openems/ids";
 import { OPENEMS_ID_FORMAT_HINT, parseOpenEmsId } from "@/lib/openems/ids";
 import { SaveDevicesBody } from "@/lib/metering/schemas";
 import { parseJsonBody } from "@/lib/validation/parse-body";
@@ -22,7 +23,8 @@ type Client = Awaited<ReturnType<typeof createClient>>;
  *   devices: Array<{
  *     componentId: string;   // OpenEMS component ID (e.g. "meter0"); trimmed,
  *                            // then must fit OPENEMS_ID_PATTERN, else 400
- *                            // `invalid_component_id`
+ *                            // `invalid_component_id`; named once per body,
+ *                            // else 400 `duplicate_component_id`
  *     factoryId: string;     // OpenEMS factory ID
  *     openemsChannelAddress: string;
  *     deviceType: string;    // device_type enum value
@@ -71,6 +73,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         { status: 400 }
       );
     }
+  }
+
+  const duplicateId = firstDuplicateOpenEmsId(devices.map((d) => d.componentId));
+  if (duplicateId !== null) {
+    return NextResponse.json(
+      {
+        error: `Component id '${duplicateId}' is named more than once (ids are trimmed before saving). Send each component once.`,
+        reason: "duplicate_component_id",
+        componentId: duplicateId,
+      },
+      { status: 400 }
+    );
   }
 
   const supabase = await createClient();

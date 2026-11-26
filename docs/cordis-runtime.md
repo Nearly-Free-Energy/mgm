@@ -393,13 +393,21 @@ successive loads rotate through an organization too large to read in one
 budget. A read still under way at the deadline is reported as not read for
 this load and finishes into the cache for the next; one that never got a
 slot leaves nothing behind. It returns at most 50 signals, offline gateways
-ahead of statuses that could not be read. An organization with no such
+ahead of quiet meters, and both ahead of what could not be read. An organization with no such
 microgrid composes nothing and calls no backend, so a local database and
 the browser smoke stay deterministic. A microgrid whose read fails or times
 out is reported as such, a signal about that site, and the watcher is
-unchecked only when the organization's own database reads fail. It reports
-offline gateways only; a meter that stopped reporting while its gateway is
-online needs per-component reads and is follow-up work. Each declares examples,
+unchecked only when the organization's own database reads fail. Beside
+each status read it makes a second cached read under the same rules and
+slots: each meter's `ActivePower` history at five-minute resolution, one
+request per edge (`src/lib/metering/infrastructure/meter-activity.ts`).
+Meters (consumption, grid and PV devices with a component id)
+on an online gateway with no reading for half an hour are one signal per
+microgrid, after the offline gateways; a meter read that failed is a signal
+that the meters could not be checked, and one with no answer by the
+deadline is left for the next load. Batteries, inverters and EV chargers
+are not asked about, since their power channel depends on the driver or
+the OpenEMS version. Each declares examples,
 which `contribute()` parses and `gui-surface.test.ts` holds to the plugin's
 own released pages. Severities follow fixed rules, listed in ADR-006
 decision 9; the installed app's badge counts only the `warn` and `critical`
@@ -567,9 +575,11 @@ composer's check, not the gate's.
 
 A missing `mgm_plugins` row means enabled, so existing organizations need no
 backfill, except for a plugin the catalog marks `defaultEnabled: false`, as
-it marks the tenant app: that plugin is off for an organization until an
-operator turns it on there (RFC mgm#197 § 3), so no organization's tenants
-get an app nobody switched on. `mgm_plugin_enabled_for_org` names those
+it marks the tenant app and the operations plugin: that plugin is off for an
+organization until an operator turns it on there, so no organization's
+tenants get an app nobody switched on (RFC mgm#197 § 3), and no
+organization's investigations share the installation-wide evidence budget
+without opting in (#133). `mgm_plugin_enabled_for_org` names those
 plugins in SQL, while Settings → Plugins reads `defaultEnabled`
 (`resolvePluginStatuses`, and `validatePluginToggle` for a plugin's
 dependents). `src/lib/plugins/__tests__/default-off-plugins.test.ts` reads

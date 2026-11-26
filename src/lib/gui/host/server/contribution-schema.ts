@@ -213,6 +213,7 @@ export function strictProblems(schema: z.ZodType): { path: Path; message: string
  *   (billing-review is a service of the billing plugin, so whatever it shows
  *   is contributed as billing), payments and Pesapal carry bills, tenants
  *   and payment references; the tenant app is about a tenant's own unit;
+ *   the operations plugin contributes nothing yet;
  * - a view whose path names a tenant, a device, or a billing or payment
  *   record (ASSISTANT_REFUSED_KINDS);
  * - a view that takes signals, which carries every watcher's answer;
@@ -238,6 +239,10 @@ export const ASSISTANT_READING: Readonly<Record<MgmPluginName, "per view" | "ref
   payments: "refused",
   pesapal: "refused",
   "tenant-app": "refused",
+  // No views or watchers yet. Refused until the pull request that builds
+  // the investigation view decides it (ADR-007 decision 9), so a view
+  // contributed before then cannot be marked by accident.
+  operations: "refused",
 };
 
 /** The entity kinds whose records an assistant may never read through a view's path. */

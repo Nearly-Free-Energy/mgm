@@ -219,7 +219,7 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
   }
 }
 
-type SampleSet = {
+export type SampleSet = {
   timestamps: Array<number | string>;
   data: Record<string, (number | null)[]>;
 };
@@ -239,7 +239,7 @@ const ZONED_ISO = /(?:Z|[+-]\d{2}:\d{2})(?:\[[^\]]+\])?$/;
  * server's own zone and move every bucket by that zone's offset. The offset
  * alone fixes the instant, so a bracketed zone is dropped before parsing.
  */
-function toEpochMs(raw: number | string): number | null {
+export function toEpochMs(raw: number | string): number | null {
   if (typeof raw === "string" && !/^\d{10,13}$/.test(raw) && !ZONED_ISO.test(raw)) return null;
   const numeric = typeof raw === "number"
     ? raw
@@ -311,7 +311,7 @@ async function mapLimited<T, R>(
  * the channels it was asked for; a channel that still has no history gives
  * no set.
  */
-async function queryBatchOrEach(
+export async function queryBatchOrEach(
   channels: string[],
   query: (channels: string[]) => Promise<SampleSet>
 ): Promise<{ channels: string[]; set: SampleSet }[]> {
@@ -669,7 +669,7 @@ async function getOpenEmsSiteSamples(
   };
 }
 
-function isNoEnergyData(error: unknown): error is OpenEmsError {
+export function isNoEnergyData(error: unknown): error is OpenEmsError {
   return error instanceof OpenEmsError &&
     error.code === "OPENEMS_HTTP_ERROR" &&
     (error.details as { status?: number } | undefined)?.status === 400 &&
