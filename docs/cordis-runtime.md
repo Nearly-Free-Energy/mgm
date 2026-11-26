@@ -533,6 +533,41 @@ rather than failing the others. Choosing another unit changes only `?unit=`,
 so `HostKitProvider` rebuilds the manifest for it, as it does for `?org=`,
 and the shell's context, clock and remembered unit follow.
 
+### Assistant reads
+
+An assistant reads an organization only through `readForAssistant`
+(`src/lib/gui/host/server/assistant-read.ts`, #133 A1-1, ADR-007 decisions 6
+to 8). It is an in-process function on a `HostContext`, not a route or a
+Cordis service, and it opens no scope and never uses the service role.
+
+- A view is read by its page href through `dispatchView`, only when it is
+  marked `agent: "read"`, listed as a view in `src/lib/gui/assistant-reads.ts`
+  and about an organization (no `scope`, or `scope: "organization"`).
+  Anything else is refused as `assistant_not_listed` before its loader runs.
+  `dispatchView`'s optional `admit` refuses it again, and turns a feed's
+  embed of such a view into a fixed "Withheld from the assistant" value
+  without loading it. Left out, `admit` admits every view, so pages are
+  served as before.
+- Attached views it may not read are withheld in the answer's `withheld`,
+  listed from the surface rather than from the model's `attached`, so the
+  answer does not tell another plugin's state. One it may read is read the
+  same way, in the same organization.
+- Signals come from `assistantSignals` (`signals.ts`): only marked and
+  listed watchers run, the counts are over them alone, and a listed watcher
+  whose plugin is off is reported in `off`.
+- Every action, proposal and composer is removed. A model or signal that
+  carries a reference `assistant-references.ts` refuses (tenant, device,
+  rate schedule, billing period, line item, payment attempt, a refused
+  plugin's kind or route, an outside link, a share or a download) is
+  refused whole, and an answer over 200 000 characters of JSON is refused.
+  The host's own refusals pass on with their codes, so an unavailable,
+  disabled or unsupported read is never shown as zero.
+- The caller asks the assistant plugin's gate with `access: "write"` first
+  (ADR-007 decision 5). Nothing calls `readForAssistant` yet: rule 13 of
+  `gui-boundary.test.ts` lets only the files in its `ASSISTANT_READERS`
+  import it, and keeps `dispatchView` and the signal collectors inside the
+  host and its pages. The action catalog is not part of it.
+
 ## The gate
 
 Every released API route enters the runtime. Routes that use a capability go

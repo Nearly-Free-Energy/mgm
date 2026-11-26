@@ -20,7 +20,7 @@ const surfaceSnapshot = vi.fn(async () => snapshot);
 vi.mock("../snapshot", () => ({ surfaceSnapshot: () => surfaceSnapshot() }));
 
 import { MODEL_CAPS } from "../parse";
-import { SYNTHETIC_NOTICE, dispatchView, matchView, shownNotice } from "../view";
+import { NOT_LISTED, SYNTHETIC_NOTICE, WITHHELD_EMBED, dispatchView, matchView, shownNotice } from "../view";
 import { ORG_A, ORG_B, contextFor, managerOf, tableClient } from "./host-fakes";
 
 const MG = "e7100000-0000-4000-8002-0000000000a1";
@@ -586,6 +586,64 @@ describe("dispatchView's organization hint", () => {
     // A hint naming an organization the person cannot see is ignored.
     expect(await orgOf("/organizations", ORG_C)).toBe(ORG_A);
     expect(await orgOf("/organizations", null)).toBe(ORG_A);
+  });
+});
+
+describe("dispatchView with admit", () => {
+  const entry = (id: string, href: string) => ({
+    id,
+    at: "2026-11-09T08:00:00Z",
+    author: { kind: "system", name: "MGM" },
+    text: [{ p: [id] }],
+    embed: { type: "view", href },
+  });
+  const feedOf = (hrefs: string[]) => {
+    const feed = view("metering", { id: "metering.feed", kind: "feed", path: "/microgrids/[id]/billing", declares: { keys: [] } });
+    loadOf(feed).mockResolvedValue({
+      ok: true,
+      model: { title: "Feed", actions: [], body: { entries: hrefs.map((href, i) => entry(`e${i}`, href)) } },
+    });
+    return feed;
+  };
+  const entriesOf = (out: Awaited<ReturnType<typeof dispatchView>>) =>
+    out.ok && out.value.kind === "feed" ? out.value.body.entries : [];
+
+  it("refuses a view it does not admit before anything is read", async () => {
+    const admit = vi.fn((id: string) => id !== "metering.site-day");
+    const newClient = vi.fn();
+    const out = await dispatchView(contextFor(roles, newClient), `/microgrids/${MG}/operations`, { admit });
+    expect(out).toEqual(NOT_LISTED);
+    expect(admit).toHaveBeenCalledWith("metering.site-day");
+    expect(newClient).not.toHaveBeenCalled();
+    expect(checkGate).not.toHaveBeenCalled();
+    expect(loadOf(siteDay)).not.toHaveBeenCalled();
+  });
+
+  it("serves a view it admits as it serves a page", async () => {
+    const page = await dispatch(`/microgrids/${MG}/operations?date=2026-11-08`);
+    const admitted = await dispatchView(ctx(), `/microgrids/${MG}/operations?date=2026-11-08`, { admit: () => true });
+    expect(admitted).toEqual(page);
+  });
+
+  it("withholds a feed's embed of a view it does not admit, without loading it", async () => {
+    const feed = feedOf([`/microgrids/${MG}/operations`, `/microgrids/${MG}/setup/rates`, "/organizations"]);
+    snapshot = snapshotOf([siteDay, rates, feed]);
+    const admit = (id: string) => id !== "metering.site-day";
+    const entries = entriesOf(await dispatchView(ctx(), `/microgrids/${MG}/billing`, { admit }));
+    expect(entries[0].embed).toEqual(WITHHELD_EMBED);
+    expect(loadOf(siteDay)).not.toHaveBeenCalled();
+    // An admitted embed loads; an href naming no view is not available, as on a page.
+    expect(entries[1].embed).toMatchObject({ type: "view", model: { view: "billing.rates" } });
+    expect(entries[2].embed).toEqual({ type: "values", values: [{ t: "text", text: "Not available" }] });
+  });
+
+  it("withholds an embed inside an embedded view too, and nothing without admit", async () => {
+    const feed = feedOf([`/microgrids/${MG}/operations`]);
+    snapshot = snapshotOf([siteDay, feed]);
+    const nested = await dispatchView(ctx(), `/microgrids/${MG}/billing`, { depth: 1, admit: (id) => id !== "metering.site-day" });
+    expect(entriesOf(nested)[0].embed).toEqual(WITHHELD_EMBED);
+    const page = await dispatch(`/microgrids/${MG}/billing`);
+    expect(entriesOf(page)[0].embed).toMatchObject({ type: "view", model: { view: "metering.site-day" } });
   });
 });
 

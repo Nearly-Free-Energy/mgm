@@ -27,6 +27,7 @@ import type { ActionRef, Id, Signal, Signals, StatusItem } from "../../contract"
 import { MAX_SIGNALS_PER_SOURCE } from "../../surface";
 import type { GateState } from "../shared/merge-actions";
 import { requireIssued, surfaceRequest, type HostContext } from "./access";
+import { findRefusedReference } from "./assistant-references";
 import { withinBudget } from "./budget";
 import { pluginGate, type PluginGate } from "./gate-state";
 import { isPageHref } from "./hrefs";
@@ -218,9 +219,40 @@ export function organizationSignals(ctx: HostContext, org: string): Promise<Host
 
 async function collectOrganizationSignals(ctx: HostContext, org: string): Promise<HostOutcome<Signals>> {
   const snapshot = await surfaceSnapshot();
+  const gathered = await gatherSignals(ctx, org, snapshot, snapshot.signals);
+  const found = gathered.answered.flatMap((a) => a.signals);
+  const all = await checkProposals(ctx, org, snapshot, found);
+  return tally(
+    org,
+    all,
+    gathered.answered.map((a) => a.entry.id),
+    gathered.missed.map((m) => m.entry.id),
+  );
+}
+
+/** What each of `entries` answered for `org`, in their order, before anything is counted. */
+type Gathered = {
+  answered: { entry: RegisteredSignal; signals: Signal[] }[];
+  missed: { entry: RegisteredSignal; miss: Miss }[];
+  /** Watchers left out because their plugin is off for `org`. */
+  off: Id[];
+};
+
+/**
+ * Runs each of `entries` for `org`: one whose plugin is off is skipped,
+ * unless it declares `whilePluginOff: "checked"`, and one whose plugin
+ * state cannot be read misses. Each miss is logged by watcher id and kind
+ * of miss only.
+ */
+async function gatherSignals(
+  ctx: HostContext,
+  org: string,
+  snapshot: SurfaceSnapshot,
+  entries: readonly RegisteredSignal[],
+): Promise<Gathered> {
   const gate = pluginGate(ctx, org);
   const results = await Promise.all(
-    snapshot.signals.map(async (entry): Promise<Watched | "off"> => {
+    entries.map(async (entry): Promise<Watched | "off"> => {
       const state = await gate(entry.plugin).catch(() => null);
       const off = state !== null && !state.ok && state.status === 409;
       if (off && entry.whilePluginOff !== "checked") return "off";
@@ -228,21 +260,22 @@ async function collectOrganizationSignals(ctx: HostContext, org: string): Promis
       return watch(ctx, org, entry, snapshot, gate);
     }),
   );
-  const checked: Id[] = [];
-  const unchecked: Id[] = [];
-  const found: Signal[] = [];
-  snapshot.signals.forEach((entry, i) => {
+  const gathered: Gathered = { answered: [], missed: [], off: [] };
+  entries.forEach((entry, i) => {
     const r = results[i];
-    if (r === "off") return;
-    if (r.ok) {
-      checked.push(entry.id);
-      found.push(...r.signals);
-    } else {
-      unchecked.push(entry.id);
+    if (r === "off") gathered.off.push(entry.id);
+    else if (r.ok) gathered.answered.push({ entry, signals: r.signals });
+    else {
+      gathered.missed.push({ entry, miss: r.miss });
       console.warn(`[gui] signals ${entry.id}: not checked (${r.miss})`);
     }
   });
-  const all = (await checkProposals(ctx, org, snapshot, found)).sort(order);
+  return gathered;
+}
+
+/** The answer over `found`: sorted, counted, cut to MAX_TOP and strictly parsed. */
+function tally(org: string, found: Signal[], checked: Id[], unchecked: Id[]): HostOutcome<Signals> {
+  const all = [...found].sort(order);
   // Counted over every signal, not `top`: the badge's number (Signals.attention) must not stop at MAX_TOP.
   const attention = all.filter((s) => s.severity !== "info").length;
   const signals = { type: "signals", org, count: all.length, attention, top: all.slice(0, MAX_TOP), checked, unchecked };
@@ -250,6 +283,53 @@ async function collectOrganizationSignals(ctx: HostContext, org: string): Promis
   return parsed.ok
     ? { ok: true, value: parsed.value }
     : { ok: false, status: 500, code: "gui_output_invalid", message: "Signals could not be shown." };
+}
+
+/**
+ * The signals of `org` an assistant may read, for the assistant read
+ * interface (./assistant-read.ts), which chose `org` as collectSignals does
+ * and passes `admit`: whether a watcher is marked `agent: "read"` and on the
+ * code-owned list (src/lib/gui/assistant-reads.ts). Only admitted watchers
+ * run, under collectSignals' rules, and `count`, `attention`, `top`,
+ * `checked` and `unchecked` are over them alone, so nothing tells how many
+ * signals another watcher has.
+ *
+ * A watcher any of whose signals carries a reference the assistant may not
+ * be given (findRefusedReference, ./assistant-references.ts) is listed as
+ * unchecked, and none of its signals are given, with only its id logged.
+ * Proposals keep the action the watcher's own resolution gives them, without
+ * asking its available() (checkProposals), since the read interface removes
+ * every action. If a caller of assistantSignals passes a proposal's action
+ * on, ask available() here again. `off` lists the admitted watchers skipped because their
+ * plugin is off for `org`, so an assistant can tell "off" from "nothing to
+ * report". Nothing is cached: the render slot holds every watcher's signals.
+ */
+export async function assistantSignals(
+  ctx: HostContext,
+  org: string,
+  admit: (s: RegisteredSignal) => boolean,
+): Promise<HostOutcome<{ signals: Signals; off: Id[] }>> {
+  requireIssued(ctx);
+  const snapshot = await surfaceSnapshot();
+  const gathered = await gatherSignals(ctx, org, snapshot, snapshot.signals.filter(admit));
+  const checked: Id[] = [];
+  const found: Signal[] = [];
+  const refused = new Set<Id>();
+  for (const { entry, signals } of gathered.answered) {
+    const refusal = signals.map((s) => findRefusedReference(s, snapshot.views)).find((r) => r !== null);
+    if (refusal) {
+      refused.add(entry.id);
+      console.warn(`[gui] signals ${entry.id}: not given to an assistant (a ${refusal.kind} reference at ${refusal.path})`);
+      continue;
+    }
+    checked.push(entry.id);
+    found.push(...signals);
+  }
+  // In the watchers' order, as collectSignals lists them.
+  const missed = new Set(gathered.missed.map((m) => m.entry.id));
+  const unchecked = snapshot.signals.filter((s) => missed.has(s.id) || refused.has(s.id)).map((s) => s.id);
+  const out = tally(org, found, checked, unchecked);
+  return out.ok ? { ok: true, value: { signals: out.value, off: gathered.off } } : out;
 }
 
 /**

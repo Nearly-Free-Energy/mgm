@@ -13,7 +13,7 @@ let snapshot: SurfaceSnapshot;
 vi.mock("../snapshot", () => ({ surfaceSnapshot: async () => snapshot }));
 
 import { UNCHECKED_REASON } from "../merge";
-import { MAX_TOP, collectSignals, collectStatus } from "../signals";
+import { MAX_TOP, assistantSignals, collectSignals, collectStatus } from "../signals";
 import { ORG_A, ORG_B, contextFor, managerOf, superAdmin, tableClient, tenantOf } from "./host-fakes";
 
 const MG = "e7100000-0000-4000-8002-0000000000a1";
@@ -382,6 +382,70 @@ describe("collectSignals", () => {
 
   it("refuses a context hostContext did not issue", async () => {
     await expect(collectSignals({ ...ctx() }, {})).rejects.toThrow(/did not issue/);
+  });
+});
+
+describe("assistantSignals", () => {
+  const TENANT = "e7100000-0000-4000-8009-000000000001";
+  const admitted = new Set(["metering.connection", "metering.late", "metering.leaky", "billing.due"]);
+  const admit = (s: RegisteredSignal) => admitted.has(s.id);
+  const read = () => assistantSignals(ctx(), ORG_A, admit);
+
+  it("runs only the admitted watchers and counts over them alone", async () => {
+    const other = vi.fn(async () => Array.from({ length: 30 }, (_, i) => ({ ...base, id: `o${i}`, kind: "alarm", severity: "critical" })));
+    use([
+      watcher("metering", "metering.connection", async () => [{ ...base, id: "a", kind: "alarm", severity: "warn" }, { ...base, id: "b", kind: "info", severity: "info" }]),
+      watcher("metering", "metering.edge-status", other),
+    ]);
+    const out = await read();
+    expect(other).not.toHaveBeenCalled();
+    expect(out).toMatchObject({
+      ok: true,
+      value: { signals: { type: "signals", org: ORG_A, count: 2, attention: 1, checked: ["metering.connection"], unchecked: [] }, off: [] },
+    });
+    expect(out.ok && out.value.signals.top.map((s) => s.source)).toEqual(["metering.connection", "metering.connection"]);
+  });
+
+  it("lists an admitted watcher whose plugin is off as off, not as checked", async () => {
+    const due = vi.fn(async () => [{ ...billed, id: "d", kind: "alarm" }]);
+    gates.set("billing", { ok: false, status: 409, code: "billing_disabled", message: "Billing is off" });
+    use([watcher("billing", "billing.due", due), watcher("metering", "metering.connection", async () => [])]);
+    const out = await read();
+    expect(due).not.toHaveBeenCalled();
+    expect(out.ok && [out.value.off, out.value.signals.checked, out.value.signals.unchecked]).toEqual([["billing.due"], ["metering.connection"], []]);
+  });
+
+  it("lists a late watcher as unchecked", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    use([watcher("metering", "metering.late", () => new Promise(() => {}), 100), watcher("metering", "metering.connection", async () => [])]);
+    const pending = read();
+    await vi.advanceTimersByTimeAsync(200);
+    const out = await pending;
+    expect(out.ok && [out.value.signals.checked, out.value.signals.unchecked]).toEqual([["metering.connection"], ["metering.late"]]);
+  });
+
+  it("gives none of a watcher's signals when one carries a refused reference, and lists it unchecked", async () => {
+    use([
+      watcher("metering", "metering.leaky", async () => [
+        { ...base, id: "ok", kind: "info", severity: "info" },
+        { ...base, id: "t", kind: "alarm", entity: { kind: "tenant", id: TENANT, label: CANARY } },
+      ]),
+      watcher("metering", "metering.connection", async () => [{ ...base, id: "a", kind: "alarm" }]),
+    ]);
+    const out = await read();
+    expect(out).toMatchObject({ ok: true, value: { signals: { count: 1, checked: ["metering.connection"], unchecked: ["metering.leaky"] } } });
+    expect(JSON.stringify(out)).not.toContain(CANARY);
+    expect(logged()).toContain("metering.leaky: not given to an assistant (a tenant reference at entity)");
+    expect(logged()).not.toContain(CANARY);
+  });
+
+  it("does not ask a proposal's available(), and refuses a context hostContext did not issue", async () => {
+    const available = vi.fn(async () => ({ ok: true }));
+    use([watcher("metering", "metering.connection", async () => [proposal()])], [action({ available })]);
+    const out = await read();
+    expect(out).toMatchObject({ ok: true, value: { signals: { count: 1, top: [{ kind: "proposal" }] } } });
+    expect(available).not.toHaveBeenCalled();
+    await expect(assistantSignals({ ...ctx() }, ORG_A, admit)).rejects.toThrow(/did not issue/);
   });
 });
 

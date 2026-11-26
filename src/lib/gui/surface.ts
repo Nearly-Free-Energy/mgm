@@ -383,10 +383,12 @@ export type SignalDef = {
    * through the host. The watcher must be on the code-owned list in
    * ./assistant-reads.ts, and contribution-schema.ts refuses the mark on a
    * watcher of a plugin whose reading it refuses (ASSISTANT_READING there),
-   * billing's and payments' included. Nothing but that check reads this
-   * mark yet, because nothing gives signals to an assistant; once the
-   * host's read interface (ADR-007 A1) does, it must pass on only marked
-   * watchers' signals, and this comment changes with it.
+   * billing's and payments' included. The host's read interface
+   * (readForAssistant in host/server/assistant-read.ts, through
+   * assistantSignals in host/server/signals.ts) runs only watchers that are
+   * marked and listed, and counts over them alone; an unmarked watcher never
+   * runs for an assistant. If another path gives signals to an assistant,
+   * it must do the same, and this comment changes with it.
    */
   agent?: "read";
 };

@@ -53,6 +53,21 @@
  *  12. contract-react: src/lib/gui/contract-react.ts, the kit and GUI-plugin
  *      types, imports only types, and only from react and ./contract, and
  *      re-exports nothing (no `export … from`), so each name has one home.
+ *  13. host-reads: the host's read entry points stay where they are
+ *      called. dispatchView, collectSignals and organizationSignals are
+ *      imported only by files under src/lib/gui/host/ and src/app/;
+ *      assistantSignals only under src/lib/gui/host/; readForAssistant, the
+ *      assistant read interface, only by the files in ASSISTANT_READERS. A
+ *      namespace import, `export *` or import() of their modules counts as
+ *      importing every one. No file re-exports one, by `export … from`,
+ *      `export *` or an `export` of the imported binding, since a file
+ *      that may import it would pass it on to files that may not. So no
+ *      module imports a view or watcher read for an assistant except
+ *      through readForAssistant, which serves only marked and listed ones
+ *      (ADR-007 decision 7). A value passed on another way (assigned to an
+ *      exported variable, or handed to a callback) is not seen: #259 § 5's
+ *      guard against domain-data read tools, which A3 adds, is the wider
+ *      check.
  *
  * Apart from the rules, the npm packages a GUI imports must equal both its
  * REVIEWED_PACKAGES entry and its GuiMeta.dependencies (packageListProblems).
@@ -86,6 +101,42 @@ const CONFORMANCE = "src/lib/gui/conformance/";
 const INSTALLED = "src/gui/installed.ts";
 /** Where the files that may import INSTALLED live (server files only). */
 const HOST_PAGES = "src/app/";
+
+/**
+ * The files that may import readForAssistant (rule 13). Empty until A3's
+ * harness adapter, which asks the assistant plugin's gate first (ADR-007
+ * decision 5); a file added here takes on that precondition, stated in
+ * src/lib/gui/host/server/assistant-read.ts.
+ */
+const ASSISTANT_READERS: readonly string[] = [];
+
+/** The host's read entry points, by the module that exports them, and who may import each (rule 13). */
+const HOST_READS: readonly { module: string; names: readonly string[]; may: (file: string) => boolean; where: string }[] = [
+  {
+    module: `${HOST_SERVER}view`,
+    names: ["dispatchView"],
+    may: (file) => file.startsWith(HOST) || file.startsWith(HOST_PAGES),
+    where: `files under ${HOST} and ${HOST_PAGES}`,
+  },
+  {
+    module: `${HOST_SERVER}signals`,
+    names: ["collectSignals", "organizationSignals"],
+    may: (file) => file.startsWith(HOST) || file.startsWith(HOST_PAGES),
+    where: `files under ${HOST} and ${HOST_PAGES}`,
+  },
+  {
+    module: `${HOST_SERVER}signals`,
+    names: ["assistantSignals"],
+    may: (file) => file.startsWith(HOST),
+    where: `files under ${HOST}`,
+  },
+  {
+    module: `${HOST_SERVER}assistant-read`,
+    names: ["readForAssistant"],
+    may: (file) => ASSISTANT_READERS.includes(file),
+    where: "the files in ASSISTANT_READERS",
+  },
+];
 
 /** What contract.ts may import types from. */
 const CONTRACT_TYPE_SOURCES = ["@/lib/plugins/bundled"];
@@ -141,7 +192,8 @@ type Rule =
   | "gui-tests"
   | "conformance-reach"
   | "gui-entry"
-  | "gui-installed";
+  | "gui-installed"
+  | "host-reads";
 
 type Violation = { rule: Rule; file: string; message: string };
 
@@ -160,6 +212,81 @@ type Import = {
    */
   typeOnly: boolean;
 };
+
+/**
+ * The names a file takes as values from each module it names: "*" for a
+ * namespace or default import, `export *` and import() or require(), whose
+ * names cannot be told. Type-only imports and specifiers are left out.
+ */
+type ValueBinding = {
+  specifier: string;
+  /** The names taken from the module; "*" for all of them. */
+  names: string[];
+  /** Whether this is an `export … from` or `export *`, which passes the names on. */
+  reexport: boolean;
+  /** Each name's local binding, for an import: [name, local]. */
+  locals: [string, string][];
+};
+
+function valueBindings(source: ts.SourceFile): ValueBinding[] {
+  const found: ValueBinding[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      const clause = node.importClause;
+      if (clause && !clause.isTypeOnly) {
+        const locals: [string, string][] = clause.name ? [["*", clause.name.text]] : [];
+        const bindings = clause.namedBindings;
+        if (bindings && ts.isNamespaceImport(bindings)) locals.push(["*", bindings.name.text]);
+        if (bindings && ts.isNamedImports(bindings)) {
+          for (const element of bindings.elements) {
+            if (!element.isTypeOnly) locals.push([(element.propertyName ?? element.name).text, element.name.text]);
+          }
+        }
+        found.push({ specifier: node.moduleSpecifier.text, names: locals.map(([name]) => name), reexport: false, locals });
+      }
+    } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+      if (!node.isTypeOnly) {
+        const clause = node.exportClause;
+        const names =
+          clause && ts.isNamedExports(clause)
+            ? clause.elements.filter((element) => !element.isTypeOnly).map((element) => (element.propertyName ?? element.name).text)
+            : ["*"];
+        found.push({ specifier: node.moduleSpecifier.text, names, reexport: true, locals: [] });
+      }
+    } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+      const expression = node.moduleReference.expression;
+      if (!node.isTypeOnly && ts.isStringLiteral(expression)) {
+        found.push({ specifier: expression.text, names: ["*"], reexport: false, locals: [["*", node.name.text]] });
+      }
+    } else if (
+      ts.isCallExpression(node) &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === "require"))
+    ) {
+      const [argument] = node.arguments;
+      if (argument && ts.isStringLiteralLike(argument)) found.push({ specifier: argument.text, names: ["*"], reexport: false, locals: [] });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+/** The local bindings a file exports by name: `export { a, b as c }` and `export default a`. */
+function exportedLocals(source: ts.SourceFile): Set<string> {
+  const found = new Set<string>();
+  for (const statement of source.statements) {
+    if (ts.isExportDeclaration(statement) && !statement.moduleSpecifier && !statement.isTypeOnly) {
+      const clause = statement.exportClause;
+      if (clause && ts.isNamedExports(clause)) {
+        for (const element of clause.elements) if (!element.isTypeOnly) found.add((element.propertyName ?? element.name).text);
+      }
+    } else if (ts.isExportAssignment(statement) && ts.isIdentifier(statement.expression)) {
+      found.add(statement.expression.text);
+    }
+  }
+  return found;
+}
 
 function isTestFile(file: string): boolean {
   return /(^|\/)__tests__\//.test(file) || /\.(test|spec)\.tsx?$/.test(file) || /\.d\.ts$/.test(file);
@@ -372,6 +499,23 @@ function boundaryViolations(
   for (const file of files.keys()) {
     const source = sourceOf(file);
     const imports = importsOf(source);
+
+    // 13. host-reads
+    const exported = exportedLocals(source);
+    for (const { specifier, names, reexport, locals } of valueBindings(source)) {
+      const target = resolveLocal(file, specifier, files);
+      if (!target) continue;
+      const stem = target.path.replace(/\.tsx?$/, "").replace(/\/index$/, "");
+      for (const read of HOST_READS) {
+        if (stem !== read.module) continue;
+        for (const name of read.names) {
+          if (!names.includes(name) && !names.includes("*")) continue;
+          const passedOn = reexport || locals.some(([imported, local]) => (imported === name || imported === "*") && exported.has(local));
+          if (passedOn) report("host-reads", file, `re-exports ${name} from ${specifier}; no file may`);
+          else if (!read.may(file)) report("host-reads", file, `imports ${name} from ${specifier}; only ${read.where} may`);
+        }
+      }
+    }
 
     // 1. contract
     if (file === CONTRACT) {
@@ -862,6 +1006,10 @@ describe("GUI import boundaries in this repository", () => {
   it("only host pages import the installed GUIs, which import only package entries", () => {
     expect(files.has(INSTALLED)).toBe(true);
     expect(byRule("gui-installed")).toEqual([]);
+  });
+
+  it("only the host and its pages import the host's read functions, and nothing yet the assistant read interface", () => {
+    expect(byRule("host-reads")).toEqual([]);
   });
 
   it("every @/ module GUI packages may import is code-owned", () => {
@@ -1513,6 +1661,55 @@ describe("the boundary checker catches each violation (self-tests)", () => {
       ]) {
         expect(rulesOf(check({ [INSTALLED]: installed, [file]: source })), file).toContain("gui-installed");
       }
+    });
+  });
+  describe("host-reads", () => {
+    const server = (source: string) => `import "server-only";\n${source}`;
+
+    it("accepts the host's read functions in the host and its pages, types anywhere, and tests", () => {
+      expect(
+        check({
+          "src/app/api/gui/view/route.ts": 'import { dispatchView } from "@/lib/gui/host/server/view";',
+          "src/app/api/gui/signals/route.ts": 'import { collectSignals } from "@/lib/gui/host/server/signals";',
+          [`${HOST_SERVER}render.ts`]: server('import { dispatchView } from "./view";\nimport { organizationSignals } from "./signals";'),
+          [`${HOST_SERVER}assistant-read.ts`]: server('import { assistantSignals } from "./signals";\nimport { dispatchView, matchView } from "./view";'),
+          "src/lib/billing/today.ts": 'import type { HostOutcome } from "@/lib/gui/host/server/view";\nimport { type AssistantView } from "@/lib/gui/host/server/assistant-read";',
+          "src/lib/billing/__tests__/today.test.ts": 'import { readForAssistant } from "@/lib/gui/host/server/assistant-read";',
+        }),
+      ).toEqual([]);
+    });
+
+    it("refuses them anywhere else, however they are named", () => {
+      for (const [file, source] of [
+        ["src/lib/billing/today.ts", 'import { dispatchView } from "@/lib/gui/host/server/view";'],
+        ["src/lib/billing/today.ts", 'import { dispatchView as load } from "../gui/host/server/view";'],
+        ["src/lib/billing/today.ts", 'import * as view from "@/lib/gui/host/server/view";'],
+        ["src/lib/billing/today.ts", 'export * from "@/lib/gui/host/server/signals";'],
+        ["src/lib/billing/today.ts", 'export { collectSignals } from "@/lib/gui/host/server/signals";'],
+        ["src/lib/billing/today.ts", 'const m = await import("@/lib/gui/host/server/signals");'],
+        ["src/app/api/gui/assistant/route.ts", 'import { assistantSignals } from "@/lib/gui/host/server/signals";'],
+        ["src/app/api/gui/assistant/route.ts", 'import { readForAssistant } from "@/lib/gui/host/server/assistant-read";'],
+        [`${HOST_SERVER}adapter.ts`, server('import { readForAssistant } from "./assistant-read";')],
+        [`${HOST_SERVER}adapter.ts`, server('import * as read from "./assistant-read";')],
+      ]) {
+        expect(rulesOf(check({ [file]: source })), source).toContain("host-reads");
+      }
+    });
+
+    it("refuses a re-export of one, even from a file that may import it", () => {
+      for (const source of [
+        'export { dispatchView } from "./view";',
+        'export { dispatchView as load } from "./view";',
+        'export * from "./signals";',
+        'export * as signals from "./signals";',
+        'import { assistantSignals } from "./signals";\nexport { assistantSignals };',
+        'import { dispatchView as load } from "./view";\nexport { load as read };',
+        'import * as view from "./view";\nexport { view };',
+        'import { dispatchView } from "./view";\nexport default dispatchView;',
+      ]) {
+        expect(rulesOf(check({ [`${HOST_SERVER}reexport.ts`]: server(source) })), source).toContain("host-reads");
+      }
+      expect(rulesOf(check({ [`${HOST_SERVER}reexport.ts`]: server('import { dispatchView } from "./view";\nexport { other } from "./other";') }))).not.toContain("host-reads");
     });
   });
 });

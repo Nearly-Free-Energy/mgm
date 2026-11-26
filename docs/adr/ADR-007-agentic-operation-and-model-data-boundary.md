@@ -427,8 +427,33 @@ says so.
   ([comment](https://github.com/Nearly-Free-Energy/mgm/pull/255#issuecomment-7152066520)),
   and asked arindahills to confirm or object there.
 - How the read interface recognises a tenant, billing period or payment
-  reference (entity references, links, or both, and which core kinds) is
-  defined by the A1 pull request that builds it, under code-owner review.
+  reference was left to the A1 pull request that builds it. A1-1 settles
+  it in `src/lib/gui/host/server/assistant-references.ts`, applied by
+  `readForAssistant` (`assistant-read.ts`) to every model and signal it
+  gives out. It reads both entity references (`entity`, `related` and a
+  `ref` value) and hrefs (`href`, `link` and `next`). It refuses a
+  reference of the kinds the contribution check refuses in a path
+  (`ASSISTANT_REFUSED_KINDS`: tenant, device, rate schedule, billing
+  period, line item and payment attempt) or of a plugin kind whose plugin
+  is unknown or refused; an href that leaves the origin, names no view or
+  catalog page, has a segment of a refused kind, carries a search
+  parameter its view does not declare or a fragment, or is any API route
+  (an assistant is given no action or download, and an API path can name
+  a tenant or device whatever plugin owns it); and a link's share or
+  download. A listed view that emits one is
+  refused whole, as a review failure. `ext.data` is not read by name:
+  the list's review and its pin cover it (decision 8).
+- That goes beyond decision 7's tenant, billing-period and payment
+  references on purpose. A device reference's label is the device's
+  name, which decision 6 keeps out of every staff view, and a rate
+  schedule or line item is billing's record, whose plugin decision 7
+  already refuses. Refusing them makes a future view that lists devices
+  unreadable to an assistant until it labels them by component id.
+- The action catalog (#293) stays out of the read interface. Decision 6
+  admits only what marked views and watchers emit, and a catalog reason is
+  an action's own copy, which a refused plugin's `available()` writes.
+  Giving an assistant the catalog needs a written reading of decision 6
+  and refused plugins' reasons turned into codes first.
 
 ## Consequences
 

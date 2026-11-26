@@ -240,6 +240,13 @@ function entryOf({ registered: { plugin, def }, params, reasons, unchecked }: Dr
  * paymentAttempt kinds, or give it the organization's catalog only: #133's
  * A0 data boundary keeps tenant, billing and payment references from any
  * model.
+ *
+ * The catalog is not given to an assistant: the assistant read interface
+ * (./assistant-read.ts) serves marked and listed views and watchers only,
+ * because ADR-007 decision 6 admits only what those emit, and a reason here
+ * is an action's own copy, which a refused plugin's available() writes. If
+ * an assistant is to be given the catalog, decision 6 is read for it first,
+ * and refused plugins' reasons become codes.
  */
 export async function buildActionCatalog(ctx: HostContext, input: CatalogQuery): Promise<HostOutcome<ActionCatalog>> {
   requireIssued(ctx);
