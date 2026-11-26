@@ -2,7 +2,7 @@ import "server-only";
 
 /**
  * Examples of the `metering.connection` watcher's signals, built by its own
- * model with a fixed clock, so they are what it returns: a backend that
+ * model, so they are what it returns: a backend that
  * refused the saved sign-in at its last check, and one that could not be
  * reached. All data is synthetic.
  */
@@ -20,6 +20,7 @@ export const CONNECTION_EXAMPLES: readonly SignalOut[] = buildConnectionSignals(
       emsType: "cloud_aws",
       status: "auth_failed",
       checkedAt: "2026-11-19T06:15:00Z",
+      createdAt: "2026-03-02T09:00:00Z",
     },
     {
       id: "00000000-0000-4000-8000-0000000000b2",
@@ -28,7 +29,7 @@ export const CONNECTION_EXAMPLES: readonly SignalOut[] = buildConnectionSignals(
       emsType: "direct_url",
       status: "unreachable",
       checkedAt: "2026-11-18T17:40:00Z",
+      createdAt: "2026-05-14T11:30:00Z",
     },
   ],
-  new Date("2026-11-20T09:00:00Z"),
 );
