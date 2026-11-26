@@ -6,8 +6,15 @@ import {
   composeCommunityManagement,
   type CommunityManagementError,
 } from "@/lib/community-management";
+import {
+  DeleteMicrogridBody,
+  UPDATE_MICROGRID_REFUSALS,
+  UpdateMicrogridBody,
+} from "@/lib/community-management/schemas";
 import { countEntityDescendants } from "@/lib/entity-descendants";
 import { gateRoute } from "@/lib/runtime/gate";
+import { parseJsonBody } from "@/lib/validation/parse-body";
+import { typedNameMatches } from "@/lib/validation/typed-name";
 import {
   errorBody,
   mapPgError,
@@ -31,11 +38,15 @@ function mapError(error: CommunityManagementError): NextResponse {
 }
 
 /**
- * PATCH /api/microgrids/[id] — update a microgrid (#76).
+ * PATCH /api/microgrids/[id] — update a microgrid (#76), as
+ * `community.update-microgrid`.
  *
- * Dirty-fields semantics: only keys present in body are applied.
- * Re-parenting via `community_id` is NOT supported through this endpoint —
- * ignored if present (would be a "move" feature, deferred).
+ * Dirty-fields semantics: only keys present in body are applied. The body
+ * is UpdateMicrogridBody (src/lib/community-management/schemas.ts), refused
+ * with this route's own answers (UPDATE_MICROGRID_REFUSALS). Re-parenting
+ * via `community_id` is NOT supported through this endpoint (it would be a
+ * "move" feature, deferred): the schema refuses the key, which the route
+ * ignored before it parsed with a schema.
  *
  * Released mutations route through the community-management Cordis
  * capability. The route resolves the parent organization needed for the
@@ -47,6 +58,11 @@ function mapError(error: CommunityManagementError): NextResponse {
  * Area/Location id that Intl.DateTimeFormat resolves; stored in canonical
  * form (422 otherwise, #357 — see src/lib/validation/timezone.ts).
  * Duplicate rename (same community → same name) → 409 with exact copy.
+ * A currency change once any of the microgrid's billing periods is closed
+ * → 409 `microgrid_currency_locked` on the currency field, as bills store
+ * no currency and would be relabelled; the same currency again passes
+ * (currencyChangeRefusal in src/lib/community-management/operations/
+ * microgrids.ts says why, and what would move it into the database).
  */
 export async function PATCH(
   request: NextRequest,
@@ -61,12 +77,9 @@ export async function PATCH(
     );
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, UpdateMicrogridBody, { refusals: UPDATE_MICROGRID_REFUSALS });
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
 
   const supabase = await createClient();
   const { data: microgrid } = await supabase
@@ -127,11 +140,23 @@ export async function PATCH(
  *
  * Idempotency: first-delete wins, repeats 404 (AC-ROUTE-7).
  *
+ * Confirmation: `community.delete-microgrid` is a typed action. The body is
+ * DeleteMicrogridBody (src/lib/community-management/schemas.ts), and a
+ * DELETE often has none, so an empty one is read as `{}`. The route checks
+ * the confirmation on every request, as billing's period delete does:
+ *   - no `confirmation`: 428 `microgrid_delete_confirmation_required`,
+ *     naming the microgrid to type. Nothing is deleted.
+ *   - a name that is not the microgrid's, or none typed: 428
+ *     `microgrid_delete_name_mismatch`.
+ * The GUI host sends the name typed in its step. No page deletes a
+ * microgrid today; if one comes to (DeleteEntityButton), it sends the name
+ * its dialog asked for.
+ *
  * Revalidation (AC-UI-6): both `/communities/<community_id>` and
  * `/microgrids` layouts are busted.
  */
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   const { id } = await params;
@@ -142,6 +167,13 @@ export async function DELETE(
       { status: 400 }
     );
   }
+
+  // A DELETE often has no body; an empty one is read as `{}`, which asks for the name.
+  const empty = (await request.clone().text()).trim() === "";
+  const parsed = empty
+    ? ({ ok: true, data: DeleteMicrogridBody.parse({}) } as const)
+    : await parseJsonBody(request, DeleteMicrogridBody);
+  if (!parsed.ok) return parsed.response;
 
   const supabase = await createClient();
 
@@ -182,6 +214,20 @@ export async function DELETE(
     return NextResponse.json(
       errorBody("Unnamed entity cannot be typed-to-confirm."),
       { status: 409 }
+    );
+  }
+  const { confirmation } = parsed.data;
+  const typeTheName = `Type the microgrid's name, ${microgrid.name.trim()}, to delete it.`;
+  if (!confirmation) {
+    return NextResponse.json(
+      { error: typeTheName, code: "microgrid_delete_confirmation_required" },
+      { status: 428 }
+    );
+  }
+  if (!typedNameMatches(confirmation.typed, microgrid.name)) {
+    return NextResponse.json(
+      { error: typeTheName, code: "microgrid_delete_name_mismatch", field: "confirmation" },
+      { status: 428 }
     );
   }
 

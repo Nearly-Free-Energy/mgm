@@ -91,6 +91,9 @@ export type MicrogridRecentActivityRow =
 /** Runtime tuple of all valid microgrid_ems_type enum values (Postgres enum order). */
 export const MICROGRID_EMS_TYPE_VALUES = Constants.public.Enums.microgrid_ems_type;
 
+/** Runtime tuple of all valid device_type enum values (Postgres enum order). */
+export const DEVICE_TYPE_VALUES = Constants.public.Enums.device_type;
+
 // ── Enums (literal-union types) ───────────────────────────────────────────────
 
 export type UserRole = Database["public"]["Enums"]["user_role"];

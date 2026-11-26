@@ -5,6 +5,8 @@ import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
 import { createOpenEmsClient, OpenEmsError } from "@/lib/openems";
 import { getMicrogridEmsConfig } from "@/lib/openems/config";
 import { listOpenEmsEdges } from "@/lib/openems/edge-discovery";
+import { CheckConnectionBody } from "@/lib/metering/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -22,13 +24,17 @@ const UUID_RE =
  * contributes no authorization on this path. If the decrypt is ever moved back
  * onto the caller's client, that changes and this note is wrong.
  *
+ * The body is `CheckConnectionBody` (`@/lib/metering/schemas`), the
+ * `metering.check-connection` action's input: empty. The pages send none,
+ * which is read as `{}`; anything else in it answers 400 `invalid_body`.
+ *
  * Returns 409 if ems_type is NULL (microgrid not configured).
  *
  * N+1 avoidance: we prefetch existing edge ids once into a Set, then
  * compute alreadyLinked per discovered edge in O(1).
  */
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   const startedAt = Date.now();
@@ -40,6 +46,9 @@ export async function POST(
       { status: 400 }
     );
   }
+
+  const parsed = await parseJsonBody(request, CheckConnectionBody, { whenEmpty: {} });
+  if (!parsed.ok) return parsed.response;
 
   const supabase = await createClient();
   // MGM runtime gate: metering writes fail closed while the plugin is disabled.

@@ -311,9 +311,17 @@ key is a 400.
 
 - `GET /api/gui/manifest?path=<page>&org=<id>` answers the manifest the
   (gui) layout renders, from the same `buildManifest`, with the interface
-  `MGM_GUI` selects and the same hints: `org`, else the `?org=` of `path`
-  (a released page on this site), then the org cookie. Views reach it as
-  navigation entries, as the page gets them.
+  `MGM_GUI` selects and the same hints, in this order: the organization of
+  the records `path` (a released page on this site) names, then `org` (or,
+  only when `org` is absent, the `?org=` of `path`), then the org cookie,
+  and failing all of them the person's first organization. As on the
+  page, a hint naming an organization the person cannot see is passed
+  over, so such an `org` answers another organization's manifest where
+  the catalog below answers 404, and a path's records outrank `org`. A person who sees no
+  organization but holds a unit gets the tenant manifest, whose `org` is a
+  unit, whatever `org` says. A client that asks for one organization, such
+  as `mgm places --org`, checks `manifest.org.id` against it. Views reach
+  it as navigation entries, as the page gets them.
 - `GET /api/gui/catalog?org=<id>`, or `?entity=<kind>:<id>` up to four
   times, each of another kind, answers an `ActionCatalog`
   (`src/lib/gui/contract.ts`): every registered action, in catalog order
@@ -325,6 +333,22 @@ key is a 400.
   each filled and asked its own `available()`. A person who reaches no
   organization but holds a unit, or whose rows are all tenant rows, gets no
   actions, since every action is a staff route.
+
+An entry's `confirm` is the level of the step the GUI host shows before it
+sends, and the host sends the confirmation that step asks for. The route
+stays the authority and checks that confirmation on every write (ADR-006,
+decision 10), so a client other than the host sends what its entry's level
+asks for too. The typed deletes refuse a request without it: billing's
+period delete answers 428 `billing_delete_confirmation_required`, and
+community management's three (`DELETE /api/communities/[id]`,
+`/api/microgrids/[id]` and `/api/tenants/[id]`) answer 428
+`*_delete_confirmation_required`, each naming the record to type; a
+confirmation with another name, or none typed, answers 428
+`*_delete_name_mismatch`. Nothing is deleted on either. The community
+page and the tenants list send the name their dialogs ask for; no page
+deletes a microgrid, which only the GUI host's typed step does. Community management's access removal is a
+ceremony with nothing to tick or type, so its route has nothing in it to
+check.
 
 An entry's `availability` lists each check that refused it in `reasons`,
 and each check not decided in `unchecked`, so `available: true` means only
@@ -437,6 +461,20 @@ lists the module that exports its contribution in `SURFACE_MODULES` there,
 as an `@/` specifier. That module's exports must reach every function the
 plugin registered.
 
+A route described after it shipped may keep the answers it gave bad bodies
+before: `parseJsonBody` (`src/lib/validation/parse-body.ts`) takes the
+route's own refusals (`BodyRefusals`, its options' `refusals`), which
+replace its generic 400 for each issue the route answered itself.
+Community management's routes do (the `*_REFUSALS` in
+`src/lib/community-management/schemas.ts`, which its `schemas.test.ts`
+holds to the capability's own answers); a new route answers the generic
+400. A path segment that names a plugin's own entity
+kind resolves through the `organizationOf` the plugin contributes.
+Community management's `community.tenant-access`, a tenant's access to its
+unit, is the first: an org manager cannot read the role row it names, so
+it resolves only beside the tenant whose access list holds it
+(`tenantAccessOrganization`).
+
 The reverse direction is checked by
 `src/lib/runtime/__tests__/described-writes.test.ts`: every write handler
 under `src/app/api` on a released path is named by an action, or listed in
@@ -543,8 +581,9 @@ every page file without the layout, as a client-side navigation renders it,
 and fails when one opens a Supabase client or loads a view before the
 redirect. Every staff entry point of the host also
 refuses them by their roles: `surfaceRequest`, `installationRequest`, `pluginGate`,
-`visibleOrganizations` (none), `resolveSegments` and `dispatchView` for any
-view that is not a tenant view. A tenant view opened without `?unit=` by a
+`visibleOrganizations` (none), `resolveSegments`, `dispatchView` for any
+view that is not a tenant view, and `buildActionCatalog` (no actions, or a
+404 when the query names an organization or an entity, with nothing read). A tenant view opened without `?unit=` by a
 person with several units shows a choice of them, and one whose plugin is
 off for the unit's organization shows the "not in this release" page. The
 choice leaves out a unit whose organization has the tenant app, or a plugin

@@ -154,8 +154,12 @@ describe("the OpenAPI document", () => {
   });
 
   it("lets a request carry no body exactly where the route's handler reads an empty one as {}", () => {
-    // How the billing period delete reads it: (await request.clone().text()).trim() === "".
-    const readsEmpty = /\.text\(\)\)\.trim\(\)\s*===\s*(?:""|'')/;
+    // The ways a route reads an empty body today: inline, as the billing
+    // period delete does ((await request.clone().text()).trim() === "", or
+    // !== "" around the parse), or through parseJsonBody's whenEmpty option
+    // (src/lib/validation/parse-body.ts). If a route comes to read one another
+    // way, add it here, or this test stops seeing that route.
+    const readsEmpty = /\.text\(\)\)\.trim\(\)\s*[!=]==\s*(?:""|'')|\bwhenEmpty\s*:/;
     const routes = new Map([...surface.actions.values()].map(({ def }) => [`${def.method} ${def.path}`, def] as const));
     const reading = [...routes].flatMap(([key, def]) => {
       const text = readFileSync(path.join(REPO, "src/app", def.path, "route.ts"), "utf8");

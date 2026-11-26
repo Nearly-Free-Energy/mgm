@@ -19,7 +19,12 @@
  *      surface a `<Banner tone="destructive">` inline on the detail page
  *      using `data.error`.
  *   4. User types name, clicks Confirm → ConfirmDialog's internal async
- *      confirm fires `DELETE /api/<kind>/<id>`.
+ *      confirm fires `DELETE /api/<kind>/<id>` with the name typed, as
+ *      `{ confirmation: { acknowledged: [], typed } }`: the community and
+ *      microgrid routes refuse a delete without it (428), as the GUI host's
+ *      typed step sends it. The dialog enables Confirm only once the input,
+ *      trimmed, is the preview's name, so `typed` is that name. The
+ *      organization and edge routes read no body.
  *   5. DELETE 204 → `router.refresh()` then `router.push(<parent-path>)`
  *      with `?deleted=<kind>&name=<encoded-name>` so the parent page can
  *      render its success banner (AC-UI-7).
@@ -167,6 +172,10 @@ export function DeleteEntityButton({
     if (!preview) throw new Error("Delete preview is missing.");
     const res = await fetch(`${apiBaseFor(entity)}/${id}`, {
       method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        confirmation: { acknowledged: [], typed: preview.entity.name },
+      }),
     });
     if (res.status === 204) {
       // Bust the Server-Component cache for the CURRENT route, then push.

@@ -4,6 +4,8 @@ import {
   composeMetering,
   type MeteringResult,
 } from "@/lib/metering/compose";
+import { RecordOpeningRegisterBody } from "@/lib/metering/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 function mapError(error: Extract<MeteringResult<never>, { ok: false }>) {
   const { ok, status, ...body } = error;
@@ -20,16 +22,17 @@ function mapError(error: Extract<MeteringResult<never>, { ok: false }>) {
  * evidence before writing. Imports and live reads never invent this row —
  * without it, the billing engine reports the tenant as needing a seed
  * reading rather than billing zero.
+ *
+ * The body is `RecordOpeningRegisterBody` (`@/lib/metering/schemas`), the
+ * `metering.record-opening-register` action's input: a field of the wrong
+ * type, a missing one or an unknown one answers 400 `invalid_body`. The
+ * value's rules (0 or more, a time not in the future) stay the capability's.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const deviceId = typeof body.device_id === "string" ? body.device_id : "";
+  const parsed = await parseJsonBody(request, RecordOpeningRegisterBody);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
+  const deviceId = body.device_id;
   const supabase = await createClient();
   const { data: device } = await supabase
     .from("devices")

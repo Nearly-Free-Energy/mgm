@@ -254,9 +254,12 @@ function entryOf({ registered, params, reasons, unchecked }: Draft): CatalogEntr
  * each reason is the host's or the action's own copy. Before the catalog
  * joins the agent clients' allow-list (RFC #259 § 2: Track A and D1), refuse
  * an agent client `entity=` of the tenant, billingPeriod, lineItem and
- * paymentAttempt kinds, or give it the organization's catalog only: #133's
- * A0 data boundary keeps tenant, billing and payment references from any
- * model.
+ * paymentAttempt kinds and community management's `community.tenant-access`
+ * (a tenant's access to its unit, whose step names the address), or give it
+ * the organization's catalog only: #133's A0 data boundary keeps tenant,
+ * billing and payment references from any model. A plugin kind added later
+ * that names a tenant, a tenant's access, a bill or a payment joins this
+ * list.
  */
 export async function buildActionCatalog(ctx: HostContext, input: CatalogQuery): Promise<HostOutcome<ActionCatalog>> {
   requireIssued(ctx);

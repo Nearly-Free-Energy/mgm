@@ -21,6 +21,14 @@
       "description": "The routes of the actions Billing contributes."
     },
     {
+      "name": "community-management",
+      "description": "The routes of the actions Community management contributes."
+    },
+    {
+      "name": "metering",
+      "description": "The routes of the actions Metering contributes."
+    },
+    {
       "name": "payments",
       "description": "The routes of the actions Payments contributes."
     }
@@ -1682,6 +1690,1448 @@
         ]
       }
     },
+    "/api/communities": {
+      "post": {
+        "operationId": "postCommunities",
+        "tags": [
+          "community-management"
+        ],
+        "summary": "Add community",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "org_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                    "title": "Organization"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Name"
+                  },
+                  "address_line1": {
+                    "title": "Address line 1",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_line2": {
+                    "title": "Address line 2",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_city": {
+                    "title": "City",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_region": {
+                    "title": "Region",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_country": {
+                    "title": "Country",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_postal_code": {
+                    "title": "Postal code",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "geography_notes": {
+                    "title": "Geography notes",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "org_id",
+                  "name"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `community_management_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `community_management_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "community.create-community",
+            "title": "Add community",
+            "plugin": "community-management",
+            "target": "organization",
+            "method": "POST",
+            "path": "/api/communities",
+            "bind": {
+              "path": {},
+              "body": {
+                "org_id": "organization"
+              }
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "title": "Name"
+                },
+                "address_line1": {
+                  "title": "Address line 1",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_line2": {
+                  "title": "Address line 2",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_city": {
+                  "title": "City",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_region": {
+                  "title": "Region",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_country": {
+                  "title": "Country",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_postal_code": {
+                  "title": "Postal code",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "geography_notes": {
+                  "title": "Geography notes",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "write",
+            "confirm": "none",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "unsafe"
+          }
+        ]
+      }
+    },
+    "/api/communities/{id}": {
+      "patch": {
+        "operationId": "patchCommunitiesId",
+        "tags": [
+          "community-management"
+        ],
+        "summary": "Edit community",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the community the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "community"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Name"
+                  },
+                  "address_line1": {
+                    "title": "Address line 1",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_line2": {
+                    "title": "Address line 2",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_city": {
+                    "title": "City",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_region": {
+                    "title": "Region",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_country": {
+                    "title": "Country",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_postal_code": {
+                    "title": "Postal code",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "geography_notes": {
+                    "title": "Geography notes",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `community_management_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `community_management_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "community.update-community",
+            "title": "Edit community",
+            "plugin": "community-management",
+            "target": "community",
+            "method": "PATCH",
+            "path": "/api/communities/[id]",
+            "bind": {
+              "path": {
+                "id": "community"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "title": "Name"
+                },
+                "address_line1": {
+                  "title": "Address line 1",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_line2": {
+                  "title": "Address line 2",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_city": {
+                  "title": "City",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_region": {
+                  "title": "Region",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_country": {
+                  "title": "Country",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_postal_code": {
+                  "title": "Postal code",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "geography_notes": {
+                  "title": "Geography notes",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "write",
+            "confirm": "none",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteCommunitiesId",
+        "tags": [
+          "community-management"
+        ],
+        "summary": "Delete community",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the community the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "community"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "description": "The route reads an empty body as `{}`.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "confirmation": {
+                    "type": "object",
+                    "properties": {
+                      "acknowledged": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 64
+                        }
+                      },
+                      "typed": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "acknowledged"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `community_management_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `community_management_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "community.delete-community",
+            "title": "Delete community",
+            "plugin": "community-management",
+            "target": "community",
+            "method": "DELETE",
+            "path": "/api/communities/[id]",
+            "bind": {
+              "path": {
+                "id": "community"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "destructive",
+            "confirm": "typed",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      }
+    },
+    "/api/devices": {
+      "post": {
+        "operationId": "postDevices",
+        "tags": [
+          "metering"
+        ],
+        "summary": "Save newly discovered devices",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "edgeId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                  },
+                  "devices": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "componentId": {
+                          "type": "string",
+                          "title": "OpenEMS component id",
+                          "description": "As OpenEMS reports it: 1 to 64 characters: letters, digits, '_', '.', ':' or '-'"
+                        },
+                        "factoryId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "title": "OpenEMS factory id"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "openemsChannelAddress": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "title": "Channel address"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "deviceType": {
+                          "type": "string",
+                          "enum": [
+                            "consumption_meter",
+                            "grid_meter",
+                            "pv_meter",
+                            "battery",
+                            "inverter",
+                            "ev_charger",
+                            "other"
+                          ],
+                          "title": "Device type"
+                        },
+                        "name": {
+                          "type": "string",
+                          "title": "Name",
+                          "description": "Blank: the component id"
+                        }
+                      },
+                      "required": [
+                        "componentId",
+                        "deviceType",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "title": "Devices",
+                    "description": "Devices discovered on the edge and not saved yet. A list naming a saved device is refused whole; change a saved device with metering.edit-device."
+                  }
+                },
+                "required": [
+                  "edgeId",
+                  "devices"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `metering_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "metering_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `metering_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "metering_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "metering.save-devices",
+            "title": "Save newly discovered devices",
+            "plugin": "metering",
+            "target": "edge",
+            "method": "POST",
+            "path": "/api/devices",
+            "bind": {
+              "path": {},
+              "body": {
+                "edgeId": "edge"
+              }
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "devices": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "componentId": {
+                        "type": "string",
+                        "title": "OpenEMS component id",
+                        "description": "As OpenEMS reports it: 1 to 64 characters: letters, digits, '_', '.', ':' or '-'"
+                      },
+                      "factoryId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "title": "OpenEMS factory id"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "openemsChannelAddress": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "title": "Channel address"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "deviceType": {
+                        "type": "string",
+                        "enum": [
+                          "consumption_meter",
+                          "grid_meter",
+                          "pv_meter",
+                          "battery",
+                          "inverter",
+                          "ev_charger",
+                          "other"
+                        ],
+                        "title": "Device type"
+                      },
+                      "name": {
+                        "type": "string",
+                        "title": "Name",
+                        "description": "Blank: the component id"
+                      }
+                    },
+                    "required": [
+                      "componentId",
+                      "deviceType",
+                      "name"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "title": "Devices",
+                  "description": "Devices discovered on the edge and not saved yet. A list naming a saved device is refused whole; change a saved device with metering.edit-device."
+                }
+              },
+              "required": [
+                "devices"
+              ],
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "write",
+            "confirm": "none",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      }
+    },
+    "/api/devices/{id}": {
+      "patch": {
+        "operationId": "patchDevicesId",
+        "tags": [
+          "metering"
+        ],
+        "summary": "Edit device",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the device the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "device"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "device_type": {
+                    "type": "string",
+                    "enum": [
+                      "consumption_meter",
+                      "grid_meter",
+                      "pv_meter",
+                      "battery",
+                      "inverter",
+                      "ev_charger",
+                      "other"
+                    ],
+                    "title": "Device type"
+                  },
+                  "name": {
+                    "type": "string",
+                    "pattern": "\\S",
+                    "title": "Name"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `metering_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "metering_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `metering_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "metering_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "metering.edit-device",
+            "title": "Edit device",
+            "plugin": "metering",
+            "target": "device",
+            "method": "PATCH",
+            "path": "/api/devices/[id]",
+            "bind": {
+              "path": {
+                "id": "device"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "device_type": {
+                  "type": "string",
+                  "enum": [
+                    "consumption_meter",
+                    "grid_meter",
+                    "pv_meter",
+                    "battery",
+                    "inverter",
+                    "ev_charger",
+                    "other"
+                  ],
+                  "title": "Device type"
+                },
+                "name": {
+                  "type": "string",
+                  "pattern": "\\S",
+                  "title": "Name"
+                }
+              },
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "write",
+            "confirm": "none",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      }
+    },
+    "/api/edges/{id}": {
+      "patch": {
+        "operationId": "patchEdgesId",
+        "tags": [
+          "metering"
+        ],
+        "summary": "Edit edge",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the edge the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "edge"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "title": "Name"
+                  },
+                  "role": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "title": "Role"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `metering_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "metering_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `metering_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "metering_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "metering.edit-edge",
+            "title": "Edit edge",
+            "plugin": "metering",
+            "target": "edge",
+            "method": "PATCH",
+            "path": "/api/edges/[id]",
+            "bind": {
+              "path": {
+                "id": "edge"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "title": "Name"
+                },
+                "role": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "title": "Role"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "write",
+            "confirm": "none",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteEdgesId",
+        "tags": [
+          "metering"
+        ],
+        "summary": "Delete edge",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the edge the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "edge"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "description": "The route reads an empty body as `{}`.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "confirmation": {
+                    "type": "object",
+                    "properties": {
+                      "acknowledged": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 64
+                        }
+                      },
+                      "typed": {
+                        "type": "string",
+                        "maxLength": 200
+                      }
+                    },
+                    "required": [
+                      "acknowledged"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `metering_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "metering_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `metering_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "metering_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "metering.delete-edge",
+            "title": "Delete edge",
+            "plugin": "metering",
+            "target": "edge",
+            "method": "DELETE",
+            "path": "/api/edges/[id]",
+            "bind": {
+              "path": {
+                "id": "edge"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "destructive",
+            "confirm": "typed",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      }
+    },
     "/api/gui/catalog": {
       "get": {
         "operationId": "getGuiCatalog",
@@ -2027,7 +3477,7 @@
             ]
           },
           "409": {
-            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n- `gui_action_refused`: The action's own prepare refused it, for a reason other than not finding its record. The status and the message are the action's.\n- `gui_action_unavailable`: The action's own available() said no for this record; the message says why.",
+            "description": "- `billing_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n- `community_management_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n- `gui_action_refused`: The action's own prepare refused it, for a reason other than not finding its record. The status and the message are the action's.\n- `gui_action_unavailable`: The action's own available() said no for this record; the message says why.\n- `metering_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2037,8 +3487,10 @@
             },
             "x-mgm-codes": [
               "billing_disabled",
+              "community_management_disabled",
               "gui_action_refused",
-              "gui_action_unavailable"
+              "gui_action_unavailable",
+              "metering_disabled"
             ]
           },
           "413": {
@@ -2070,7 +3522,7 @@
             ]
           },
           "503": {
-            "description": "- `billing_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n- `gui_action_refused`: The action's own prepare refused it, for a reason other than not finding its record. The status and the message are the action's.\n- `gui_unavailable`: Something the answer needs could not be read right now. Nothing was written; try again.\n- `payments_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.",
+            "description": "- `billing_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n- `community_management_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n- `gui_action_refused`: The action's own prepare refused it, for a reason other than not finding its record. The status and the message are the action's.\n- `gui_unavailable`: Something the answer needs could not be read right now. Nothing was written; try again.\n- `metering_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n- `payments_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2080,8 +3532,10 @@
             },
             "x-mgm-codes": [
               "billing_gate_unavailable",
+              "community_management_gate_unavailable",
               "gui_action_refused",
               "gui_unavailable",
+              "metering_gate_unavailable",
               "payments_gate_unavailable"
             ]
           }
@@ -2443,6 +3897,1144 @@
         "x-mgm-released": true
       }
     },
+    "/api/meter-readings/opening": {
+      "post": {
+        "operationId": "postMeterReadingsOpening",
+        "tags": [
+          "metering"
+        ],
+        "summary": "Record the opening register",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "device_id": {
+                    "type": "string"
+                  },
+                  "reading_kwh": {
+                    "type": "number",
+                    "title": "Opening register (kWh)",
+                    "description": "The meter's register at the time read, 0 or more"
+                  },
+                  "read_at": {
+                    "type": "string",
+                    "title": "Read at",
+                    "description": "When the register was read: an ISO 8601 time with its offset, not in the future"
+                  }
+                },
+                "required": [
+                  "device_id",
+                  "reading_kwh",
+                  "read_at"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `metering_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "metering_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `metering_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "metering_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "metering.record-opening-register",
+            "title": "Record the opening register",
+            "plugin": "metering",
+            "target": "device",
+            "method": "POST",
+            "path": "/api/meter-readings/opening",
+            "bind": {
+              "path": {},
+              "body": {
+                "device_id": "device"
+              }
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "reading_kwh": {
+                  "type": "number",
+                  "title": "Opening register (kWh)",
+                  "description": "The meter's register at the time read, 0 or more"
+                },
+                "read_at": {
+                  "type": "string",
+                  "title": "Read at",
+                  "description": "When the register was read: an ISO 8601 time with its offset, not in the future"
+                }
+              },
+              "required": [
+                "reading_kwh",
+                "read_at"
+              ],
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "money",
+            "confirm": "confirm",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      }
+    },
+    "/api/microgrids": {
+      "post": {
+        "operationId": "postMicrogrids",
+        "tags": [
+          "community-management"
+        ],
+        "summary": "Add microgrid",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "community_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                    "title": "Community"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Name"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Currency",
+                    "description": "An ISO 4217 code, such as UGX."
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Time zone",
+                    "description": "An IANA zone id, such as Africa/Kampala, or UTC."
+                  },
+                  "lat": {
+                    "title": "Latitude",
+                    "type": [
+                      "number",
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "lng": {
+                    "title": "Longitude",
+                    "type": [
+                      "number",
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_line1": {
+                    "title": "Address line 1",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_line2": {
+                    "title": "Address line 2",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_city": {
+                    "title": "City",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_region": {
+                    "title": "Region",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_country": {
+                    "title": "Country",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_postal_code": {
+                    "title": "Postal code",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "community_id",
+                  "name",
+                  "currency"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `community_management_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `community_management_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "community.create-microgrid",
+            "title": "Add microgrid",
+            "plugin": "community-management",
+            "target": "community",
+            "method": "POST",
+            "path": "/api/microgrids",
+            "bind": {
+              "path": {},
+              "body": {
+                "community_id": "community"
+              }
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "title": "Name"
+                },
+                "currency": {
+                  "type": "string",
+                  "minLength": 1,
+                  "title": "Currency",
+                  "description": "An ISO 4217 code, such as UGX."
+                },
+                "timezone": {
+                  "type": "string",
+                  "minLength": 1,
+                  "title": "Time zone",
+                  "description": "An IANA zone id, such as Africa/Kampala, or UTC."
+                },
+                "lat": {
+                  "title": "Latitude",
+                  "type": [
+                    "number",
+                    "string",
+                    "null"
+                  ]
+                },
+                "lng": {
+                  "title": "Longitude",
+                  "type": [
+                    "number",
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_line1": {
+                  "title": "Address line 1",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_line2": {
+                  "title": "Address line 2",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_city": {
+                  "title": "City",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_region": {
+                  "title": "Region",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_country": {
+                  "title": "Country",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_postal_code": {
+                  "title": "Postal code",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "name",
+                "currency"
+              ],
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "write",
+            "confirm": "none",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      }
+    },
+    "/api/microgrids/{id}": {
+      "patch": {
+        "operationId": "patchMicrogridsId",
+        "tags": [
+          "community-management"
+        ],
+        "summary": "Edit microgrid",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the microgrid the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "microgrid"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Name"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Currency",
+                    "description": "An ISO 4217 code, such as UGX."
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Time zone",
+                    "description": "An IANA zone id, such as Africa/Kampala, or UTC."
+                  },
+                  "address_line1": {
+                    "title": "Address line 1",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_line2": {
+                    "title": "Address line 2",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_city": {
+                    "title": "City",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_region": {
+                    "title": "Region",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_country": {
+                    "title": "Country",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_postal_code": {
+                    "title": "Postal code",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "lat": {
+                    "title": "Latitude",
+                    "description": "Blank text or null clears it.",
+                    "type": [
+                      "number",
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "lng": {
+                    "title": "Longitude",
+                    "description": "Blank text or null clears it.",
+                    "type": [
+                      "number",
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `community_management_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `community_management_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "community.update-microgrid",
+            "title": "Edit microgrid",
+            "plugin": "community-management",
+            "target": "microgrid",
+            "method": "PATCH",
+            "path": "/api/microgrids/[id]",
+            "bind": {
+              "path": {
+                "id": "microgrid"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "title": "Name"
+                },
+                "currency": {
+                  "type": "string",
+                  "minLength": 1,
+                  "title": "Currency",
+                  "description": "An ISO 4217 code, such as UGX."
+                },
+                "timezone": {
+                  "type": "string",
+                  "minLength": 1,
+                  "title": "Time zone",
+                  "description": "An IANA zone id, such as Africa/Kampala, or UTC."
+                },
+                "address_line1": {
+                  "title": "Address line 1",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_line2": {
+                  "title": "Address line 2",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_city": {
+                  "title": "City",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_region": {
+                  "title": "Region",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_country": {
+                  "title": "Country",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_postal_code": {
+                  "title": "Postal code",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "lat": {
+                  "title": "Latitude",
+                  "description": "Blank text or null clears it.",
+                  "type": [
+                    "number",
+                    "string",
+                    "null"
+                  ]
+                },
+                "lng": {
+                  "title": "Longitude",
+                  "description": "Blank text or null clears it.",
+                  "type": [
+                    "number",
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "write",
+            "confirm": "none",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteMicrogridsId",
+        "tags": [
+          "community-management"
+        ],
+        "summary": "Delete microgrid",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the microgrid the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "microgrid"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "description": "The route reads an empty body as `{}`.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "confirmation": {
+                    "type": "object",
+                    "properties": {
+                      "acknowledged": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 64
+                        }
+                      },
+                      "typed": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "acknowledged"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `community_management_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `community_management_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "community.delete-microgrid",
+            "title": "Delete microgrid",
+            "plugin": "community-management",
+            "target": "microgrid",
+            "method": "DELETE",
+            "path": "/api/microgrids/[id]",
+            "bind": {
+              "path": {
+                "id": "microgrid"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "destructive",
+            "confirm": "typed",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      }
+    },
+    "/api/microgrids/{id}/edges/register": {
+      "post": {
+        "operationId": "postMicrogridsIdEdgesRegister",
+        "tags": [
+          "metering"
+        ],
+        "summary": "Register edges",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the microgrid the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "microgrid"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "edges": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "openems_edge_id": {
+                          "type": "string",
+                          "pattern": "\\S",
+                          "title": "OpenEMS edge id",
+                          "description": "As OpenEMS reports it: 1 to 64 characters: letters, digits, '_', '.', ':' or '-'"
+                        },
+                        "name": {
+                          "type": "string",
+                          "pattern": "\\S",
+                          "title": "Name"
+                        },
+                        "role": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "title": "Role"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "openems_edge_id",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "title": "Edges"
+                  }
+                },
+                "required": [
+                  "edges"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `metering_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "metering_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `metering_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "metering_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "metering.register-edges",
+            "title": "Register edges",
+            "plugin": "metering",
+            "target": "microgrid",
+            "method": "POST",
+            "path": "/api/microgrids/[id]/edges/register",
+            "bind": {
+              "path": {
+                "id": "microgrid"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "edges": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "openems_edge_id": {
+                        "type": "string",
+                        "pattern": "\\S",
+                        "title": "OpenEMS edge id",
+                        "description": "As OpenEMS reports it: 1 to 64 characters: letters, digits, '_', '.', ':' or '-'"
+                      },
+                      "name": {
+                        "type": "string",
+                        "pattern": "\\S",
+                        "title": "Name"
+                      },
+                      "role": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "title": "Role"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "openems_edge_id",
+                      "name"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "title": "Edges"
+                }
+              },
+              "required": [
+                "edges"
+              ],
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "write",
+            "confirm": "none",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      }
+    },
     "/api/microgrids/{id}/grid-tariffs": {
       "post": {
         "operationId": "postMicrogridsIdGridTariffs",
@@ -2670,6 +5262,461 @@
             "targeted": false,
             "prepareAgainOn": [],
             "repeat": "safe"
+          }
+        ]
+      }
+    },
+    "/api/microgrids/{id}/openems-backend": {
+      "put": {
+        "operationId": "putMicrogridsIdOpenemsBackend",
+        "tags": [
+          "metering"
+        ],
+        "summary": "Save the OpenEMS connection",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the microgrid the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "microgrid"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "cloud_aws",
+                      "direct_url"
+                    ],
+                    "title": "Connection type"
+                  },
+                  "backendUrl": {
+                    "type": "string",
+                    "pattern": "\\S",
+                    "title": "Backend address",
+                    "description": "An absolute https:// address (http:// for localhost only), with no credentials in it"
+                  },
+                  "known_edge_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "title": "Known edge ids",
+                    "description": "Edge ids to check on the backend before saving. Leave empty to list the edges with the OpenEMS UI username and password."
+                  },
+                  "region": {
+                    "type": "string",
+                    "title": "AWS region"
+                  },
+                  "accessKeyId": {
+                    "type": "string",
+                    "title": "AWS access key id"
+                  },
+                  "secretAccessKey": {
+                    "type": "string",
+                    "title": "AWS secret access key",
+                    "writeOnly": true
+                  },
+                  "basicAuthUsername": {
+                    "type": "string",
+                    "title": "OpenEMS UI username"
+                  },
+                  "basicAuthPassword": {
+                    "type": "string",
+                    "title": "OpenEMS UI password",
+                    "writeOnly": true
+                  },
+                  "bearerToken": {
+                    "type": "string",
+                    "title": "Bearer token",
+                    "writeOnly": true
+                  },
+                  "keycloakTokenUrl": {
+                    "type": "string",
+                    "title": "Keycloak token address"
+                  },
+                  "keycloakClientId": {
+                    "type": "string",
+                    "title": "Keycloak client id"
+                  },
+                  "keycloakClientSecret": {
+                    "type": "string",
+                    "title": "Keycloak client secret",
+                    "writeOnly": true
+                  },
+                  "confirmed_name": {
+                    "type": "string",
+                    "title": "Microgrid name, typed",
+                    "deprecated": true,
+                    "description": "The OpenEMS Backend page's field. Other clients send the name in confirmation.typed, which the route reads instead whenever a confirmation is sent."
+                  },
+                  "confirmation": {
+                    "type": "object",
+                    "properties": {
+                      "acknowledged": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 64
+                        }
+                      },
+                      "typed": {
+                        "type": "string",
+                        "maxLength": 200
+                      }
+                    },
+                    "required": [
+                      "acknowledged"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "type",
+                  "backendUrl",
+                  "known_edge_ids"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `metering_connection_name_required`: The route's own: what the person confirmed changed after prepare. Prepare the action again and confirm the new step; the route never takes the old one.\n- `metering_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "metering_connection_name_required",
+              "metering_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `metering_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "metering_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "metering.save-connection",
+            "title": "Save the OpenEMS connection",
+            "plugin": "metering",
+            "target": "microgrid",
+            "method": "PUT",
+            "path": "/api/microgrids/[id]/openems-backend",
+            "bind": {
+              "path": {
+                "id": "microgrid"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "cloud_aws",
+                    "direct_url"
+                  ],
+                  "title": "Connection type"
+                },
+                "backendUrl": {
+                  "type": "string",
+                  "pattern": "\\S",
+                  "title": "Backend address",
+                  "description": "An absolute https:// address (http:// for localhost only), with no credentials in it"
+                },
+                "known_edge_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Known edge ids",
+                  "description": "Edge ids to check on the backend before saving. Leave empty to list the edges with the OpenEMS UI username and password."
+                },
+                "region": {
+                  "type": "string",
+                  "title": "AWS region"
+                },
+                "accessKeyId": {
+                  "type": "string",
+                  "title": "AWS access key id"
+                },
+                "secretAccessKey": {
+                  "type": "string",
+                  "title": "AWS secret access key",
+                  "writeOnly": true
+                },
+                "basicAuthUsername": {
+                  "type": "string",
+                  "title": "OpenEMS UI username"
+                },
+                "basicAuthPassword": {
+                  "type": "string",
+                  "title": "OpenEMS UI password",
+                  "writeOnly": true
+                },
+                "bearerToken": {
+                  "type": "string",
+                  "title": "Bearer token",
+                  "writeOnly": true
+                },
+                "keycloakTokenUrl": {
+                  "type": "string",
+                  "title": "Keycloak token address"
+                },
+                "keycloakClientId": {
+                  "type": "string",
+                  "title": "Keycloak client id"
+                },
+                "keycloakClientSecret": {
+                  "type": "string",
+                  "title": "Keycloak client secret",
+                  "writeOnly": true
+                },
+                "confirmed_name": {
+                  "type": "string",
+                  "title": "Microgrid name, typed",
+                  "deprecated": true,
+                  "description": "The OpenEMS Backend page's field. Other clients send the name in confirmation.typed, which the route reads instead whenever a confirmation is sent."
+                }
+              },
+              "required": [
+                "type",
+                "backendUrl",
+                "known_edge_ids"
+              ],
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "write",
+            "confirm": "ceremony",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [
+              "metering_connection_name_required"
+            ],
+            "repeat": "unsafe"
+          }
+        ]
+      }
+    },
+    "/api/microgrids/{id}/openems-backend/discover": {
+      "post": {
+        "operationId": "postMicrogridsIdOpenemsBackendDiscover",
+        "tags": [
+          "metering"
+        ],
+        "summary": "Check the OpenEMS connection",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the microgrid the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "microgrid"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "description": "The route reads an empty body as `{}`.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `metering_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "metering_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `metering_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "metering_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "metering.check-connection",
+            "title": "Check the OpenEMS connection",
+            "plugin": "metering",
+            "target": "microgrid",
+            "method": "POST",
+            "path": "/api/microgrids/[id]/openems-backend/discover",
+            "bind": {
+              "path": {
+                "id": "microgrid"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "write",
+            "confirm": "none",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "unsafe"
           }
         ]
       }
@@ -3236,6 +6283,1287 @@
             "inputVersion": 1,
             "risk": "write",
             "confirm": "none",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      }
+    },
+    "/api/tenants/with-meter": {
+      "post": {
+        "operationId": "postTenantsWithMeter",
+        "tags": [
+          "community-management"
+        ],
+        "summary": "Add tenant",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "microgrid_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Microgrid"
+                  },
+                  "display_name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Name"
+                  },
+                  "device_id": {
+                    "title": "Meter",
+                    "description": "The meter's device id; null or blank for a tenant with no meter.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "primary_phone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Phone"
+                  },
+                  "account_number": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 30
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Account number"
+                  },
+                  "meter_serial": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 50
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Meter serial"
+                  },
+                  "meter_type": {
+                    "title": "Meter type",
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 50
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "customer_type": {
+                    "title": "Customer type",
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "residential",
+                          "commercial"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "primary_email": {
+                    "title": "Email",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_line1": {
+                    "title": "Address line 1",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_line2": {
+                    "title": "Address line 2",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_city": {
+                    "title": "City",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_region": {
+                    "title": "Region",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_country": {
+                    "title": "Country",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_postal_code": {
+                    "title": "Postal code",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "unit_label": {
+                    "title": "Unit",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "geography_notes": {
+                    "title": "Geography notes",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "microgrid_id",
+                  "display_name",
+                  "primary_phone"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `community_management_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `community_management_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "community.create-tenant",
+            "title": "Add tenant",
+            "plugin": "community-management",
+            "target": "microgrid",
+            "method": "POST",
+            "path": "/api/tenants/with-meter",
+            "bind": {
+              "path": {},
+              "body": {
+                "microgrid_id": "microgrid"
+              }
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "display_name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "title": "Name"
+                },
+                "device_id": {
+                  "title": "Meter",
+                  "description": "The meter's device id; null or blank for a tenant with no meter.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "primary_phone": {
+                  "type": "string",
+                  "minLength": 1,
+                  "title": "Phone"
+                },
+                "account_number": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 30
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Account number"
+                },
+                "meter_serial": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Meter serial"
+                },
+                "meter_type": {
+                  "title": "Meter type",
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "customer_type": {
+                  "title": "Customer type",
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "residential",
+                        "commercial"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "primary_email": {
+                  "title": "Email",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_line1": {
+                  "title": "Address line 1",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_line2": {
+                  "title": "Address line 2",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_city": {
+                  "title": "City",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_region": {
+                  "title": "Region",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_country": {
+                  "title": "Country",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_postal_code": {
+                  "title": "Postal code",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "unit_label": {
+                  "title": "Unit",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "geography_notes": {
+                  "title": "Geography notes",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "display_name",
+                "primary_phone"
+              ],
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "write",
+            "confirm": "none",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "unsafe"
+          }
+        ]
+      }
+    },
+    "/api/tenants/{id}": {
+      "patch": {
+        "operationId": "patchTenantsId",
+        "tags": [
+          "community-management"
+        ],
+        "summary": "Edit tenant",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the tenant the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "tenant"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "display_name": {
+                    "title": "Name",
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "device_id": {
+                    "title": "Meter",
+                    "description": "The meter's device id; null or blank text unlinks the tenant's meter.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "primary_email": {
+                    "title": "Email",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_line1": {
+                    "title": "Address line 1",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_line2": {
+                    "title": "Address line 2",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "unit_label": {
+                    "title": "Unit",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_city": {
+                    "title": "City",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_region": {
+                    "title": "Region",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_country": {
+                    "title": "Country",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address_postal_code": {
+                    "title": "Postal code",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "geography_notes": {
+                    "title": "Geography notes",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "account_number": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 30
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Account number"
+                  },
+                  "meter_serial": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 50
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Meter serial"
+                  },
+                  "primary_phone": {
+                    "title": "Phone",
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "meter_type": {
+                    "title": "Meter type",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 50
+                  },
+                  "customer_type": {
+                    "title": "Customer type",
+                    "type": "string",
+                    "enum": [
+                      "residential",
+                      "commercial"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `community_management_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `community_management_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "community.update-tenant",
+            "title": "Edit tenant",
+            "plugin": "community-management",
+            "target": "tenant",
+            "method": "PATCH",
+            "path": "/api/tenants/[id]",
+            "bind": {
+              "path": {
+                "id": "tenant"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "display_name": {
+                  "title": "Name",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "device_id": {
+                  "title": "Meter",
+                  "description": "The meter's device id; null or blank text unlinks the tenant's meter.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "primary_email": {
+                  "title": "Email",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_line1": {
+                  "title": "Address line 1",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_line2": {
+                  "title": "Address line 2",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "unit_label": {
+                  "title": "Unit",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_city": {
+                  "title": "City",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_region": {
+                  "title": "Region",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_country": {
+                  "title": "Country",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "address_postal_code": {
+                  "title": "Postal code",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "geography_notes": {
+                  "title": "Geography notes",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "account_number": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 30
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Account number"
+                },
+                "meter_serial": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Meter serial"
+                },
+                "primary_phone": {
+                  "title": "Phone",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "meter_type": {
+                  "title": "Meter type",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 50
+                },
+                "customer_type": {
+                  "title": "Customer type",
+                  "type": "string",
+                  "enum": [
+                    "residential",
+                    "commercial"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "write",
+            "confirm": "none",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteTenantsId",
+        "tags": [
+          "community-management"
+        ],
+        "summary": "Delete tenant",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the tenant the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "tenant"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "description": "The route reads an empty body as `{}`.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "confirmation": {
+                    "type": "object",
+                    "properties": {
+                      "acknowledged": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 64
+                        }
+                      },
+                      "typed": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "acknowledged"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `community_management_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `community_management_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "community.delete-tenant",
+            "title": "Delete tenant",
+            "plugin": "community-management",
+            "target": "tenant",
+            "method": "DELETE",
+            "path": "/api/tenants/[id]",
+            "bind": {
+              "path": {
+                "id": "tenant"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "destructive",
+            "confirm": "typed",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      }
+    },
+    "/api/tenants/{id}/access": {
+      "post": {
+        "operationId": "postTenantsIdAccess",
+        "tags": [
+          "community-management"
+        ],
+        "summary": "Give access",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the tenant the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "tenant"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "title": "Email address",
+                    "type": "string",
+                    "maxLength": 254
+                  }
+                },
+                "required": [
+                  "email"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `community_management_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `community_management_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "community.grant-tenant-access",
+            "title": "Give access",
+            "plugin": "community-management",
+            "target": "tenant",
+            "method": "POST",
+            "path": "/api/tenants/[id]/access",
+            "bind": {
+              "path": {
+                "id": "tenant"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "email": {
+                  "title": "Email address",
+                  "type": "string",
+                  "maxLength": 254
+                }
+              },
+              "required": [
+                "email"
+              ],
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "external",
+            "confirm": "confirm",
+            "humanOnly": true,
+            "targeted": false,
+            "prepareAgainOn": [],
+            "repeat": "safe"
+          }
+        ]
+      }
+    },
+    "/api/tenants/{id}/access/{accessId}": {
+      "delete": {
+        "operationId": "deleteTenantsIdAccessAccessId",
+        "tags": [
+          "community-management"
+        ],
+        "summary": "Remove access",
+        "description": "The route of one action, listed under `x-mgm-actions` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.\n\nThe answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the tenant the action is sent for.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "x-mgm-entity-kind": "tenant"
+          },
+          {
+            "name": "accessId",
+            "in": "path",
+            "required": true,
+            "description": "The id of the community.tenant-access the action is sent for.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            },
+            "x-mgm-entity-kind": "community.tenant-access"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "description": "The route reads an empty body as `{}`.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "confirmation": {
+                    "type": "object",
+                    "properties": {
+                      "acknowledged": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 64
+                        }
+                      }
+                    },
+                    "required": [
+                      "acknowledged"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "- `invalid_body`: The body is not JSON, or the action's input refuses it. `error` describes the first problem, and `field` names the top-level field it is in, when there is one.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "invalid_body"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "401": {
+            "description": "Middleware answers a request with no session `{ error }`, with no code, before the route runs.\n\nThe route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionRefusal"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionRequired"
+                    }
+                  ]
+                }
+              }
+            },
+            "x-mgm-codes": [],
+            "x-mgm-codes-complete": false
+          },
+          "409": {
+            "description": "- `community_management_disabled`: The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_disabled"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "503": {
+            "description": "- `community_management_gate_unavailable`: Whether the plugin is on could not be read, so nothing was done. Try again.\n\nAnd refusals of the route's own, which this document does not list yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            },
+            "x-mgm-codes": [
+              "community_management_gate_unavailable"
+            ],
+            "x-mgm-codes-complete": false
+          },
+          "2XX": {
+            "description": "The route did the write."
+          },
+          "default": {
+            "description": "Any other refusal: the route's own, at a status not described above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionRefusal"
+                }
+              }
+            }
+          }
+        },
+        "x-mgm-released": true,
+        "x-mgm-actions": [
+          {
+            "id": "community.revoke-tenant-access",
+            "title": "Remove access",
+            "plugin": "community-management",
+            "target": "tenant",
+            "method": "DELETE",
+            "path": "/api/tenants/[id]/access/[accessId]",
+            "bind": {
+              "path": {
+                "id": "tenant",
+                "accessId": "community.tenant-access"
+              },
+              "body": {}
+            },
+            "input": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            },
+            "inputVersion": 1,
+            "risk": "write",
+            "confirm": "ceremony",
             "humanOnly": true,
             "targeted": false,
             "prepareAgainOn": [],
@@ -6684,6 +11012,26 @@
     },
     {
       "code": "billing_gate_unavailable",
+      "status": [
+        503
+      ],
+      "reasons": [
+        "healthy"
+      ],
+      "meaning": "Whether the plugin is on could not be read, so nothing was done. Try again."
+    },
+    {
+      "code": "community_management_disabled",
+      "status": [
+        409
+      ],
+      "reasons": [
+        "enabled"
+      ],
+      "meaning": "The plugin is off for the organization the request targets. Its records are kept, and it is turned on in Settings → Plugins."
+    },
+    {
+      "code": "community_management_gate_unavailable",
       "status": [
         503
       ],

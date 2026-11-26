@@ -499,16 +499,29 @@ function hostOperation(route: HostRoute, surface: DescribedSurface, gated: GateL
 // ── The actions' routes ─────────────────────────────────────────────────────
 
 /**
- * The action routes, as `METHOD /path/[segment]`, that read an empty body
- * as `{}`, so a request to them may carry none. Every other action route
- * parses its body with parseJsonBody (gui-surface.test.ts, check 2), which
- * refuses an empty one, so its body is required. The billing period delete
- * reads nothing as a request for the name to type
- * (src/app/api/billing-periods/[periodId]/route.ts; its delete-route.test.ts
- * pins it). openapi.test.ts fails while this list and the action route
- * handlers that read an empty body disagree.
+ * The action routes, as `METHOD /path/[segment]`, that accept an empty body,
+ * so a request to them may carry none. Every other action route parses its
+ * body with parseJsonBody (gui-surface.test.ts, check 2), which refuses an
+ * empty one, so its body is required.
+ * - The billing period delete and community management's three typed
+ *   deletes read nothing as a request for the name to type, and answer 428
+ *   (src/app/api/billing-periods/[periodId]/route.ts and the community,
+ *   microgrid and tenant routes).
+ * - The edge delete and the connection check read nothing as `{}` through
+ *   parseJsonBody's `whenEmpty`, since the pages send them bare.
+ * - The access removal reads nothing as a removal with no confirmation.
+ * openapi.test.ts fails while this list and the action route handlers that
+ * read an empty body disagree.
  */
-export const EMPTY_BODY_ROUTES: ReadonlySet<string> = new Set(["DELETE /api/billing-periods/[periodId]"]);
+export const EMPTY_BODY_ROUTES: ReadonlySet<string> = new Set([
+  "DELETE /api/billing-periods/[periodId]",
+  "DELETE /api/communities/[id]",
+  "DELETE /api/edges/[id]",
+  "DELETE /api/microgrids/[id]",
+  "DELETE /api/tenants/[id]",
+  "DELETE /api/tenants/[id]/access/[accessId]",
+  "POST /api/microgrids/[id]/openems-backend/discover",
+]);
 
 /** The body of the actions sent to one route: the same for all of them, since the route parses one schema. */
 function routeBody(actions: readonly RegisteredAction[]): JsonObject {
