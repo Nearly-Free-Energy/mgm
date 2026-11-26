@@ -819,6 +819,9 @@ export class MeteringCapability implements MeteringCapabilityContract {
         sources: reader.availability,
         resolutionMinutes: SITE_RESOLUTION_MINUTES,
         nowMs,
+        // The meters asked for, so one the provider leaves out is counted
+        // as missing rather than dropped.
+        houseMeterIds: reader.sources.houseMeters.map((meter) => meter.id),
       });
       const read: SiteDayReadFacts = {
         zone,

@@ -563,6 +563,32 @@ describe("MeteringCapability.getSiteDay", () => {
       expect(result.data.sources.houses).toBe(true);
     });
 
+    it("counts a linked meter the provider left out of its samples as missing", async () => {
+      const dayStart = Date.parse("2026-10-31T21:00:00Z"); // 00:00 1 Nov in Kampala
+      const timestamps = Array.from({ length: 288 }, (_, i) => dayStart + i * 5 * 60_000);
+      const samples: SiteSamples = {
+        ...emptySamples(),
+        timestamps,
+        batterySocPct: timestamps.map(() => 60),
+        batteryPowerW: timestamps.map(() => 0),
+        gridPowerW: timestamps.map(() => 0),
+        gridVoltageV: timestamps.map(() => 230),
+        loadPowerW: timestamps.map(() => null),
+        pvPowerW: timestamps.map(() => null),
+        // No series for METER_ID, though it was asked for.
+        houseEnergyWh: {},
+      };
+      const { capability } = setup({
+        repo: { getHouseMeterIds: async () => [METER_ID] },
+        getSiteSamples: async () => samples,
+      });
+      const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+      if (!result.ok) throw new Error(`expected a site day, got ${JSON.stringify(result)}`);
+      expect(result.data.sources).toMatchObject({ houses: true, houseMetersUnreadable: 0 });
+      expect(result.data.housesEveningKwh).toBeNull();
+      expect(result.data.housesEveningMetersMissing).toBe(1);
+    });
+
     it("reports no houses when no device is a linked house meter", async () => {
       const { capability, getSiteSamples } = setup();
       const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
