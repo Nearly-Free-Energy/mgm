@@ -6873,55 +6873,106 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "action": {
-                    "type": "string",
-                    "enum": [
-                      "accept_exact",
-                      "record_external"
-                    ],
-                    "title": "Resolution"
-                  },
-                  "externalAmount": {
-                    "title": "External amount (negative for a refund)",
-                    "type": "number"
-                  },
-                  "externalReference": {
-                    "title": "External reference",
-                    "type": "string",
-                    "maxLength": 200
-                  },
-                  "notes": {
-                    "title": "Notes",
-                    "type": "string",
-                    "maxLength": 500
-                  },
-                  "confirmation": {
+                "anyOf": [
+                  {
                     "type": "object",
                     "properties": {
-                      "acknowledged": {
-                        "maxItems": 20,
-                        "type": "array",
-                        "items": {
-                          "type": "string",
-                          "maxLength": 64
-                        }
+                      "action": {
+                        "type": "string",
+                        "const": "accept_exact",
+                        "title": "Resolution"
                       },
-                      "typed": {
-                        "type": "string"
+                      "externalReference": {
+                        "title": "External reference",
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "notes": {
+                        "title": "Notes",
+                        "type": "string",
+                        "maxLength": 500
+                      },
+                      "confirmation": {
+                        "type": "object",
+                        "properties": {
+                          "acknowledged": {
+                            "maxItems": 20,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "maxLength": 64
+                            }
+                          },
+                          "typed": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "acknowledged"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
-                      "acknowledged"
+                      "action"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "const": "record_external",
+                        "title": "Resolution"
+                      },
+                      "externalAmount": {
+                        "type": "number",
+                        "title": "External amount (negative for a refund)",
+                        "description": "In the currency's major units, as the bill's total: 2500 for UGX 2,500, 12.5 for USD 12.50."
+                      },
+                      "externalReference": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "title": "External reference"
+                      },
+                      "notes": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500,
+                        "title": "Notes"
+                      },
+                      "confirmation": {
+                        "type": "object",
+                        "properties": {
+                          "acknowledged": {
+                            "maxItems": 20,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "maxLength": 64
+                            }
+                          },
+                          "typed": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "acknowledged"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "externalAmount",
+                      "externalReference",
+                      "notes"
                     ],
                     "additionalProperties": false
                   }
-                },
-                "required": [
-                  "action"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -6995,15 +7046,8 @@
               "properties": {
                 "action": {
                   "type": "string",
-                  "enum": [
-                    "accept_exact",
-                    "record_external"
-                  ],
+                  "const": "accept_exact",
                   "title": "Resolution"
-                },
-                "externalAmount": {
-                  "title": "External amount (negative for a refund)",
-                  "type": "number"
                 },
                 "externalReference": {
                   "title": "External reference",
@@ -7021,7 +7065,7 @@
               ],
               "additionalProperties": false
             },
-            "inputVersion": 1,
+            "inputVersion": 2,
             "risk": "money",
             "confirm": "confirm",
             "humanOnly": true,
@@ -7048,33 +7092,36 @@
               "properties": {
                 "action": {
                   "type": "string",
-                  "enum": [
-                    "accept_exact",
-                    "record_external"
-                  ],
+                  "const": "record_external",
                   "title": "Resolution"
                 },
                 "externalAmount": {
+                  "type": "number",
                   "title": "External amount (negative for a refund)",
-                  "type": "number"
+                  "description": "In the currency's major units, as the bill's total: 2500 for UGX 2,500, 12.5 for USD 12.50."
                 },
                 "externalReference": {
-                  "title": "External reference",
                   "type": "string",
-                  "maxLength": 200
+                  "minLength": 1,
+                  "maxLength": 200,
+                  "title": "External reference"
                 },
                 "notes": {
-                  "title": "Notes",
                   "type": "string",
-                  "maxLength": 500
+                  "minLength": 1,
+                  "maxLength": 500,
+                  "title": "Notes"
                 }
               },
               "required": [
-                "action"
+                "action",
+                "externalAmount",
+                "externalReference",
+                "notes"
               ],
               "additionalProperties": false
             },
-            "inputVersion": 1,
+            "inputVersion": 2,
             "risk": "money",
             "confirm": "typed",
             "humanOnly": true,

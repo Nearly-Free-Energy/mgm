@@ -330,9 +330,16 @@ describe("openApiDocument, on actions the registry does not hold yet", () => {
     expect(param.schema).toEqual({ type: "string", pattern: "^[A-Za-z0-9_-]{1,128}$" });
   });
 
-  it("refuses actions that share a route but not an input, or bind one segment to two kinds", () => {
+  it("describes the body of actions that share a route with different inputs as anyOf those inputs, each once", () => {
     const other = z.strictObject({ other: z.number() });
-    expect(() => generate(action("billing.zz-a"), action("billing.zz-b", { input: other }))).toThrow("share a route but not an input");
+    const doc = generate(action("billing.zz-a"), action("billing.zz-b", { input: other }), action("billing.zz-c", { input: other }));
+    const body = (operationOf(doc, "/api/billing-line-items/{lineItemId}/usage").requestBody as Obj).content as Obj;
+    const schema = (body["application/json"] as Obj).schema as Obj;
+    expect((schema.anyOf as Obj[]).map((s) => Object.keys(s.properties as Obj))).toHaveLength(2);
+    expect(JSON.stringify(schema.anyOf)).toContain('"other"');
+  });
+
+  it("refuses actions that share a route but bind one segment to two kinds", () => {
     expect(() => generate(action("billing.zz-a"), action("billing.zz-b", { bind: { path: { lineItemId: "tenant" } } }))).toThrow(
       "do not all bind [lineItemId] to one kind",
     );
