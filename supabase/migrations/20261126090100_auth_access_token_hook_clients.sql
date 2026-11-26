@@ -4,13 +4,20 @@
 -- Replaces the body 20261117210000 created. Turn the hook off, and check it
 -- is off, before pushing this to a project where it is on, and turn the OAuth
 -- server off first (docs/setup.md, "Rolling back, or changing the function").
+-- That is a precaution: CREATE OR REPLACE never leaves the function missing,
+-- and the REVOKE below does not touch supabase_auth_admin.
 --
 -- Supabase Auth's OAuth server puts the client's id in the token's client_id
 -- claim, and the scopes the client asked for in scope; a browser session has
 -- neither claim. Supabase Auth v2.198.0 reports a client's first sign-in as
 -- 'oauth_provider/authorization_code' and every refresh, a client's or a
 -- browser's, as 'token_refresh'. If a later version reports other names,
--- revisit the method checks below.
+-- revisit the method checks below. In v2.198.0 client_id is omitted when
+-- empty and set only for a session an OAuth client started, so a browser
+-- event never carries the key; a client_id that is present but null, empty
+-- or not a uuid is refused. If a later version sends the key for a browser
+-- session, every sign-in is refused, the emergency link included: revisit
+-- the browser check below.
 --
 -- In order:
 --   1. A session a password or a recovery started is refused, new or
@@ -21,10 +28,15 @@
 --   3. An event with no client_id claim is a browser's, and is returned
 --      unchanged. It reads no table.
 --   4. A client this installation does not list in mgm_clients is refused.
---   5. A client token runs as authenticated; any other role is refused.
---      (#274 gives an agent client its own role here.)
+--   5. Only an operator client is accepted, and its token runs as
+--      authenticated; any other role is refused. An agent client is refused
+--      until #274 gives it its own select-only role here: as authenticated it
+--      would hold the person's full authority at the database API (ADR-008
+--      decision 7). #274 changes only this function; mgm_clients already
+--      accepts the kind 'agent'.
 --   6. A client sign-in that asks for scope openid is refused: MGM's clients
---      get an access token and a refresh token, and nothing else.
+--      get an access token and a refresh token, and nothing else. The test
+--      is for the word anywhere in the scope claim; see the check below.
 --   7. A new client sign-in counts only after MGM's own consent page has
 --      recorded the person's approval: an 'oauth_provider/authorization_code'
 --      event uses up a record for that person and client younger than the
@@ -95,13 +107,25 @@ BEGIN
     ));
   END IF;
 
-  IF _claims->>'role' IS DISTINCT FROM 'authenticated' THEN
+  IF _kind IS DISTINCT FROM 'operator' OR _claims->>'role' IS DISTINCT FROM 'authenticated' THEN
     RETURN jsonb_build_object('error', jsonb_build_object(
       'http_code', 403, 'message', 'MGM refused this sign-in.'
     ));
   END IF;
 
-  IF 'openid' = ANY (regexp_split_to_array(btrim(coalesce(_claims->>'scope', '')), '\s+')) THEN
+  -- Supabase Auth v2.198.0 passes the scope the client asked for at
+  -- authorize, unchanged, and issues an ID token when ParseScopeString finds
+  -- openid in it: it splits on an ASCII space and trims each part with Go's
+  -- strings.TrimSpace, which also strips Unicode spaces such as U+00A0
+  -- (internal/models/oauth_scope.go). So ' openid' next to a no-break space
+  -- is openid to Supabase Auth. Rather than copy that split, refuse the word
+  -- anywhere: every part ParseScopeString reads as openid contains it,
+  -- whatever the separators. Auth refuses at authorize any part that is not
+  -- a supported scope (validateScopes), and openid is the only supported
+  -- scope containing the word, so for every scope that reaches the hook this
+  -- refuses exactly what Auth would read as openid. If Supabase Auth adds a
+  -- supported scope that contains the word, revisit.
+  IF position('openid' IN coalesce(_claims->>'scope', '')) > 0 THEN
     RETURN jsonb_build_object('error', jsonb_build_object(
       'http_code', 403,
       'message', 'MGM gives this app an access token only. Sign in without the openid scope.'

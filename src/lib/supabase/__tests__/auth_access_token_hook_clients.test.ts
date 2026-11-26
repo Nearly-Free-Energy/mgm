@@ -6,8 +6,10 @@
  * 1. Direct calls of fn_auth_access_token_hook, as the database owner, with
  *    crafted events: every rule, one at a time.
  * 2. The catalogs: the hook stays SECURITY INVOKER and is VOLATILE, both
- *    tables have row-level security on, and supabase_auth_admin holds exactly
- *    the grants and policies the hook needs, anon and authenticated none.
+ *    tables have row-level security on, supabase_auth_admin holds exactly
+ *    the grants and policies the hook needs, service_role every privilege,
+ *    and no other role any. A caller with no grant on either table still
+ *    gets a browser event back unchanged.
  * 3. End to end through Supabase Auth's OAuth server on the local Supabase,
  *    where supabase/config.toml turns it on and Supabase Auth runs the hook
  *    as supabase_auth_admin. Only this part catches a missing grant or
@@ -242,6 +244,7 @@ async function unlist(clientId: string) {
 // ── Fixtures ───────────────────────────────────────────────────────────────
 
 const OPERATOR = randomUUID();
+const OPERATOR_2 = randomUUID();
 const AGENT = randomUUID();
 const UNLISTED = randomUUID();
 let userA = "";
@@ -263,6 +266,7 @@ describe.skipIf(skip)("access-token hook: clients that are not a browser (#270)"
       else userB = data.user!.id;
     }
     await list(OPERATOR, "operator", "Test operator");
+    await list(OPERATOR_2, "operator", "Test operator 2");
     await list(AGENT, "agent", "Test agent");
 
     // Two public clients, registered as docs/setup.md registers MGM's.
@@ -283,7 +287,7 @@ describe.skipIf(skip)("access-token hook: clients that are not a browser (#270)"
 
   afterAll(async () => {
     const svc = await serviceClient();
-    await svc.from("mgm_clients").delete().in("client_id", [OPERATOR, AGENT, listedClient].filter(Boolean));
+    await svc.from("mgm_clients").delete().in("client_id", [OPERATOR, OPERATOR_2, AGENT, listedClient].filter(Boolean));
     for (const id of [listedClient, unlistedClient].filter(Boolean)) {
       await admin("DELETE", `/admin/oauth/clients/${id}`);
     }
@@ -307,8 +311,15 @@ describe.skipIf(skip)("access-token hook: clients that are not a browser (#270)"
     it("writes the kind of a listed client into its refreshed token, and changes nothing else", () => {
       const operator = clientEvent("token_refresh", userA, OPERATOR);
       expect(hook(operator)).toEqual(withKind(operator, "operator"));
-      const agent = clientEvent("token_refresh", userA, AGENT);
-      expect(hook(agent)).toEqual(withKind(agent, "agent"));
+    });
+
+    // Until #274 gives an agent client a role of its own: as authenticated it
+    // would hold the person's full authority at the database API.
+    it("refuses a listed agent client, sign-in and refresh, and uses no record up", async () => {
+      await record(userA, AGENT);
+      expect(hook(clientEvent("token_refresh", userA, AGENT))).toEqual(refusal(REFUSED));
+      expect(hook(clientEvent("oauth_provider/authorization_code", userA, AGENT))).toEqual(refusal(REFUSED));
+      expect(approvals(userA, AGENT)).toEqual([{ used: false }]);
     });
 
     it("refuses a client the table does not list, or a client_id that is not one", () => {
@@ -321,16 +332,32 @@ describe.skipIf(skip)("access-token hook: clients that are not a browser (#270)"
 
     it("refuses a client sign-in or refresh that asks for scope openid, and uses no record up", async () => {
       await record(userA, OPERATOR);
-      for (const scope of ["openid", "email openid", " openid  email "]) {
+      // Supabase Auth v2.198.0 splits on an ASCII space and trims each part of
+      // every Unicode space, U+00A0 included, so each of these is openid to it.
+      for (const scope of [
+        "openid",
+        "email openid",
+        " openid  email ",
+        " openid",
+        "email  openid",
+        "email \u00a0openid",
+        "\u00a0openid",
+        "email openid\u2003",
+        "email\topenid",
+      ]) {
         expect(hook(clientEvent("token_refresh", userA, OPERATOR, { scope }))).toEqual(refusal(NO_OPENID));
         expect(hook(clientEvent("oauth_provider/authorization_code", userA, OPERATOR, { scope }))).toEqual(
           refusal(NO_OPENID)
         );
       }
+      // Supabase Auth refuses this one at authorize (no such scope); the hook
+      // refuses the word anywhere, so it is refused here too.
+      expect(hook(clientEvent("token_refresh", userA, OPERATOR, { scope: "email openid_x" }))).toEqual(
+        refusal(NO_OPENID)
+      );
       expect(approvals(userA, OPERATOR)).toEqual([{ used: false }]);
-      // A scope that only contains the word is not openid.
-      const near = clientEvent("token_refresh", userA, OPERATOR, { scope: "email openid_x" });
-      expect(hook(near)).toEqual(withKind(near, "operator"));
+      const plain = clientEvent("token_refresh", userA, OPERATOR, { scope: "email profile" });
+      expect(hook(plain)).toEqual(withKind(plain, "operator"));
     });
 
     it("counts a new client sign-in only against a fresh record, and uses it up", () => {
@@ -349,16 +376,26 @@ describe.skipIf(skip)("access-token hook: clients that are not a browser (#270)"
       await record(userB, OPERATOR, old);
       await record(userB, OPERATOR, undefined, new Date().toISOString());
       await record(userA, OPERATOR);
-      await record(userB, AGENT);
+      await record(userB, OPERATOR_2);
       expect(hook(event)).toEqual(refusal(NOT_APPROVED));
       // None of them was used up by the refusals.
       expect(approvals(userB, OPERATOR)).toEqual([{ used: false }, { used: true }]);
       expect(approvals(userA, OPERATOR)).toEqual([{ used: true }, { used: false }]);
-      expect(approvals(userB, AGENT)).toEqual([{ used: false }]);
+      expect(approvals(userB, OPERATOR_2)).toEqual([{ used: false }]);
 
       // The other client's record counts for that client.
-      const agent = clientEvent("oauth_provider/authorization_code", userB, AGENT);
-      expect(hook(agent)).toEqual(withKind(agent, "agent"));
+      const other = clientEvent("oauth_provider/authorization_code", userB, OPERATOR_2);
+      expect(hook(other)).toEqual(withKind(other, "operator"));
+      expect(approvals(userB, OPERATOR_2)).toEqual([{ used: true }]);
+    });
+
+    it("counts a record nine minutes old, inside the ten-minute authorization lifetime", async () => {
+      // Someone who takes a few minutes to paste the code still gets in.
+      await record(userB, OPERATOR, new Date(Date.now() - 9 * 60_000).toISOString());
+      const event = clientEvent("oauth_provider/authorization_code", userB, OPERATOR);
+      expect(hook(event)).toEqual(withKind(event, "operator"));
+      // The eleven-minute record before it stays unused; the nine-minute one is used.
+      expect(approvals(userB, OPERATOR)).toEqual([{ used: false }, { used: true }, { used: true }]);
     });
 
     it("refuses a new client sign-in whose user_id is not a user id", () => {
@@ -469,6 +506,103 @@ describe.skipIf(skip)("access-token hook: clients that are not a browser (#270)"
       );
       const [row] = ownerRows<{ any: boolean }>(`SELECT (${checks.join(" OR ")}) AS any`);
       expect(row.any).toBe(false);
+    });
+
+    it("pins every grant on both tables and their columns, to whichever role", () => {
+      const tables = ownerRows<{ tbl: string; owner: string; grantee: string; privileges: string[] }>(
+        `SELECT c.relname AS tbl, pg_get_userbyid(c.relowner) AS owner,
+                CASE WHEN e.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(e.grantee) END AS grantee,
+                array_agg(e.privilege_type ORDER BY e.privilege_type) AS privileges
+           FROM pg_class c, aclexplode(c.relacl) e
+          WHERE c.oid IN ('public.mgm_clients'::regclass, 'public.mgm_client_approvals'::regclass)
+          GROUP BY 1, 2, 3 ORDER BY 1, 3`
+      );
+      // The owner and service_role, each with every table privilege
+      // (whichever this Postgres version has), and nobody else.
+      expect(tables.map(({ tbl, owner, grantee }) => ({ tbl, owner, grantee }))).toEqual([
+        { tbl: "mgm_client_approvals", owner: "postgres", grantee: "postgres" },
+        { tbl: "mgm_client_approvals", owner: "postgres", grantee: "service_role" },
+        { tbl: "mgm_clients", owner: "postgres", grantee: "postgres" },
+        { tbl: "mgm_clients", owner: "postgres", grantee: "service_role" },
+      ]);
+      for (const row of tables) {
+        expect(row.privileges, `${row.tbl} ${row.grantee}`).toEqual(tables[0].privileges);
+        expect(row.privileges).toEqual(
+          expect.arrayContaining(["DELETE", "INSERT", "REFERENCES", "SELECT", "TRIGGER", "TRUNCATE", "UPDATE"])
+        );
+      }
+
+      const columns = ownerRows<{ tbl: string; col: string; grantee: string; privilege: string }>(
+        `SELECT c.relname AS tbl, a.attname AS col,
+                CASE WHEN e.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(e.grantee) END AS grantee,
+                e.privilege_type AS privilege
+           FROM pg_class c
+           JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+           CROSS JOIN LATERAL aclexplode(a.attacl) e
+          WHERE c.oid IN ('public.mgm_clients'::regclass, 'public.mgm_client_approvals'::regclass)
+          ORDER BY c.relname, a.attnum, 3, 4`
+      );
+      const auth = (tbl: string, col: string, privilege = "SELECT") => ({
+        tbl,
+        col,
+        grantee: "supabase_auth_admin",
+        privilege,
+      });
+      expect(columns).toEqual([
+        auth("mgm_client_approvals", "id"),
+        auth("mgm_client_approvals", "user_id"),
+        auth("mgm_client_approvals", "client_id"),
+        auth("mgm_client_approvals", "created_at"),
+        auth("mgm_client_approvals", "used_at"),
+        auth("mgm_client_approvals", "used_at", "UPDATE"),
+        auth("mgm_clients", "client_id"),
+        auth("mgm_clients", "kind"),
+      ]);
+    });
+
+    // The browser return comes before the first table read, so a missing
+    // grant or policy stops client sign-ins only (ADR-008, amendment of 26
+    // Nov 2026). The direct calls above run as the owner, and the end-to-end
+    // sign-ins with the grants in place, so neither would notice a change
+    // that reads a table first.
+    it("returns a browser event unchanged to a caller with no grant on either table, and refuses a client's", () => {
+      const role = `mgm_hook_probe_${randomBytes(4).toString("hex")}`;
+      const browser = JSON.stringify({
+        user_id: userA,
+        authentication_method: "magiclink",
+        claims: { sub: userA, role: "authenticated", amr: [{ method: "otp", timestamp: 1 }] },
+      });
+      const client = JSON.stringify(clientEvent("token_refresh", userA, OPERATOR));
+      // Rolled back, role and all, by the final RAISE, which reports what happened.
+      const result = runAsDatabaseOwner(
+        [
+          "DO $t$",
+          "DECLARE",
+          "  v_browser jsonb;",
+          "  v_client text := 'answered';",
+          "  v_tables boolean;",
+          "BEGIN",
+          `  CREATE ROLE ${role} NOLOGIN NOINHERIT;`,
+          `  GRANT ${role} TO CURRENT_USER WITH SET TRUE;`,
+          `  GRANT USAGE ON SCHEMA public TO ${role};`,
+          `  GRANT EXECUTE ON FUNCTION public.fn_auth_access_token_hook(jsonb) TO ${role};`,
+          `  v_tables := has_any_column_privilege('${role}', 'public.mgm_clients', 'SELECT')`,
+          `    OR has_any_column_privilege('${role}', 'public.mgm_client_approvals', 'SELECT');`,
+          `  SET LOCAL ROLE ${role};`,
+          `  v_browser := public.fn_auth_access_token_hook('${browser}'::jsonb);`,
+          "  BEGIN",
+          `    PERFORM public.fn_auth_access_token_hook('${client}'::jsonb);`,
+          "  EXCEPTION WHEN insufficient_privilege THEN",
+          "    v_client := SQLSTATE;",
+          "  END;",
+          "  RAISE EXCEPTION 'hook-grant-probe tables=% unchanged=% client=%',",
+          `    v_tables::text, (v_browser = '${browser}'::jsonb)::text, v_client;`,
+          "END",
+          "$t$",
+        ].join("\n")
+      );
+      expect(result.ok, result.output).toBe(false);
+      expect(result.output).toMatch(/hook-grant-probe tables=false unchanged=true client=42501/);
     });
 
     it("gives supabase_auth_admin exactly the columns the hook reads and writes", () => {
@@ -596,7 +730,37 @@ describe.skipIf(skip)("access-token hook: clients that are not a browser (#270)"
       // The refusal rotated nothing: listed again, the same token refreshes.
       const again = await refresh(listedClient, refreshToken);
       expect(again.status, JSON.stringify(again.body)).toBe(200);
+      refreshToken = again.body.refresh_token as string;
     }, 30_000);
+
+    it("refuses the refresh while the client is listed as an agent (#274)", async () => {
+      const svc = await serviceClient();
+      const kind = (k: string) => svc.from("mgm_clients").update({ kind: k }).eq("client_id", listedClient);
+      expect((await kind("agent")).error).toBeNull();
+      try {
+        const refused = await refresh(listedClient, refreshToken);
+        expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+        expect(JSON.stringify(refused.body)).toContain(REFUSED);
+        expect(refused.body.access_token).toBeUndefined();
+      } finally {
+        expect((await kind("operator")).error).toBeNull();
+      }
+    }, 30_000);
+
+    // Supabase Auth reads ["email", "openid"] from this scope and accepts it at
+    // authorize; it would issue an ID token if the hook let the sign-in pass.
+    it("refuses a client sign-in whose openid sits next to a no-break space", async () => {
+      const browser = await browserSession(EMAILS[0]);
+      const { code, verifier } = await codeFor(listedClient, browser, "email \u00a0openid");
+      await record(userA, listedClient);
+      const refused = await exchange(listedClient, code, verifier);
+      expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+      expect(JSON.stringify(refused.body)).toContain(NO_OPENID);
+      expect(refused.body.id_token).toBeUndefined();
+      // Unlisting the client above removed the earlier, used record.
+      expect(approvals(userA, listedClient)).toEqual([{ used: false }]);
+      expect(clientSessions(userA, listedClient)).toBe(1);
+    }, 60_000);
 
     it("refuses a client sign-in that asks for scope openid: no token, no session, the record not used", async () => {
       const browser = await browserSession(EMAILS[1]);

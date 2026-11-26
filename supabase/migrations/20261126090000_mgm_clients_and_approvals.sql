@@ -6,7 +6,8 @@
 -- client), and lists each here (docs/setup.md, "Clients that are not a
 -- browser"). fn_auth_access_token_hook (20261126090100) refuses a token for
 -- a client this table does not list, and writes the client's kind into the
--- token.
+-- token. Until #274 gives agent clients their own role, the hook refuses an
+-- agent client too, so only the CLI is listed for now.
 --
 -- mgm_client_approvals holds the record MGM's consent page writes when the
 -- person approves a client sign-in (#271). The hook counts a new client
@@ -16,7 +17,8 @@
 -- Who reads and writes them:
 --   * the operator lists and removes clients, and MGM's server writes an
 --     approval record after a getUser() check: both as service_role, which
---     keeps the privileges it has on every public table;
+--     is granted every privilege on both tables below, explicitly, because
+--     default privileges differ between databases (20261111200000);
 --   * Supabase Auth runs the hook as supabase_auth_admin, which owns neither
 --     table and does not bypass row-level security, so it gets the column
 --     grants the hook needs and a policy for each, and nothing else;
@@ -24,11 +26,16 @@
 --     or client token reads or writes either table through the database API.
 --     The assistant's role (#274) is granted nothing here either.
 --
--- The hook is SECURITY INVOKER, so a missing grant or policy here does not
--- fail loudly: the hook would find no row, and refuse every client sign-in
--- as unlisted or unapproved. auth_access_token_hook_clients.test.ts signs a
--- client in through Supabase Auth itself, as supabase_auth_admin, and checks
--- the grants and policies in the catalogs.
+-- The hook is SECURITY INVOKER, so what supabase_auth_admin lacks here stops
+-- every client sign-in, in one of two ways. A missing column grant raises
+-- permission denied in the hook, and Supabase Auth answers every client
+-- sign-in with 500 "Error running hook URI": that 500 means a grant is
+-- missing. A missing policy raises nothing: the hook finds no row and refuses
+-- with its own 403, as unlisted or unapproved. Neither touches a browser
+-- sign-in, for which the hook reads no table.
+-- auth_access_token_hook_clients.test.ts signs a client in through Supabase
+-- Auth itself, as supabase_auth_admin, checks the grants and policies in the
+-- catalogs, and checks that a browser event passes with no table grant.
 
 -- client_id is the id of the client in auth.oauth_clients, which Supabase
 -- Auth writes into the token's client_id claim. No foreign key: MGM does not
@@ -73,6 +80,7 @@ ALTER TABLE public.mgm_clients ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.mgm_client_approvals ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.mgm_clients FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON public.mgm_client_approvals FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.mgm_clients, public.mgm_client_approvals TO service_role;
 
 -- supabase_auth_admin exists only on Supabase (CLI and hosted). Docker mode
 -- runs Supabase Auth as postgres, which owns both tables and needs neither
@@ -82,8 +90,8 @@ REVOKE ALL ON public.mgm_client_approvals FROM PUBLIC, anon, authenticated;
 -- Exactly what fn_auth_access_token_hook reads and writes: a client's kind,
 -- and an unused record's columns, of which it sets used_at alone. The UPDATE
 -- policy lets it only mark an unused record used. If the hook reads or writes
--- another column, grant it here in a new migration, or the hook refuses every
--- client sign-in.
+-- another column, grant it in a new migration, or every client sign-in fails
+-- with a 500.
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_auth_admin') THEN

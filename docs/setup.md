@@ -320,7 +320,9 @@ MGM's table of clients (ADR-008 decision 2). So, in this order:
 
 1. If the project's OAuth server is on, turn it off first
    ([Clients that are not a browser](#clients-that-are-not-a-browser)), and
-   read the setting back to check it is off.
+   check it is off: while it is off, Supabase Auth answers `404` with
+   `feature_disabled` for
+   `curl -sS <supabase-url>/auth/v1/.well-known/oauth-authorization-server -H "apikey: <anon key>"`.
 2. Turn the hook off (Authentication › Auth Hooks, or `PATCH
    /v1/projects/<ref>/config/auth` with
    `hook_custom_access_token_enabled: false`), and read the setting back
@@ -328,7 +330,8 @@ MGM's table of clients (ADR-008 decision 2). So, in this order:
 3. Only then change, replace or drop `public.fn_auth_access_token_hook`.
    Pushing a migration that replaces it, such as `20261126090100`, counts.
 4. Turn the hook back on, if it should be, once the function is in place.
-5. Turn the OAuth server back on last, only once the hook is on again.
+5. If you turned the OAuth server off in step 1, turn it back on last, only
+   once the hook is on again.
 
 Turning the hook off makes Supabase Auth issue tokens again; it does not
 bring passwords back. The cutover above deleted the hashes for good, so
@@ -344,7 +347,7 @@ Supabase Auth and lists them in MGM's table, `public.mgm_clients`:
 | Client | Kind | Lists it when |
 |--------|------|---------------|
 | The CLI | `operator` | The installation wants the CLI |
-| The assistant bridge | `agent` | The release includes the assistant's database role (#274). Until then, register and list the operator client only |
+| The assistant bridge | `agent` | The release includes the assistant's database role (#274). Until then, register and list the operator client only: the hook refuses every sign-in and refresh of an `agent` client, listed or not |
 
 The access-token hook (above) refuses a token for a client that
 `mgm_clients` does not list, and writes the client's kind into the token as
@@ -367,13 +370,20 @@ the version a project runs with `curl <supabase-url>/auth/v1/health -H
   `allow_dynamic_registration = false`). Supabase Auth sends the person to
   the consent page at `site_url` plus that path. The CLI's built-in signing
   key is enough; no key setup is needed.
-- *Hosted:* in the dashboard's Authentication settings for the OAuth server,
-  turn it on, set the authorization path to `/oauth/consent`, and leave
-  dynamic client registration off. The project's Site URL must be MGM's
-  address (`MGM_APP_URL`). These dashboard steps have not yet been checked
-  against a hosted project (ADR-008, Consequences), so read each setting
-  back after saving. Supabase recommends an asymmetric signing key (ES256)
-  for the OAuth server.
+- *Hosted:* leave the OAuth server off until the release you run includes
+  MGM's consent and code pages (#271), the resolver's check of client tokens
+  (#272) and the CLI. Before then no client can complete a sign-in, and a
+  server that is on adds the turn-it-off-first step to every later change of
+  the hook. Once they ship: in the dashboard's Authentication settings for
+  the OAuth server, turn it on, set the authorization path to
+  `/oauth/consent`, and leave dynamic client registration off. Leave the
+  authorization lifetime at its default of 10 minutes: the hook counts an
+  approval record for 10 minutes, and a different lifetime needs a
+  migration that changes the hook to match. The project's Site URL must be
+  MGM's address (`MGM_APP_URL`). These dashboard steps have not yet been
+  checked against a hosted project (ADR-008, Consequences), so read each
+  setting back after saving. Supabase recommends an asymmetric signing key
+  (ES256) for the OAuth server.
 - *Docker mode:* the OAuth server stays off, so no client can sign in.
 
 If the access-token hook is not on, or the migrations up to
@@ -381,8 +391,10 @@ If the access-token hook is not on, or the migrations up to
 
 **2. Register each client** with Supabase Auth's admin endpoint, as a
 public client: no secret, the grant types `authorization_code` and
-`refresh_token`, and one return address, MGM's sign-in code page. Return
-addresses must match exactly, port included. Locally:
+`refresh_token`, and one return address, MGM's sign-in code page,
+`/oauth/code`. #271 serves that page; if it ships at another path, register
+the clients again with that one. Return addresses must match exactly, port
+included. Locally:
 
 ```bash
 eval "$(supabase status -o env | grep '^SERVICE_ROLE_KEY=')"
@@ -564,6 +576,15 @@ instance** — they never run against cloud Supabase to prevent polluting shared
 - **Local Supabase CLI** running (`MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase start`, or `./setup.sh`).
 
 ### Running RLS tests
+
+A stack that was already running when you pulled a change to
+`supabase/config.toml` keeps its old settings until you restart it
+(`supabase stop`, then `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase start`; the
+database is kept). For example, a stack started before `[auth.oauth_server]`
+was turned on in `supabase/config.toml` keeps its OAuth server off until it is
+restarted, and
+`auth_access_token_hook_clients.test.ts` fails in `beforeAll` with `404`
+`feature_disabled` from `/admin/oauth/clients`.
 
 ```bash
 # 1. Start local Supabase (if not already running)
