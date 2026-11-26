@@ -29,8 +29,8 @@
  * stays on the box and the polite announcements say where the cursor is, so
  * the box sets no aria-activedescendant, which would have each move read
  * twice; if the moves stop being announced, point it at the cursor's cell.
- * Below 600 px the grid is hidden and the bills are a list of cards
- * (./cards.tsx), whose figures are buttons, so no grid keys are needed there.
+ * Below 600 px a list of cards (./cards.tsx) takes the grid's place; their
+ * figures are buttons, so no grid keys are needed there.
  */
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { ActionRef, Column, LiveState, ModelOf, RowOf } from "@/lib/gui/contract";
