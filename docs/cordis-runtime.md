@@ -352,6 +352,16 @@ agent client gets less (`src/lib/gui/host/server/agent.ts`):
   gives an agent beyond its model (its actions, attached and embedded
   views) is settled first.
 
+The host's own reads on these two routes run on the agent's client, whose
+token reaches the database as `mgm_agent` (`20261126160000`, CLAUDE.md):
+the person's role rows and the ids and names of their organizations, which
+the catalog and every organization view read before they ask the
+assistant's gate. The rows the host reads for a view's path (a
+community's, a microgrid's, an edge's, in `resolveSegments`) are not
+granted yet; they come with the first marked view whose path names one.
+`bearer-session.db.test.ts` sends a real agent token to the catalog and
+expects `409 assistant_disabled`.
+
 An operator client holds the person's access: nothing grants or refuses
 anything by that kind. For a new `/api` route:
 

@@ -5,15 +5,16 @@
  *
  * 1. The guard: what mgm_agent may do, read from the catalogs (pg_class,
  *    pg_attribute, pg_proc, pg_namespace, pg_auth_members, pg_policy,
- *    pg_depend and pg_publication_tables, through aclexplode and the
+ *    pg_depend, pg_default_acl and pg_publication_tables, through aclexplode and the
  *    has_*_privilege functions), not from
  *    information_schema.column_privileges, which also lists every column of
  *    a table granted whole. The lists below are the role's whole reach. A
  *    pull request that grants the role anything moves them in the same
  *    commit (CLAUDE.md, "The assistant's role").
  * 2. As an agent token through the database API: the caller's own role
- *    rows, the plugin gate, and a refusal of every write, of every table
- *    not granted and of every definer function not listed.
+ *    rows, the ids and names of the caller's organizations, the plugin
+ *    gate, and a refusal of every write, of every table and column not
+ *    granted and of every definer function not listed.
  *
  * The hook that gives an agent client's token this role is tested in
  * auth_access_token_hook_clients.test.ts, end to end included.
@@ -48,18 +49,47 @@ const ROLE = "mgm_agent";
 /** Table privileges granted to mgm_agent itself, in any schema. */
 const TABLE_GRANTS = [{ relation: "public.user_roles", privilege: "SELECT" }];
 
-/** Column privileges granted to mgm_agent itself, in any schema. */
-const COLUMN_GRANTS: { relation: string; column: string; privilege: string }[] = [];
+/**
+ * Column privileges granted to mgm_agent itself, in any schema. The GUI
+ * host reads the caller's organizations by id and name before it asks the
+ * assistant's gate (visibleOrganizations); the address columns stay out
+ * (ADR-007 decision 6).
+ */
+const COLUMN_GRANTS: { relation: string; column: string; privilege: string }[] = [
+  { relation: "public.organizations", column: "id", privilege: "SELECT" },
+  { relation: "public.organizations", column: "name", privilege: "SELECT" },
+];
 
 /**
  * The definer functions in public that mgm_agent may run, through any grant.
  * is_super_admin: the super-admin policy on user_roles calls it as the
+ * caller. user_can_access_org: the policy on organizations calls it as the
  * caller. mgm_plugin_enabled_for_org: the plugin gate and the composers.
  */
-const DEFINER_FUNCTIONS = ["public.is_super_admin()", "public.mgm_plugin_enabled_for_org(uuid, text)"];
+const DEFINER_FUNCTIONS = [
+  "public.is_super_admin()",
+  "public.mgm_plugin_enabled_for_org(uuid, text)",
+  "public.user_can_access_org(uuid)",
+];
 
-/** The policies that name mgm_agent. */
+/**
+ * The policies that name mgm_agent: one RESTRICTIVE policy on each of
+ * organizations and user_roles, so a policy added later that names no role,
+ * which applies to the role too, cannot widen what an assistant reads on
+ * those two tables. A table granted later gets a RESTRICTIVE policy only
+ * where CLAUDE.md asks for one (tenants and tenant_devices, checked through
+ * RESTRICTED_ON_FIRST_GRANT); otherwise it gets twins TO mgm_agent of its
+ * TO authenticated policies. If CLAUDE.md's grant rule changes, revisit.
+ */
 const POLICIES = [
+  {
+    table: "organizations",
+    name: "Agent tokens read only the caller's organizations",
+    permissive: "RESTRICTIVE",
+    cmd: "ALL",
+    qual: "user_can_access_org(id)",
+    with_check: "user_can_access_org(id)",
+  },
   {
     table: "user_roles",
     name: "Agent tokens read only the caller's own role rows",
@@ -275,6 +305,27 @@ describe.skipIf(skip)("mgm_agent, the assistant's database role (#274)", { timeo
       expect(columns).toEqual(COLUMN_GRANTS);
     });
 
+    // A default privilege takes effect at the next CREATE, in whatever pull
+    // request makes the next table or function, so it is pinned here, in
+    // the commit that adds it. None names the role, and none names PUBLIC
+    // (Supabase sets none today). Postgres's own default, EXECUTE for PUBLIC
+    // on every new function, is stored here only in a global entry
+    // (ALTER DEFAULT PRIVILEGES with no IN SCHEMA), which repeats it; the
+    // query leaves that one case out, and the definer-function check below
+    // covers it.
+    it("is named by no default privilege, and neither is PUBLIC", () => {
+      const defaults = ownerRows<{ owner: string; schema: string | null; type: string; privilege: string; grantee: string }>(
+        `SELECT d.defaclrole::regrole::text AS owner, d.defaclnamespace::regnamespace::text AS schema,
+                d.defaclobjtype::text AS type, a.privilege_type AS privilege,
+                CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END AS grantee
+           FROM pg_default_acl d, aclexplode(d.defaclacl) a
+          WHERE a.grantee IN ('${ROLE}'::regrole, 0)
+            AND NOT (a.grantee = 0 AND d.defaclnamespace = 0 AND d.defaclobjtype = 'f' AND a.privilege_type = 'EXECUTE')
+          ORDER BY 1, 2, 3, 4, 5`
+      );
+      expect(defaults).toEqual([]);
+    });
+
     it("may use exactly the listed schemas", () => {
       const usable = ownerRows<{ schema: string }>(
         `SELECT nspname AS schema FROM pg_namespace
@@ -368,6 +419,42 @@ describe.skipIf(skip)("mgm_agent, the assistant's database role (#274)", { timeo
           ORDER BY schemaname, tablename, policyname`
       );
       expect(policies).toEqual(POLICIES);
+    });
+
+    // A policy that names no role applies to mgm_agent. One is added here
+    // inside a transaction that the final RAISE rolls back: it widens what a
+    // browser token reads, and not what an agent token reads.
+    it("reads no more of organizations or user_roles when a policy that names no role is added", () => {
+      const cases: [string, string, number, number][] = [
+        ["public.organizations", `id IN ('${ORG}', '${OTHER_ORG}')`, 2, 1],
+        ["public.user_roles", `user_id IN ('${manager.userId}', '${otherManager.userId}')`, 3, 1],
+      ];
+      for (const [table, rows, browser, agent] of cases) {
+        const claims = (role: string) => JSON.stringify({ sub: otherManager.userId, role });
+        const result = runAsDatabaseOwner(
+          [
+            "DO $t$",
+            "DECLARE",
+            "  v_browser int;",
+            "  v_agent int;",
+            "BEGIN",
+            `  CREATE POLICY "agent role probe: every row" ON ${table} FOR SELECT USING (true);`,
+            `  GRANT ${ROLE} TO CURRENT_USER WITH SET TRUE;`,
+            `  PERFORM set_config('request.jwt.claims', '${claims("authenticated")}', true);`,
+            "  SET LOCAL ROLE authenticated;",
+            `  SELECT count(*) INTO v_browser FROM ${table} WHERE ${rows};`,
+            "  RESET ROLE;",
+            `  PERFORM set_config('request.jwt.claims', '${claims(ROLE)}', true);`,
+            `  SET LOCAL ROLE ${ROLE};`,
+            `  SELECT count(*) INTO v_agent FROM ${table} WHERE ${rows};`,
+            "  RAISE EXCEPTION 'wide-policy-probe browser=% agent=%', v_browser, v_agent;",
+            "END",
+            "$t$",
+          ].join("\n")
+        );
+        expect(result.ok, result.output).toBe(false);
+        expect(result.output, table).toMatch(new RegExp(`wide-policy-probe browser=${browser} agent=${agent}\\b`));
+      }
     });
 
     it("reads user_roles, granted whole, only while its columns are the listed ones", () => {
@@ -490,6 +577,30 @@ describe.skipIf(skip)("mgm_agent, the assistant's database role (#274)", { timeo
       expect(asked).toEqual([]);
     });
 
+    it("reads the ids and names of the caller's own organizations, and no other column", async () => {
+      const both = [ORG, OTHER_ORG];
+      const cases: [string, TestUser, string[]][] = [
+        ["manager of both", manager, [ORG, OTHER_ORG]],
+        ["manager of one", otherManager, [OTHER_ORG]],
+        ["super admin", superAdmin, [ORG, OTHER_ORG]],
+      ];
+      for (const [who, user, expected] of cases) {
+        const agent = await agentOf(user);
+        // The read visibleOrganizations makes (src/lib/gui/host/server/organization.ts).
+        const { data, error } = await agent.from("organizations").select("id, name").in("id", both).order("name");
+        expect(error, who).toBeNull();
+        expect(data!.map((r) => r.id).sort(), who).toEqual([...expected].sort());
+        // The same person's browser token reads the same rows.
+        const { data: browser } = await user.client.from("organizations").select("id").in("id", both);
+        expect(browser!.map((r) => r.id).sort(), who).toEqual([...expected].sort());
+      }
+      const agent = await agentOf(superAdmin);
+      for (const columns of ["address_city", "*"]) {
+        const { error } = await agent.from("organizations").select(columns).limit(1);
+        expect(error?.code, columns).toBe("42501");
+      }
+    });
+
     it("gets the plugin gate's answers, the same as the browser token", async () => {
       const agent = await agentOf(manager);
       const cases: [string, string, boolean][] = [
@@ -541,21 +652,21 @@ describe.skipIf(skip)("mgm_agent, the assistant's database role (#274)", { timeo
 
     it("is refused, with 42501, a table it is not granted, where the browser token reads it", async () => {
       const agent = await agentOf(superAdmin);
-      for (const table of ["organizations", "communities", "microgrids", "tenants", "devices", "mgm_plugins"]) {
+      for (const table of ["communities", "microgrids", "edges", "tenants", "devices", "mgm_plugins"]) {
         const { error } = await agent.from(table).select("id").limit(1);
         expect(error?.code, table).toBe("42501");
       }
-      const { data, error } = await superAdmin.client.from("organizations").select("id").eq("id", ORG);
+      const { data, error } = await superAdmin.client.from("mgm_plugins").select("org_id").eq("org_id", ORG);
       expect(error).toBeNull();
-      expect(data).toEqual([{ id: ORG }]);
+      expect(data).toEqual([{ org_id: ORG }]);
     });
 
     it("is refused a definer function that is not listed", async () => {
       const agent = await agentOf(superAdmin);
       const calls: [string, Record<string, unknown>][] = [
         ["fn_list_visible_users", { _target_user_ids: null }],
-        ["user_can_access_org", { _org_id: ORG }],
         ["user_can_access_microgrid", { _microgrid_id: randomUUID() }],
+        ["user_can_access_community", { _community_id: randomUUID() }],
         ["fn_tenant_home", { _tenant_id: randomUUID() }],
         ["fn_tenant_access_list", { _tenant_id: randomUUID() }],
       ];
@@ -564,7 +675,7 @@ describe.skipIf(skip)("mgm_agent, the assistant's database role (#274)", { timeo
         expectRefused(error, fn);
       }
       // The same call with the browser token is answered.
-      const { error } = await superAdmin.client.rpc("user_can_access_org", { _org_id: ORG });
+      const { error } = await superAdmin.client.rpc("user_can_access_microgrid", { _microgrid_id: randomUUID() });
       expect(error).toBeNull();
     });
   });

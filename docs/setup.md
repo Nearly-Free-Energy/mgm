@@ -440,26 +440,21 @@ On a hosted project, before listing the assistant bridge, check that
 `20261126160000` and `20261126160100` were pushed (both appear in
 `supabase_migrations.schema_migrations`) and that the role reaches what
 `src/lib/supabase/__tests__/agent_role.test.ts` pins and nothing more. A
-long-lived database can differ from the migrations, and a hosted project may
-refuse the grant to `authenticator`; a refused grant stops the push before
-`20261126160100`, so no agent token runs as anything. In the SQL editor:
+long-lived database can differ from the migrations: enabling an extension or
+turning Realtime on for a table in the dashboard changes the role's reach
+with no migration. A hosted project may also refuse the grant to
+`authenticator`; a refused grant stops the push before `20261126160100`, so
+no agent token runs as anything. Run the queries before listing the bridge,
+and again after a restore from `roles.sql` or any change made in the
+dashboard. In the SQL editor, run each query on its own (select it and run
+the selection: the editor shows only the last result of a batch), and
+compare each answer with its comment:
 
 ```sql
--- Exactly is_super_admin() and mgm_plugin_enabled_for_org(uuid,text):
-SELECT p.oid::regprocedure FROM pg_proc p
- WHERE p.prosecdef AND has_schema_privilege('mgm_agent', p.pronamespace, 'USAGE')
-   AND has_function_privilege('mgm_agent', p.oid, 'EXECUTE');
-
--- Exactly one row, user_roles SELECT:
-SELECT c.relname, p FROM pg_class c,
-       unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p
- WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r','p','v','m','f')
-   AND has_table_privilege('mgm_agent', c.oid, p)
-UNION ALL
-SELECT c.relname, 'column ' || p FROM pg_class c, unnest(ARRAY['SELECT','INSERT','UPDATE','REFERENCES']) p
- WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r','p','v','m','f')
-   AND NOT has_table_privilege('mgm_agent', c.oid, p)
-   AND has_any_column_privilege('mgm_agent', c.oid, p);
+-- Every column false:
+SELECT rolcanlogin, rolinherit, rolsuper, rolcreaterole, rolcreatedb,
+       rolreplication, rolbypassrls
+  FROM pg_roles WHERE rolname = 'mgm_agent';
 
 -- authenticator with SET only, and at most one row with ADMIN only
 -- (the role that created it), and no row with mgm_agent as the member:
@@ -467,6 +462,74 @@ SELECT pg_get_userbyid(roleid) AS role, pg_get_userbyid(member) AS member,
        admin_option, inherit_option, set_option
   FROM pg_auth_members
  WHERE 'mgm_agent'::regrole IN (roleid, member);
+
+-- Exactly two rows, both RESTRICTIVE and ALL, with the same qual and
+-- with_check: organizations, user_can_access_org(id); and user_roles,
+-- (user_id = auth.uid()):
+SELECT tablename, policyname, permissive, cmd, qual, with_check
+  FROM pg_policies WHERE 'mgm_agent' = ANY (roles);
+
+-- information_schema, pg_catalog, public, and any extension schema PUBLIC
+-- may use (net, where pg_net is enabled):
+SELECT nspname FROM pg_namespace
+ WHERE has_schema_privilege('mgm_agent', oid, 'USAGE') ORDER BY 1;
+
+-- Exactly is_super_admin(), mgm_plugin_enabled_for_org(uuid,text) and
+-- user_can_access_org(uuid):
+SELECT p.oid::regprocedure FROM pg_proc p
+ WHERE p.prosecdef AND has_schema_privilege('mgm_agent', p.pronamespace, 'USAGE')
+   AND has_function_privilege('mgm_agent', p.oid, 'EXECUTE');
+
+-- Exactly two rows: user_roles SELECT and organizations column SELECT
+-- (its id and name only; the next query shows which):
+SELECT c.relname, p FROM pg_class c, unnest(ARRAY['SELECT']) p
+ WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r','p','v','m','f')
+   AND has_table_privilege('mgm_agent', c.oid, p)
+UNION ALL
+SELECT c.relname, 'column ' || p FROM pg_class c, unnest(ARRAY['SELECT']) p
+ WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r','p','v','m','f')
+   AND NOT has_table_privilege('mgm_agent', c.oid, p)
+   AND has_any_column_privilege('mgm_agent', c.oid, p);
+
+-- Exactly organizations id and name:
+SELECT c.relname, a.attname FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+ WHERE c.relnamespace = 'public'::regnamespace AND a.attnum > 0 AND NOT a.attisdropped
+   AND NOT has_table_privilege('mgm_agent', c.oid, 'SELECT')
+   AND has_column_privilege('mgm_agent', c.oid, a.attnum, 'SELECT');
+
+-- Nothing in public. Outside it, exactly what PUBLIC_WRITES in
+-- agent_role.test.ts lists: pg_settings UPDATE, and pg_net's two tables
+-- and its sequence where pg_net is enabled:
+SELECT c.relnamespace::regnamespace AS schema, c.relname, p FROM pg_class c,
+       unnest(ARRAY['INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p
+ WHERE has_schema_privilege('mgm_agent', c.relnamespace, 'USAGE')
+   AND c.relkind IN ('r','p','v','m','f')
+   AND has_table_privilege('mgm_agent', c.oid, p)
+UNION ALL
+SELECT c.relnamespace::regnamespace, c.relname, 'column ' || p FROM pg_class c,
+       unnest(ARRAY['INSERT','UPDATE','REFERENCES']) p
+ WHERE has_schema_privilege('mgm_agent', c.relnamespace, 'USAGE')
+   AND c.relkind IN ('r','p','v','m','f')
+   AND NOT has_table_privilege('mgm_agent', c.oid, p)
+   AND has_any_column_privilege('mgm_agent', c.oid, p)
+UNION ALL
+SELECT c.relnamespace::regnamespace, c.relname, 'sequence ' || p FROM pg_class c,
+       unnest(ARRAY['USAGE','SELECT','UPDATE']) p
+ WHERE has_schema_privilege('mgm_agent', c.relnamespace, 'USAGE')
+   AND c.relkind = 'S' AND has_sequence_privilege('mgm_agent', c.oid, p);
+
+-- No row: no default privilege names mgm_agent or PUBLIC (a global entry's
+-- EXECUTE for PUBLIC on functions only repeats Postgres's own default):
+SELECT d.defaclrole::regrole, d.defaclnamespace::regnamespace, d.defaclobjtype,
+       a.privilege_type
+  FROM pg_default_acl d, aclexplode(d.defaclacl) a
+ WHERE a.grantee IN ('mgm_agent'::regrole, 0)
+   AND NOT (a.grantee = 0 AND d.defaclnamespace = 0 AND d.defaclobjtype = 'f'
+            AND a.privilege_type = 'EXECUTE');
+
+-- No row, unless a decision about mgm_agent came with the table (CLAUDE.md):
+SELECT schemaname, tablename FROM pg_publication_tables
+ WHERE pubname = 'supabase_realtime';
 ```
 
 Any other answer: leave the assistant bridge out of the table, and record

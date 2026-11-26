@@ -88,9 +88,12 @@ says so.
      its own (#259 decision 12) that the token hook sets (shown by #268).
      The role is `NOLOGIN` and granted to `authenticator`, never made a
      member of `authenticated`, so it reads only what grants and policies
-     give it. It has no write grant on any table, so an invoker function
-     it can call through `PUBLIC` cannot write. A definer function is
-     closed to it only by that function's own `REVOKE … FROM PUBLIC`, which
+     give it. It has no write grant of its own, and none on MGM's tables
+     through `PUBLIC` (through `PUBLIC` it may write only what extensions
+     and Postgres give every role, `PUBLIC_WRITES` in `agent_role.test.ts`),
+     so an invoker function it can call cannot write MGM's tables. A
+     definer function is closed to it only by that function's own
+     `REVOKE … FROM PUBLIC`, which
      CLAUDE.md requires of every definer function, and a guard test checks
      the role against every definer function (ADR-008 decision 7). A new
      table is out of its reach until a migration grants it (#274). A table with columns outside decision
