@@ -1,6 +1,6 @@
 # Investigation evidence (A0)
 
-Status: draft for #133 milestone A0. File and line references are at `6cb83bdb`. #263 has since put changes 3 and 4 (§11) on `main`, #133 A2-1 (#313) put change 1 there, and #264 gave a source without site samples its own refusal code (§6); this document takes all of these as current behaviour. #258 added `OPENEMS_ID_PATTERN` and its database check (§4).
+Status: draft for #133 milestone A0. File and line references are at `6cb83bdb`. #263 has since put changes 3 and 4 (§11) on `main`, #133 A2-1 (#313) put change 1 there and #133 A2-2 change 2, and #264 gave a source without site samples its own refusal code (§6); this document takes all of these as current behaviour. #258 added `OPENEMS_ID_PATTERN` and its database check (§4).
 
 A logical design, stated as requirements on A2, which builds the records, with a pointer to ADR-007 for the model data boundary. It contains no SQL.
 
