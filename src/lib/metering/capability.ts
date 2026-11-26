@@ -60,10 +60,10 @@ function daysBetween(from: string, to: string): number {
 
 /**
  * Whether a device carries the identifiers a provider reads it by: an edge
- * id and a component id. getManagedDevices (infrastructure/
- * supabase-repository.ts) maps a NULL component id, and an edge without an
- * OpenEMS id, to "", which this reads as missing; if getManagedDevices
- * stops mapping NULL to "", revisit.
+ * id and a component id. An id that is "" or null is missing.
+ * getManagedDevices (infrastructure/supabase-repository.ts) maps a NULL
+ * component id, and an edge without an OpenEMS id, to "", but a null that
+ * reached here would be read as missing too.
  */
 function isReadable(device: ManagedDevice): boolean {
   return Boolean(device.edgeOpenemsId && device.componentId);

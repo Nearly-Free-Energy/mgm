@@ -658,7 +658,21 @@ describe("MeteringCapability.getSiteDay", () => {
       consoleSpy.mockRestore();
     });
 
-    it("reports linked house meters that cannot be read", async () => {
+    it("reports linked house meters that cannot be read, and counts each as missing once", async () => {
+      const dayStart = Date.parse("2026-10-31T21:00:00Z"); // 00:00 1 Nov in Kampala
+      const timestamps = Array.from({ length: 288 }, (_, i) => dayStart + i * 5 * 60_000);
+      const samples: SiteSamples = {
+        ...emptySamples(),
+        timestamps,
+        batterySocPct: timestamps.map(() => 60),
+        batteryPowerW: timestamps.map(() => 0),
+        gridPowerW: timestamps.map(() => 0),
+        gridVoltageV: timestamps.map(() => 230),
+        loadPowerW: timestamps.map(() => null),
+        pvPowerW: timestamps.map(() => null),
+        // The readable meter rises 1 Wh a bin.
+        houseEnergyWh: { [METER_ID]: timestamps.map((_, i) => 1000 + i) },
+      };
       const { capability, getSiteSamples } = setup({
         repo: {
           getManagedDevices: async () => [
@@ -667,12 +681,17 @@ describe("MeteringCapability.getSiteDay", () => {
           ],
           getHouseMeterIds: async () => [METER_ID, "m-no-comp"],
         },
+        getSiteSamples: async () => samples,
       });
       const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
       if (!result.ok) throw new Error(`expected a site day, got ${JSON.stringify(result)}`);
       expect(getSiteSamples.mock.calls[0][0].sources.houseMeters).toHaveLength(1);
       expect(getSiteSamples.mock.calls[0][0].sources.houseMetersUnreadable).toBe(1);
       expect(result.data.sources).toMatchObject({ houses: true, houseMetersUnreadable: 1 });
+      // Only m-no-comp is missing: counted from houseMetersUnreadable, not
+      // also as a meter without readings.
+      expect(result.data.housesEveningMetersMissing).toBe(1);
+      expect(result.data.housesEveningKwh).toBeCloseTo(0.072, 10);
     });
 
     it("counts houses when every linked meter is unreadable", async () => {
@@ -1089,12 +1108,21 @@ describe("unreadableHouseMeters", () => {
     expect(sources.houseMeters.map((m) => m.id)).toEqual(["m-1"]);
   });
 
-  it("lists a meter whose stored component id is NULL, which the repository reads as an empty string", () => {
-    // getManagedDevices maps openems_component_id NULL to "" (supabase-repository.ts).
-    const devices = [device({ id: "m-null", name: "Meter 01", componentId: "" })];
-    expect(unreadableHouseMeters(devices, ["m-null"])).toEqual([
-      { id: "m-null", reason: "tenant_meter_unreadable" },
+  it("lists a meter whose component id or edge id reaches it as null, not only as an empty string", () => {
+    // getManagedDevices maps NULL to "" (supabase-repository.ts); a null
+    // that got past it must still read as missing, not as an id.
+    const devices = [
+      device({ id: "m-null-comp", name: "Meter 01", componentId: null as unknown as string }),
+      device({ id: "m-null-edge", name: "Meter 02", edgeOpenemsId: null as unknown as string }),
+    ];
+    const ids = ["m-null-comp", "m-null-edge"];
+    expect(unreadableHouseMeters(devices, ids)).toEqual([
+      { id: "m-null-comp", reason: "tenant_meter_unreadable" },
+      { id: "m-null-edge", reason: "tenant_meter_unreadable" },
     ]);
+    const sources = pickSiteSources(devices, ids);
+    expect(sources.houseMeters).toEqual([]);
+    expect(sources.houseMetersUnreadable).toBe(2);
   });
 
   it("neither lists nor reads a linked device that is not a consumption meter", () => {

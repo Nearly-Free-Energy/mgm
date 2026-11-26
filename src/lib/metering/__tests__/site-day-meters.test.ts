@@ -247,6 +247,18 @@ describe("computeSiteDayDetail — tenant meters", () => {
     expect(day.housesEveningKwh).toBeCloseTo(0.072, 10);
   });
 
+  it("counts a meter whose end reading equals its start at zero, not as backwards", () => {
+    // A vacant unit: the counter does not move across the evening.
+    const rows = fullDay();
+    meterAt(rows, 215, D1, 5000);
+    meterAt(rows, 287, D1, 5000);
+    const { day, detail } = detailOf(rows, { meterIds: [D1], houseMeterIds: [D1] });
+    expect(detail.meter_readings).toEqual({ [D1]: { start: [215, 5000], end: [287, 5000] } });
+    expect(detail.meter_outcomes).toEqual({});
+    expect(day.housesEveningKwh).toBe(0);
+    expect(day.housesEveningMetersMissing).toBe(0);
+  });
+
   it("reads a meter asked for twice once", () => {
     const rows = fullDay();
     for (let pos = 0; pos <= 287; pos++) meterAt(rows, pos, D1, 1000 + pos);
