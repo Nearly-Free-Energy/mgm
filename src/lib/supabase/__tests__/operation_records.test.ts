@@ -66,6 +66,8 @@ const F = {
   mgACascade: "0b5e0000-0000-4000-8002-000000000006",
   mgB: "0b5e0000-0000-4000-8002-000000000007",
   mgC: "0b5e0000-0000-4000-8002-000000000008",
+  mgAOffset: "0b5e0000-0000-4000-8002-000000000009",
+  mgAAbbrev: "0b5e0000-0000-4000-8002-00000000000a",
   tenantA: "0b5e0000-0000-4000-8005-00000000000a",
 };
 
@@ -75,6 +77,10 @@ const ZONE = {
   mgAPagoPago: "Pacific/Pago_Pago",
   mgABadZone: "Not/AZone",
   mgAUtc: "UTC",
+  // Zones Postgres knows and validateTimezone refuses by shape, so
+  // openSiteQuery replaces them with the UTC fallback.
+  mgAOffset: "UTC+3",
+  mgAAbbrev: "EST",
 } as const;
 
 const STAMP = Date.now();
@@ -340,6 +346,8 @@ desc("20261126120000_operation_records.sql", { timeout: 60_000 }, () => {
       { id: F.mgACascade, community_id: F.communityA, name: "OR MG cascade", currency: "UGX", timezone: ZONE.mgA },
       { id: F.mgB, community_id: F.communityB, name: "OR MG B", currency: "UGX", timezone: ZONE.mgA },
       { id: F.mgC, community_id: F.communityC, name: "OR MG C", currency: "UGX", timezone: ZONE.mgA },
+      { id: F.mgAOffset, community_id: F.communityA, name: "OR MG offset zone", currency: "UGX", timezone: ZONE.mgAOffset },
+      { id: F.mgAAbbrev, community_id: F.communityA, name: "OR MG abbreviated zone", currency: "UGX", timezone: ZONE.mgAAbbrev },
     ]);
     await insertOrThrow(svc, "tenants", {
       id: F.tenantA,
@@ -855,6 +863,34 @@ desc("20261126120000_operation_records.sql", { timeout: 60_000 }, () => {
     });
     expect(error).toBeNull();
     expect(data).toMatchObject({ microgrid_id: F.mgA, window_zone: "fallback", window_tz: "UTC", window_date: date });
+  });
+
+  // openSiteQuery never names a stored zone validateTimezone refuses: it
+  // falls back to UTC. A 'microgrid' pair naming one would record that no
+  // fallback happened, in a zone MGM does not use (header item 8).
+  it("refuses a microgrid pair for a stored zone of a shape validateTimezone refuses, and accepts its UTC fallback (O2)", async () => {
+    const date = addDaysToDateKey(todayIn("UTC"), -2);
+    for (const key of ["mgAOffset", "mgAAbbrev"] as const) {
+      const microgridId = F[key];
+      const before = countOperations(`microgrid_id = '${microgridId}'`);
+      const named = await create(managerA.client, {
+        _microgrid_id: microgridId,
+        _window_date: date,
+        _window_tz: ZONE[key],
+        _window_zone: "microgrid",
+      });
+      expectRefusal(named.error, "22023", "window_zone_stale");
+      expect(countOperations(`microgrid_id = '${microgridId}'`)).toBe(before);
+
+      const { data, error } = await create(managerA.client, {
+        _microgrid_id: microgridId,
+        _window_date: date,
+        _window_tz: "UTC",
+        _window_zone: "fallback",
+      });
+      expect(error, key).toBeNull();
+      expect(data).toMatchObject({ microgrid_id: microgridId, window_zone: "fallback", window_tz: "UTC", window_date: date });
+    }
   });
 
   it("refuses a missing argument with operation_request_invalid", async () => {

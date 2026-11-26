@@ -71,14 +71,19 @@
 --     validateTimezone accepts it, else UTC with zone = 'fallback'). The
 --     function re-reads the stored zone in its own transaction and refuses,
 --     with window_zone_stale, a 'microgrid' pair that does not name the
---     stored zone exactly, and a 'fallback' pair that is not UTC or is
---     claimed for a microgrid whose stored zone is literally UTC (which
---     validateTimezone accepts, so it is never a fallback). It does not
---     refuse a 'fallback' claimed for a stored zone validateTimezone would
---     accept: whether a stored zone is valid is Intl's rule, which the
---     database does not judge, so it cannot tell a true fallback from a
---     false one. Such an operation is judged window_not_closed in UTC and
---     fails at its first capture through MGM with window_changed. If
+--     stored zone exactly or names one validateTimezone refuses by shape
+--     (anything but the literal UTC without a '/', such as 'UTC+3' or
+--     'EST', which openSiteQuery replaces with the UTC fallback), and a
+--     'fallback' pair that is not UTC or is claimed for a microgrid whose
+--     stored zone is literally UTC (which validateTimezone accepts, so it
+--     is never a fallback). The shape rule is canonicalTimezone's first two
+--     rules (src/lib/validation/timezone.ts); if those change, change it
+--     here in a new migration. It does not refuse a 'fallback' claimed for
+--     a stored zone of the right shape: whether such a zone is valid is
+--     Intl's rule, which the database does not judge, so it cannot tell a
+--     true fallback from a false one. Such an operation is judged
+--     window_not_closed in UTC and fails at its first capture through MGM
+--     with window_changed. If
 --     openSiteQuery or the operations capability's creation resolver
 --     (#133 A2-11) stops reading microgrids.timezone, or falls back to
 --     anything but UTC, revisit; A2-11 shares one resolver with
@@ -460,11 +465,16 @@ BEGIN
   END IF;
 
   -- O2: the pair the caller resolved names the stored zone, or UTC as a
-  -- fallback. A fallback claimed for a stored zone validateTimezone accepts
-  -- is not refused: the database does not judge a zone's validity (header
-  -- item 8). window_zone_stale is a creation-only code
+  -- fallback. A stored zone of the wrong shape (not the literal UTC and no
+  -- '/', canonicalTimezone's first two rules in
+  -- src/lib/validation/timezone.ts; if they change, revisit) is always a
+  -- fallback. A fallback claimed for a stored zone of the right shape is not
+  -- refused: the database does not judge whether Intl knows it (header item
+  -- 8). window_zone_stale is a creation-only code
   -- (investigation-evidence.md § 6); it is never stored.
-  IF (_window_zone = 'microgrid' AND _window_tz IS DISTINCT FROM v_stored)
+  IF (_window_zone = 'microgrid'
+      AND (_window_tz IS DISTINCT FROM v_stored
+           OR (v_stored <> 'UTC' AND strpos(v_stored, '/') = 0)))
      OR (_window_zone = 'fallback' AND (_window_tz <> 'UTC' OR v_stored IS NOT DISTINCT FROM 'UTC')) THEN
     RAISE EXCEPTION 'window_zone_stale: the microgrid''s time zone changed; resolve it again'
       USING ERRCODE = '22023', DETAIL = 'window_zone_stale';
