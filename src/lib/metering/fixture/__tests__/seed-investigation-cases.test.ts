@@ -135,6 +135,55 @@ const rowsOf = (table: string) => inserts(table).flatMap((s) => s.rows);
 const sortBy = <T>(items: T[], key: (item: T) => string) =>
   [...items].sort((a, b) => key(a).localeCompare(key(b)));
 
+/**
+ * The single row of `INSERT INTO <table> (cols) VALUES (…);`, each value as
+ * its source text, for rows holding expressions such as now() that
+ * parseValues does not read.
+ */
+function rawRows(table: string): Record<string, string>[] {
+  const pattern = new RegExp(`INSERT INTO ${table.replace(".", "\\.")}\\s*\\(([^)]*)\\)\\s*VALUES\\s*\\(`, "g");
+  return [...seed.matchAll(pattern)].map((match) => {
+    const columns = match[1].split(",").map((c) => c.trim());
+    const values: string[] = [];
+    let depth = 0;
+    let quoted = false;
+    let current = "";
+    for (let i = match.index + match[0].length; ; i++) {
+      const c = seed[i];
+      if (c === undefined) throw new Error(`${table}: unterminated VALUES`);
+      if (quoted) {
+        if (c === "'" && seed[i + 1] === "'") {
+          current += "''";
+          i++;
+          continue;
+        }
+        if (c === "'") quoted = false;
+        current += c;
+        continue;
+      }
+      if (c === "'") quoted = true;
+      else if (c === "(") depth++;
+      else if (c === ")" && depth === 0) {
+        values.push(current.trim());
+        break;
+      } else if (c === ")") depth--;
+      else if (c === "," && depth === 0) {
+        values.push(current.trim());
+        current = "";
+        continue;
+      }
+      current += c;
+    }
+    if (values.length !== columns.length) {
+      throw new Error(`${table}: ${values.length} values for ${columns.length} columns`);
+    }
+    return Object.fromEntries(columns.map((c, k) => [c, values[k]]));
+  });
+}
+
+const MANAGER_EMAIL = "investigations-manager@example.org";
+const PLACEHOLDER_PHONE = "+000000000000";
+
 const NUMBERS = Object.keys(CASE_VARIANTS);
 const communityOf = (nn: string) =>
   CASE_VARIANTS[nn].org === "B" ? CASE_COMMUNITY_B : CASE_COMMUNITY_A;
@@ -197,10 +246,11 @@ describe("the investigation seed's legacy rows", () => {
 
   it("writes exactly CASE_VARIANTS' legacy rows, in one statement inside the same DO block as the trigger switch", () => {
     const [disable, enable] = triggerStatements.map((m) => m.index);
+    // The DO block nearest before the DISABLE must still be open at the
+    // ENABLE: its END comes after both, so neither is a top-level statement.
     const blockStart = seed.lastIndexOf("DO $$", disable);
-    const blockEnd = seed.indexOf("END $$", disable);
     expect(blockStart).toBeGreaterThanOrEqual(0);
-    expect(enable).toBeLessThan(blockEnd);
+    expect(seed.indexOf("END $$", blockStart)).toBeGreaterThan(enable);
 
     const devices = inserts("devices");
     const inside = devices.filter((s) => s.index > disable && s.index < enable);
@@ -313,13 +363,28 @@ describe("the investigation seed's rows", () => {
     expect(linked).toEqual([...tenants.keys()].sort());
   });
 
-  it("makes one manager an org manager of both organizations", () => {
+  it("makes the account docs/setup.md signs in as an org manager of both organizations", () => {
     const roles = rowsOf("user_roles");
     expect(new Set(roles.map((r) => r.user_id)).size).toBe(1);
     expect(roles.map((r) => `${r.role} ${r.scope_type} ${r.scope_id}`).sort()).toEqual(
       [`org_manager org ${CASE_ORG_A}`, `org_manager org ${CASE_ORG_B}`].sort()
     );
-    expect(seed).toMatch(/'investigations-manager@example\.org'/);
+    const users = rawRows("auth.users");
+    expect(users).toHaveLength(1);
+    expect(users[0].id).toBe(`'${roles[0].user_id}'`);
+    expect(users[0].email).toBe(`'${MANAGER_EMAIL}'`);
+    const identities = rawRows("auth.identities");
+    expect(identities).toHaveLength(1);
+    expect(identities[0].user_id).toBe(users[0].id);
+    expect(identities[0].identity_data).toBe(
+      `jsonb_build_object('sub', ${users[0].id}, 'email', '${MANAGER_EMAIL}')`
+    );
+    expect(read("docs/setup.md")).toContain(`\`${MANAGER_EMAIL}\``);
+  });
+
+  it("gives every unit the placeholder phone number, which no country uses", () => {
+    const phones = new Set(rowsOf("tenants").map((t) => t.primary_phone));
+    expect([...phones]).toEqual([PLACEHOLDER_PHONE]);
   });
 });
 
