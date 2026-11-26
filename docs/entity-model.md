@@ -140,6 +140,11 @@ was dropped (`20261118100100_tenant_role_access.sql`).
   manager to send the person to the sign-in page.
 - **Remove** is `DELETE /api/tenants/[id]/access/[accessId]`, which calls
   `fn_tenant_access_revoke` with the manager's own client and answers 204.
+  The tenant record sends it no body. Described as the
+  `community.revoke-tenant-access` action, it is sent the GUI host's
+  confirmation, a ceremony with nothing to tick or type, so the route
+  parses an optional body (`RevokeTenantAccessBody`) and has nothing in it
+  to check.
   Reads of the unit are refused at once, because the RLS helpers read the
   role rows on every query. When the person holds no other role row, their
   sessions are deleted too, so the next token refresh fails; an access

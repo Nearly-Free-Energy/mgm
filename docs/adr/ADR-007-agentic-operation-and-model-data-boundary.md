@@ -330,8 +330,8 @@ says so.
      that exist today select `devices.name`
      (`src/lib/metering/infrastructure/supabase-repository.ts:170`,
      `src/lib/tenant-app/infrastructure/supabase-repository.ts:85`), which
-     the role is never granted, so their entries' pull requests change
-     those reads.
+     the role is never granted, so the pull request that first serves
+     each view to an agent client changes those reads.
    - The first list, approved here for those pull requests:
 
      | Entry | Kind | Condition |

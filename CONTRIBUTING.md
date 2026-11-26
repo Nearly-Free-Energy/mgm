@@ -6,8 +6,8 @@ The reasons behind the rules are in `docs/operating-model.md` and
 
 ## Setup
 
-You need Node.js 24 (see `.nvmrc`), npm, Docker, and the Supabase CLI.
-`docs/setup.md` has the full walkthrough; the short version:
+You need Node.js 24 (see `.nvmrc`), npm, Docker, and the Supabase CLI 3.4 or
+later. `docs/setup.md` has the full walkthrough; the short version:
 
 ```bash
 git clone https://github.com/<you>/mgm.git   # your fork

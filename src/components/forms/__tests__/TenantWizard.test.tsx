@@ -985,7 +985,11 @@ describe("TenantWizard", () => {
               online: true,
               devices: [],
               skipped: [
-                { componentId: "meter 1", reason: "invalid_component_id" },
+                {
+                  componentId: "meter 1",
+                  reason: "invalid_component_id",
+                  suggestedDeviceType: "consumption_meter",
+                },
               ],
             },
           },
@@ -1012,7 +1016,7 @@ describe("TenantWizard", () => {
         await screen.findByRole("button", { name: /Discover meters/i })
       );
       await waitFor(() =>
-        expect(screen.getByText(/Not listed: 1 component/)).toBeDefined()
+        expect(screen.getByText(/Not listed: 1 consumption meter/)).toBeDefined()
       );
       expect(screen.getByText("meter 1")).toBeDefined();
       expect(
