@@ -406,9 +406,15 @@ describe("tenant views and the tenant audience", () => {
 });
 
 describe("assistant reading", () => {
-  /** METERING_SURFACE with the mark on its one view, metering.site-day. */
+  /** METERING_SURFACE without site-day's mark, which each case sets or leaves out itself. */
+  const UNMARKED = (() => {
+    const c = copy(METERING_SURFACE) as Draft;
+    delete c.views[0].agent;
+    return c;
+  })();
+  /** UNMARKED with the mark on its one view, metering.site-day. */
   const marked = (c: Draft) => (c.views[0].agent = "read");
-  /** METERING_SURFACE with the mark on its one watcher, metering.connection. */
+  /** UNMARKED with the mark on its one watcher, metering.connection. */
   const watched = (c: Draft) => (c.signals[0].agent = "read");
   const issue = (path: PropertyKey[], message: string) => expect.objectContaining({ path, message });
   const unlisted = (noun: string, id: string) =>
@@ -428,27 +434,59 @@ describe("assistant reading", () => {
   const SITE_DAY: readonly AssistantRead[] = [siteDayEntry()];
   const CONNECTION: readonly AssistantRead[] = [{ kind: "watcher", id: "metering.connection" }];
 
-  it("lists nothing yet", () => {
-    // ADR-007 decision 8: the list starts empty, and A1's pull requests add
-    // its first entries, one each, with the mark. Each of them changes this.
-    expect(ASSISTANT_READS).toEqual([]);
+  // ADR-007 decision 8: A1's pull requests add the first entries, one each,
+  // with the mark. Each of them changes this.
+  it("lists metering.site-day and nothing else", () => {
+    expect(ASSISTANT_READS.map((r) => `${r.kind} ${r.id}`)).toEqual(["view metering.site-day"]);
+  });
+
+  describe("metering.site-day's entry", () => {
+    const listed = ASSISTANT_READS.find((r) => r.id === "metering.site-day") as Extract<AssistantRead, { kind: "view" }>;
+
+    it("is the real contribution's, which registers with the real list", () => {
+      expect(METERING_SURFACE.views?.[0]).toMatchObject({ id: "metering.site-day", agent: "read" });
+      expect(() => parseContribution(METERING_SURFACE, CATALOG)).not.toThrow();
+      // The same as the walk finds today: the entry is pasted, never computed.
+      expect([...listed.declares.keys].sort()).toEqual([...SITE_DAY_KEYS].sort());
+      expect(listed.declares.ext).toEqual({ schema: "metering.site-day@2", paths: extKeyPaths(SiteDayExt) });
+    });
+
+    it("withholds the time zone notice and never lists its link", () => {
+      expect(listed.withhold).toEqual({ ext: ["timezoneNotice"] });
+      expect(listed.links).not.toContain("metering.set-timezone");
+    });
+
+    it("refuses the real contribution with one more key", () => {
+      const error = refusal((c) => (c.views[0].declares.keys = [...c.views[0].declares.keys, "revenue"]), CATALOG, METERING_SURFACE, ASSISTANT_READS);
+      expect(error.issues).toEqual([
+        issue(
+          ["views", 0, "declares", "keys"],
+          `"metering.site-day"'s declaration differs from its entry in src/lib/gui/assistant-reads.ts: keys (not in the entry: revenue)`,
+        ),
+      ]);
+    });
+
+    it("refuses the real contribution without its entry", () => {
+      const error = refusal(() => {}, CATALOG, METERING_SURFACE, []);
+      expect(error.issues).toEqual([issue(["views", 0, "agent"], unlisted("views", "metering.site-day"))]);
+    });
   });
 
   describe("views", () => {
     it("accepts the mark on a listed view about an organization's records that takes no signals", () => {
-      const c = copy(METERING_SURFACE) as Draft;
+      const c = copy(UNMARKED) as Draft;
       marked(c);
       expect(c.views[0].params).toEqual({ id: "microgrid" });
       expect(parseContribution(c, CATALOG, SITE_DAY).contribution.views?.[0].agent).toBe("read");
     });
 
     it("refuses the mark on a view that is not on the list", () => {
-      const error = refusal(marked, CATALOG, METERING_SURFACE);
+      const error = refusal(marked, CATALOG, UNMARKED, []);
       expect(error.issues).toEqual([issue(["views", 0, "agent"], unlisted("views", "metering.site-day"))]);
     });
 
     it("refuses the mark on a view listed as a watcher", () => {
-      const error = refusal(marked, CATALOG, METERING_SURFACE, [{ kind: "watcher", id: "metering.site-day" }]);
+      const error = refusal(marked, CATALOG, UNMARKED, [{ kind: "watcher", id: "metering.site-day" }]);
       expect(error.issues).toEqual([issue(["views", 0, "agent"], unlisted("views", "metering.site-day"))]);
     });
 
@@ -472,7 +510,7 @@ describe("assistant reading", () => {
     it.each(["billing", "payments", "pesapal", "tenant-app", "sms-reminders"])(
       "refuses the mark on a listed view contributed by %s",
       (plugin) => {
-        const error = refusal((c) => Object.assign(c, { plugin }) && marked(c), CATALOG, METERING_SURFACE, SITE_DAY);
+        const error = refusal((c) => Object.assign(c, { plugin }) && marked(c), CATALOG, UNMARKED, SITE_DAY);
         expect(error.issues).toContainEqual(issue(["views", 0, "agent"], `a ${plugin} view cannot be read by an assistant`));
       },
     );
@@ -483,7 +521,7 @@ describe("assistant reading", () => {
         const error = refusal(
           (c) => Object.assign(c.views[0], { params: { id: kind } }) && marked(c),
           CATALOG,
-          METERING_SURFACE,
+          UNMARKED,
           SITE_DAY,
         );
         expect(error.issues).toEqual([issue(["views", 0, "agent"], `a view whose path names a ${kind} cannot be read by an assistant`)]);
@@ -509,7 +547,7 @@ describe("assistant reading", () => {
           marked(c);
         },
         CATALOG,
-        METERING_SURFACE,
+        UNMARKED,
         SITE_DAY,
       );
       expect(error.issues).toEqual([issue(["views", 0, "agent"], `a view reached from ${group} navigation cannot be read by an assistant`)]);
@@ -523,7 +561,7 @@ describe("assistant reading", () => {
           marked(c);
         },
         CATALOG,
-        METERING_SURFACE,
+        UNMARKED,
         SITE_DAY,
       );
       expect(error.issues).toEqual([issue(["views", 0, "agent"], "a view that takes signals cannot be read by an assistant")]);
@@ -536,7 +574,7 @@ describe("assistant reading", () => {
           marked(c);
         },
         CATALOG,
-        METERING_SURFACE,
+        UNMARKED,
         SITE_DAY,
       );
       expect(error.issues).toEqual([
@@ -545,7 +583,7 @@ describe("assistant reading", () => {
     });
 
     it("accepts the mark on a listed view whose prefix list is empty", () => {
-      const c = copy(METERING_SURFACE) as Draft;
+      const c = copy(UNMARKED) as Draft;
       c.views[0].declares.prefixes = [];
       marked(c);
       expect(parseContribution(c, CATALOG, SITE_DAY).contribution.views?.[0].agent).toBe("read");
@@ -568,7 +606,7 @@ describe("assistant reading", () => {
   // ADR-007 decision 8: a marked view's declaration is pinned by its entry.
   describe("the pin", () => {
     const differs = (what: string) => expect.stringContaining(`"metering.site-day"'s declaration differs from its entry in src/lib/gui/assistant-reads.ts: ${what}`);
-    /** METERING_SURFACE marked, refused against `entry` (site-day's, changed by `edit`). */
+    /** UNMARKED marked, refused against `entry` (site-day's, changed by `edit`). */
     const pinned = (change: (c: Draft) => void, edit: (e: ReturnType<typeof siteDayEntry>) => void = () => {}) => {
       const entry = siteDayEntry();
       edit(entry);
@@ -578,14 +616,14 @@ describe("assistant reading", () => {
           change(c);
         },
         CATALOG,
-        METERING_SURFACE,
+        UNMARKED,
         [entry],
       );
     };
 
     it("accepts a marked view whose declaration is its entry's, keys in any order", () => {
       const entry = siteDayEntry();
-      const c = copy(METERING_SURFACE) as Draft;
+      const c = copy(UNMARKED) as Draft;
       marked(c);
       c.views[0].declares.keys = [...SITE_DAY_KEYS].reverse();
       expect(parseContribution(c, CATALOG, [entry]).contribution.views?.[0].agent).toBe("read");
@@ -650,24 +688,24 @@ describe("assistant reading", () => {
     it("does not pin a view that is listed but not marked", () => {
       const entry = siteDayEntry();
       entry.declares = { keys: [], ext: null };
-      expect(() => parseContribution(METERING_SURFACE, CATALOG, [entry])).not.toThrow();
+      expect(() => parseContribution(UNMARKED, CATALOG, [entry])).not.toThrow();
     });
   });
 
   describe("watchers", () => {
     it("accepts the mark on a listed watcher", () => {
-      const c = copy(METERING_SURFACE) as Draft;
+      const c = copy(UNMARKED) as Draft;
       watched(c);
       expect(parseContribution(c, CATALOG, CONNECTION).contribution.signals?.[0].agent).toBe("read");
     });
 
     it("refuses the mark on a watcher that is not on the list", () => {
-      const error = refusal(watched, CATALOG, METERING_SURFACE);
+      const error = refusal(watched, CATALOG, UNMARKED);
       expect(error.issues).toEqual([issue(["signals", 0, "agent"], unlisted("watchers", "metering.connection"))]);
     });
 
     it("refuses the mark on a watcher listed as a view", () => {
-      const error = refusal(watched, CATALOG, METERING_SURFACE, [bare("metering.connection")]);
+      const error = refusal(watched, CATALOG, UNMARKED, [bare("metering.connection")]);
       expect(error.issues).toEqual([issue(["signals", 0, "agent"], unlisted("watchers", "metering.connection"))]);
     });
 
@@ -683,7 +721,7 @@ describe("assistant reading", () => {
     });
 
     it("refuses a mark other than read", () => {
-      const error = refusal((c) => (c.signals[0].agent = "write"), CATALOG, METERING_SURFACE, CONNECTION);
+      const error = refusal((c) => (c.signals[0].agent = "write"), CATALOG, UNMARKED, CONNECTION);
       expect(error.issues).toContainEqual(expect.objectContaining({ path: ["signals", 0, "agent"] }));
     });
   });

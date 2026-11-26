@@ -73,4 +73,75 @@ export type AssistantRead =
       withhold?: { ext: readonly string[] };
     };
 
-export const ASSISTANT_READS: readonly AssistantRead[] = [];
+export const ASSISTANT_READS: readonly AssistantRead[] = [
+  /*
+   * The Operations day (#133 A1-2), on ADR-007's first list with its
+   * condition: `billing.savings`, its attached section, is withheld (the
+   * read interface withholds every unlisted attached view), and so is the
+   * time zone notice, whose text holds the microgrid's free-text country
+   * (src/lib/timezone/nudge.ts). The notice reaches the model only as
+   * `timezoneNotice` in the ext, withheld below, and through the
+   * `metering.set-timezone` link, which `links` leaves out.
+   *
+   * This mark serves only the in-process read interface
+   * (src/lib/gui/host/server/assistant-read.ts), which reads in the
+   * operator's own session as `authenticated`. ADR-008 decisions 7 and 8,
+   * as PR #315 words them, tie the agent role's conditions to serving the
+   * view to an agent client, not to the mark. So the pull request that
+   * first serves this view to an agent client must also: have a definer
+   * function return the house-meter ids in force for the microgrid and day
+   * (checking user_can_access_microgrid for the caller), or have the view
+   * say by name that house figures are not available to an assistant;
+   * stop reading `devices.name`
+   * (src/lib/metering/infrastructure/supabase-repository.ts, getManagedDevices)
+   * and the microgrid's `address_country, lat, lng` (the loader's select in
+   * src/lib/metering/surface/site-day.ts) under that role; and add the
+   * grants, policy twins and agent-token test ADR-008 decision 7 names.
+   * When #274 lands, or any agent client can reach this view, revisit this
+   * entry before it is served.
+   */
+  {
+    kind: "view",
+    id: "metering.site-day",
+    declares: {
+      keys: [
+        "solar", "houses-evening", "battery-evening", "cuts", "cut-time", "lowest-soc", "soc-17",
+        "lights-on", "evening-supply", "soc", "setup", "problem",
+      ],
+      ext: {
+        schema: "metering.site-day@2",
+        paths: [
+          "chartEmpty", "chartLabel",
+          "cuts", "cuts.end", "cuts.label", "cuts.start",
+          "dark", "dark.end", "dark.label", "dark.start",
+          "date", "dayEnd", "dayHref", "dayStart",
+          "evening", "evening.end", "evening.label", "evening.start", "evening.supply",
+          "eveningEmpty",
+          "eveningHours", "eveningHours.battery", "eveningHours.battery_and_grid", "eveningHours.dark",
+          "eveningHours.grid", "eveningHours.no_data",
+          "eveningLabel", "eveningStart",
+          "eveningTicks", "eveningTicks.at", "eveningTicks.label",
+          "hourMarks", "hourMarks.at", "hourMarks.label",
+          "legend", "legend.hours", "legend.label", "legend.supply",
+          "message", "notes", "partial", "readUntil", "reason", "resolutionMinutes", "retry",
+          "sources", "sources.battery", "sources.gridMeter", "sources.houses", "sources.load", "sources.pv",
+          "state", "synthetic",
+          "thresholds", "thresholds.gridPresentMinV", "thresholds.lowBatteryPct",
+          "timezone", "timezoneNotice", "timezoneNotice.text", "timezoneNotice.title",
+          "title", "today", "tone",
+        ],
+      },
+    },
+    links: [
+      // The day navigation.
+      "metering.day-previous",
+      "metering.day-next",
+      "metering.day-today",
+      // The Setup pages: the microgrid's, and a problem's fix.
+      "metering.microgrid-setup",
+      "metering.edges",
+      "metering.openems-backend",
+    ],
+    withhold: { ext: ["timezoneNotice"] },
+  },
+];

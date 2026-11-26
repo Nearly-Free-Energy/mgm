@@ -70,6 +70,11 @@ export const METERING_SURFACE: Contribution = {
       // finished day does not change; today's partial day is refreshed by
       // the person, as on the page.
       cost: "vendor",
+      // On the assistant read list (src/lib/gui/assistant-reads.ts), whose
+      // entry pins these keys and the ext's paths, and names the links an
+      // assistant may be given: a new key, ext field or link stays from an
+      // assistant until that entry is edited.
+      agent: "read",
       declares: { keys: SITE_DAY_KEYS },
       ext: { schema: SITE_DAY_EXT_SCHEMA, zod: SiteDayExt },
       examples: SITE_DAY_EXAMPLES,

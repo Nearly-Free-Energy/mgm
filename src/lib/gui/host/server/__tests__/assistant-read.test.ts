@@ -632,6 +632,65 @@ describe("readForAssistant, applying a view's entry", () => {
   });
 });
 
+describe("readForAssistant, for metering.site-day as listed", () => {
+  const COUNTRY = "CANARY-COUNTRY-9c3e";
+  const NUDGE_TITLE = "Billing timezone is still UTC";
+  let listed: AssistantRead[];
+
+  beforeEach(async () => {
+    ({ ASSISTANT_READS: listed } = await vi.importActual<{ ASSISTANT_READS: AssistantRead[] }>("@/lib/gui/assistant-reads"));
+    list(...listed);
+    // The real contribution, mark included, and a UTC microgrid whose address implies another zone.
+    siteDay = { plugin: "metering", def: { ...REAL_SITE_DAY, load: vi.fn(REAL_SITE_DAY.load) } as unknown as ViewDef };
+    snapshot = snapshotOf([siteDay, savings, rates], { actions: [action("billing", "billing.edit", "/api/microgrids/[id]")] });
+    tables.microgrids = { data: [{ id: MG, name: "Kiwumu", community_id: null, timezone: "UTC", address_country: COUNTRY, lat: null, lng: 32.6 }] };
+  });
+
+  it("is marked in the real contribution", () => {
+    expect(REAL_SITE_DAY.agent).toBe("read");
+  });
+
+  it.each([
+    ["a day", () => undefined, "day"],
+    ["no site devices", () => getSiteDay.mockResolvedValue({ ok: false, status: 409, code: "metering_no_site_devices", message: UPSTREAM }), "no-site-devices"],
+    ["a problem", () => getSiteDay.mockResolvedValue({ ok: false, status: 503, code: "METERING_UNAVAILABLE", message: UPSTREAM }), "problem"],
+  ])("gives no text of the time zone notice and no link to it, in %s", async (_name, arrange, state) => {
+    arrange();
+    const page = await dispatchView(ctx(), `${DAY}?date=2026-11-08`);
+    // The page itself carries the notice, so its absence below is the interface's doing.
+    expect(JSON.stringify(page)).toContain(COUNTRY);
+    expect(JSON.stringify(page)).toContain(NUDGE_TITLE);
+
+    const out = await read(`${DAY}?date=2026-11-08`);
+    if (!out.ok) throw new Error("refused");
+    expect(out.value.model.ext?.data).toMatchObject({ state, timezoneNotice: null });
+    expect(out.value.withheld).toContainEqual({ what: "field", path: "ext.data.timezoneNotice", note: WITHHELD_NOTE });
+    const json = JSON.stringify(out);
+    expect(json).not.toContain(COUNTRY);
+    expect(json).not.toContain(NUDGE_TITLE);
+    expect(json).not.toContain("metering.set-timezone");
+    expect(json).not.toContain(UPSTREAM);
+    expect(logged()).not.toContain(COUNTRY);
+  });
+
+  it.each([
+    ["on", undefined],
+    ["off", { ok: false, status: 409, code: "billing_disabled", message: "Billing is disabled." }],
+  ])("withholds billing.savings with billing %s, and the model names no billing id", async (_name, decision) => {
+    if (decision) gates.set("billing", decision as GateDecision);
+    const out = await read(`${DAY}?date=2026-11-08`);
+    if (!out.ok) throw new Error("refused");
+    expect(out.value.withheld).toEqual([
+      { what: "view", view: "billing.savings", title: "billing.savings example", hint: "section", note: WITHHELD_NOTE },
+      { what: "view", view: "billing.rates", title: "Rates", hint: "tab", note: WITHHELD_NOTE },
+      { what: "field", path: "ext.data.timezoneNotice", note: WITHHELD_NOTE },
+    ]);
+    expect(out.value.attached).toEqual([]);
+    expect(JSON.stringify(out.value.model)).not.toContain("billing.");
+    expect(loadOf(savings)).not.toHaveBeenCalled();
+  });
+});
+
 describe("the positions stripActions removes", () => {
   type Def = {
     type: string;
